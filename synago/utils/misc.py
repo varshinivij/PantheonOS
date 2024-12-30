@@ -44,7 +44,7 @@ def desc_to_openai_function(
             "type": tp,
             "description": arg.doc or "",
         }
-        if arg.default is not NotDef:
+        if arg.default is NotDef:
             required.append(arg.name)
 
     func_dict = {
@@ -56,7 +56,9 @@ def desc_to_openai_function(
                 "type": "object",
                 "properties": parameters,
                 "required": required,
-            }
+                "additionalProperties": False,
+            },
+            "strict": True,
         },
     }
 

@@ -1,20 +1,18 @@
 import copy
 import json
 from typing import Optional, List, Callable, AsyncGenerator, Union
-from collections import defaultdict
-from dataclasses import dataclass
 
 from funcdesc.parse import parse_func
+from pydantic import BaseModel
 
 from .utils.llm import LLM, get_model
-from .utils.misc import merge_chunk, desc_to_openai_function
+from .utils.misc import desc_to_openai_function
 
 
 __CTX_VARS_NAME__ = "context_variables"
 
 
-@dataclass
-class AgentResponse:
+class AgentResponse(BaseModel):
     messages: List[dict]
     context_variables: dict
 
@@ -24,7 +22,7 @@ class Agent:
         self,
         name: str,
         instructions: str,
-        model: Union[LLM, str, None] = None,
+        model: Optional[Union[LLM, str]] = None,
         functions: Optional[List[Callable]] = None,
     ):
         self.name = name
@@ -82,6 +80,7 @@ class Agent:
         messages: List,
         max_turns: Union[int, float] = float("inf"),
         context_variables: Optional[dict] = None,
+        response_format: Optional[BaseModel] = None,
     ):
         history = copy.deepcopy(messages)
         history.insert(0, {"role": "system", "content": self.instructions})
@@ -91,41 +90,29 @@ class Agent:
 
         while len(history) - init_len < max_turns:
 
-            message = {
-                "content": "",
-                "sender": self.name,
-                "role": "assistant",
-                "function_call": None,
-                "tool_calls": defaultdict(
-                    lambda: {
-                        "function": {"arguments": "", "name": ""},
-                        "id": "",
-                        "type": "",
-                    }
-                ),
-            }
-
-            # get completion with current history, agent
+            message = {}
+            history_clear_parsed = copy.deepcopy(history)
+            for msg in history_clear_parsed:
+                if "parsed" in msg:
+                    del msg["parsed"]
             stream = await self.model.get_stream(
-                messages=history,
+                messages=history_clear_parsed,
                 tools=self._convert_functions() or None,
+                sender=self.name,
+                response_format=response_format,
             )
-
-            yield {"delim": "start"}
             async for chunk in stream:
-                delta = chunk.choices[0].delta.model_dump()
-                if delta["role"] == "assistant":
-                    delta["sender"] = self.name
-                yield delta
-                delta.pop("role", None)
-                delta.pop("sender", None)
-                merge_chunk(message, delta)
-            yield {"delim": "end"}
+                if chunk.get("delim") == "end":
+                    message = chunk["complete"]
+                    break
+                yield chunk
 
-            message["tool_calls"] = list(
-                message.get("tool_calls", {}).values())
-            if not message["tool_calls"]:
-                message["tool_calls"] = None
+            if response_format is not None:
+                content = message.get("content")
+                if content:
+                    parsed = response_format.model_validate_json(content)
+                    message["parsed"] = parsed
+
             history.append(message)
 
             if not message["tool_calls"]:
@@ -144,10 +131,22 @@ class Agent:
 
     async def run_stream(
             self, stream: AsyncGenerator,
-            process_chunk: Optional[Callable] = None):
+            process_chunk: Optional[Callable] = None) -> AgentResponse:
         async for chunk in stream:
             if isinstance(chunk, dict):
                 if process_chunk:
                     process_chunk(chunk)
             else:
                 return chunk
+
+    async def run(
+            self, messages: List,
+            response_format: Optional[BaseModel] = None,
+            context_variables: Optional[dict] = None,
+            ) -> AgentResponse:
+        stream = self.get_stream(
+            messages=messages,
+            response_format=response_format,
+            context_variables=context_variables,
+        )
+        return await self.run_stream(stream)
