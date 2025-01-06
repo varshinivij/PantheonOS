@@ -1,12 +1,27 @@
-# Synago
+<div align="center">
+  <h1> Pantheum </h1>
 
-A framework for building LLM based multi-agent system.
+  <p> A framework for building LLM based multi-agent system. </p>
+
+  <p>
+    <a href="https://github.com/aristoteleo/pantheum/actions/workflows/test.yml">
+        <img src="https://github.com/aristoteleo/pantheum/actions/workflows/test.yml/badge.svg" alt="Build Status">
+    </a>
+    <a href="https://pypi.org/project/pantheum/">
+      <img src="https://img.shields.io/pypi/v/pantheum.svg" alt="Install with PyPi" />
+    </a>
+    <a href="https://github.com/aristoteleo/pantheum/blob/master/LICENSE">
+      <img src="https://img.shields.io/github/license/aristoteleo/pantheum" alt="MIT license" />
+    </a>
+  </p>
+</div>
+
 
 ## Installation
 
 ```bash
 # Install with the built-in tools
-pip install synago[tool]
+pip install pantheum[tool]
 ```
 
 See the [examples](examples) folder for more details.

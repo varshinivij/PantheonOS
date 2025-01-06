@@ -1,5 +1,5 @@
-from synago.tools.duckduckgo import duckduckgo_search
-from synago.tools.web_crawl import web_crawl
+from pantheum.tools.duckduckgo import duckduckgo_search
+from pantheum.tools.web_crawl import web_crawl
 
 
 def test_duckduckgo_search():

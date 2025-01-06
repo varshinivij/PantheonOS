@@ -1,6 +1,5 @@
 [project]
-name = "synago"
-version = "0.1.0"
+name = "pantheum"
 description = "A framework for building LLM based multi-agent system."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -10,6 +9,7 @@ dependencies = [
     "loguru>=0.7.3",
     "openai>=1.58.1",
 ]
+dynamic = ["version"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -40,4 +40,4 @@ dev = [
 packages = {find = {}}
 
 [tool.setuptools.dynamic]
-version = {attr = "funcdesc.__version__"} 
+version = {attr = "pantheum.__version__"} 

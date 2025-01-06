@@ -1,4 +1,4 @@
-from synago.agent import Agent
+from pantheum.agent import Agent
 from pydantic import BaseModel, Field
 from typing import List
 import random

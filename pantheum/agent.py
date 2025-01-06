@@ -30,6 +30,7 @@ class Agent:
         instructions: str,
         model: Optional[Union[LLM, str]] = None,
         functions: Optional[List[Callable]] = None,
+        response_format: Optional[BaseModel] = None,
     ):
         self.name = name
         self.instructions = instructions
@@ -42,6 +43,7 @@ class Agent:
         if functions:
             for func in functions:
                 self.functions[func.__name__] = func
+        self.response_format = response_format
 
     def tool(self, func: Callable):
         """
@@ -91,6 +93,7 @@ class Agent:
         context_variables: Optional[dict] = None,
         response_format: Optional[BaseModel] = None,
     ):
+        response_format = self.response_format or response_format
         history = copy.deepcopy(messages)
         history.insert(0, {"role": "system", "content": self.instructions})
         init_len = len(history)
@@ -156,6 +159,7 @@ class Agent:
             ) -> AgentAnswer:
         assert isinstance(msg, (list, str, BaseModel, AgentAnswer)), \
             "Message must be a list, string, BaseModel or AgentAnswer"
+        response_format = self.response_format or response_format
         if isinstance(msg, AgentAnswer):
             # For acceping the result of previous run or other agent
             msg = msg.content
