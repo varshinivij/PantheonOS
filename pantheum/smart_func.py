@@ -26,6 +26,16 @@ def smart_func(
         use_short_term_memory: bool = False,
         short_term_memory: list[dict] | None = None,
     ):
+    """Decorator for creating a smart function.
+    Smart function is a function that uses LLM to perform tasks.
+
+    Args:
+        func: The function to be decorated.
+        model: The model to use for the smart function.
+        tools: The tools to use for the smart function.
+        use_short_term_memory: Whether to use short term memory.
+        short_term_memory: The short term memory to use.
+    """
     if func is None:
         return partial(
             smart_func,
