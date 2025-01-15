@@ -71,14 +71,14 @@ class Repl:
                     if tool_calls := message.get("tool_calls"):
                         for call in tool_calls:
                             print_tool_message(
-                                f"[bold]Agent [blue]{agent.name}[/blue] is using tool "
+                                f"[bold]Agent [blue]{self.agent.name}[/blue] is using tool "
                                 f"[green]{call.get('function', {}).get('name')}[/green]"
                                 f" with arguments [yellow]{call.get('function', {}).get('arguments')}[/yellow]"
                                 "[/bold]"
                             )
                     if message.get("role") == "tool":
                         print_tool_message(
-                            f"[bold]Agent [blue]{agent.name}[/blue] got result from tool "
+                            f"[bold]Agent [blue]{self.agent.name}[/blue] got result from tool "
                             f"[green]{message.get('tool_name')}[/green]:[/bold] "
                             f"[yellow]{message.get('content')}[/yellow]"
                         )

@@ -151,7 +151,10 @@ class Agent:
             history.extend(tool_messages)
             if process_step_message:
                 for msg in tool_messages:
-                    process_step_message(msg)
+                    if inspect.iscoroutinefunction(process_step_message):
+                        await process_step_message(msg)
+                    else:
+                        process_step_message(msg)
 
         return ResponseDetails(
             messages=history[init_len:],

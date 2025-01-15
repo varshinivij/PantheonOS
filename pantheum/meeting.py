@@ -1,4 +1,5 @@
 import copy
+import time
 from typing import List, Literal
 import asyncio
 import datetime
@@ -33,7 +34,7 @@ class ToolResponseEvent(BaseModel):
     tool_response: str
 
 
-class AgentBeginEvent(BaseModel):
+class ThinkingEvent(BaseModel):
     agent_name: str
 
 
@@ -62,15 +63,17 @@ class AgentRunner:
             self,
             agent: Agent,
             public_queue: asyncio.Queue,
-            stream_queue: asyncio.Queue):
+            stream_queue: asyncio.Queue,
+            message_time_threshold: float = 1.5):
         self.agent = agent
         self.public_queue = public_queue
         self.queue = asyncio.Queue()
         self.stream_queue = stream_queue
+        self.message_time_threshold = message_time_threshold
+        self.run_start_time = None
 
     async def process_step_message(self, message: dict):
-        if message.get("tool_calls"):
-            tool_calls = message["tool_calls"]
+        if tool_calls := message.get("tool_calls"):
             for tool_call in tool_calls:
                 event = ToolEvent(
                     agent_name=self.agent.name,
@@ -84,23 +87,32 @@ class AgentRunner:
                 tool_name=message.get("tool_name"),
                 tool_response=message.get("content"),
             )
-            await self.stream_queue.put(event)
+            self.stream_queue.put_nowait(event)
+
+    async def process_chunk(self, _):
+        if self.run_start_time is not None:
+            run_time = time.time() - self.run_start_time
+            if run_time > self.message_time_threshold:
+                self.stream_queue.put_nowait(
+                    ThinkingEvent(agent_name=self.agent.name)
+                )
+                self.run_start_time = None
 
     async def run(self):
         while True:
             record = await self.queue.get()
             prompt = format_record(record)
 
-            await self.stream_queue.put(
-                AgentBeginEvent(agent_name=self.agent.name)
-            )
+            self.run_start_time = time.time()
             resp = await self.agent.run(
                 prompt,
                 response_format=Message,
                 process_step_message=self.process_step_message,
+                process_chunk=self.process_chunk,
             )
+            self.run_start_time = None
             record = message_to_record(resp.content, self.agent.name)
-            await self.public_queue.put(record)
+            self.public_queue.put_nowait(record)
 
 
 class Meeting:
@@ -125,18 +137,19 @@ class Meeting:
     async def process_public_queue(self):
         while True:
             record = await self.public_queue.get()
-            await self.stream_queue.put(record)
+            self.stream_queue.put_nowait(record)
             if record.targets == "all":
                 for runner in self.agent_runners.values():
                     if runner.agent.name != record.source:
-                        await runner.queue.put(record)
+                        runner.queue.put_nowait(record)
             elif isinstance(record.targets, list):
                 for target in record.targets:
-                    await self.agent_runners[target].queue.put(record)
+                    if target in self.agent_runners:
+                        self.agent_runners[target].queue.put_nowait(record)
 
     async def run(self, initial_message: Record | None = None):
         if initial_message:
-            await self.public_queue.put(initial_message)
+            self.public_queue.put_nowait(initial_message)
 
         await asyncio.gather(
             self.process_public_queue(),

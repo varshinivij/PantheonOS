@@ -8,7 +8,7 @@ from textual.containers import Vertical, Horizontal, VerticalScroll
 from ..agent import Agent
 from ..meeting import (
     Meeting, Message, message_to_record,
-    ToolEvent, ToolResponseEvent, AgentBeginEvent, Record
+    ToolEvent, ToolResponseEvent, ThinkingEvent, Record
 )
 
 
@@ -34,10 +34,15 @@ class Repl(App):
 
     .message-input Input {
         width: 90%;
+        border: solid #FFFFFF;
     }
 
     .message-input Button {
         width: 10%;
+    }
+
+    .message-item {
+        padding-top: 1;
     }
 
     Markdown {
@@ -104,36 +109,43 @@ class Repl(App):
                     f"[blue]{event.source}[/blue] "
                     f"[yellow]({event.timestamp})[/yellow] "
                     f"{event.targets} "
-                    "[/bold]:"
+                    "[/bold]:",
+                    classes="message-item",
                 )
                 self.msg_container.mount(new_item)
                 content = Markdown(event.content)
                 self.call_after_refresh(self.msg_container.mount, content)
-                self.msg_container.scroll_end()
+                self.call_after_refresh(self.msg_container.scroll_end)
             elif isinstance(event, ToolEvent):
                 new_item = Static(
                     f"[bold][red]INFO:[/red][/bold] "
                     f"Agent [blue]{event.agent_name}[/blue] is using tool "
                     f"[green]{event.tool_name}[/green] with arguments "
-                    f"[yellow]{event.tool_args_info}[/yellow]"
+                    f"[yellow]{event.tool_args_info}[/yellow]",
+                    classes="message-item",
                 )
                 self.msg_container.mount(new_item)
+                self.msg_container.scroll_end()
             elif isinstance(event, ToolResponseEvent):
                 new_item = Static(
                     f"[bold][red]INFO:[/red][/bold] "
                     f"Agent [blue]{event.agent_name}[/blue] got result from tool "
                     f"[green]{event.tool_name}[/green]: "
-                    f"[yellow]{event.tool_response}[/yellow]\n"
+                    f"[yellow]{event.tool_response}[/yellow]\n",
+                    classes="message-item",
                 )
                 self.msg_container.mount(new_item)
                 self.msg_container.scroll_end()
-            elif isinstance(event, AgentBeginEvent):
+            elif isinstance(event, ThinkingEvent):
                 new_item = Static(
                     f"[bold][red]INFO:[/red][/bold] "
-                    f"Agent [blue]{event.agent_name}[/blue] is thinking...\n"
+                    f"Agent [blue]{event.agent_name}[/blue] is thinking...\n",
+                    classes="message-item",
                 )
                 self.msg_container.mount(new_item)
                 self.msg_container.scroll_end()
+
+            self.refresh()
 
     async def run(self):
         import logging

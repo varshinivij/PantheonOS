@@ -28,3 +28,11 @@ pip install pantheum[tool]
 ```
 
 See the [examples](examples) folder for more details.
+
+
+## TODO
+
+[ ] Team Meeting
+[ ] Code Execution
+[ ] Reasoning with O1 / Flash Thinking
+[ ] Long Term Memory
