@@ -25,23 +25,32 @@ class TasksSolver:
 
     def process_step_message(self, message: dict):
 
-        def print_tool_message(message: str):
-            panel = Panel(message, title="Tool Message")
+        def print_message(message: str, title: str):
+            panel = Panel(message, title=title)
             self.console.print(panel)
 
         if tool_calls := message.get("tool_calls"):
             for call in tool_calls:
-                print_tool_message(
+                print_message(
                     f"[bold]Agent [blue]{self.agent.name}[/blue] is using tool "
                     f"[green]{call.get('function', {}).get('name')}[/green]"
                     f" with arguments [yellow]{call.get('function', {}).get('arguments')}[/yellow]"
-                    "[/bold]"
+                    "[/bold]",
+                    "Tool Call Message"
                 )
         if message.get("role") == "tool":
-            print_tool_message(
+            print_message(
                 f"[bold]Agent [blue]{self.agent.name}[/blue] got result from tool "
                 f"[green]{message.get('tool_name')}[/green]:[/bold] "
-                f"[yellow]{message.get('content')}[/yellow]"
+                f"[yellow]{message.get('content')}[/yellow]",
+                "Tool Response Message"
+            )
+
+        if message.get("role") == "assistant":
+            print_message(
+                f"[bold]Agent [blue]{self.agent.name}[/blue]'s message:[/bold]\n"
+                f"[yellow]{message.get('content')}[/yellow]",
+                "Agent Message"
             )
 
     async def solve(self):

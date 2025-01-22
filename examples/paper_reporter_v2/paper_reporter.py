@@ -21,6 +21,11 @@ def read_directory(directory_path: str):
     return os.listdir(directory_path)
 
 
+def read_file(file_path: str):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 @smart_func(model="gpt-4o-mini")
 async def extract_content(content: str) -> str:
     """Extract the most important content from the text. 
@@ -58,8 +63,8 @@ async def main():
     search_agent = Agent(
         name="Search Agent",
         instructions = """You are a search engine expert.""",
-        model="gpt-4o-mini",
-        tools=[duckduckgo_search, crawl_and_extract, write_file, read_directory],
+        model="gpt-4o",
+        tools=[duckduckgo_search, crawl_and_extract, write_file, read_directory, read_file],
     )
 
     task = Task(
@@ -70,8 +75,9 @@ async def main():
 3. Filter the search results, only keep the papers.
 4. Crawl the url according to the filtered search results, extract the journal, authors, title, publication date, abstract, url, and other information.
 5. Filter the contents according to the theme, and only keep the relevant papers.
-6. If the papers after filtering are not enough(less than 20), repeat the steps 1-5.
-7. Write the results into a markdown file(keep item's url) to path `./report.md`. And check the file is written successfully. """
+6. Count the number of papers after filtering.
+7. If the papers after filtering are not enough(less than 20), repeat the steps 1-6.
+8. Write the results into a markdown file(keep item's url) to path `./report.md`. And check the file is written successfully. """
     )
 
     tasks_solver = TasksSolver(task, search_agent)
