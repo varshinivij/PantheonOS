@@ -1,6 +1,7 @@
 from magique.client import MagiqueError
 from pantheum.remote import tool, ToolSet, connect_remote
 from pantheum.tools.web_browse import WebBrowseToolSet
+from pantheum.tools.code_execution import PythonInterpreterToolSet
 
 from executor.engine import Engine, LocalJob, ProcessJob
 
@@ -68,5 +69,22 @@ async def test_agent_call_toolset():
         print(resp.content)
         assert a
 
+        await job.cancel()
+        await engine.wait_async()
+
+
+async def test_python_interpreter_toolset():
+    toolset = PythonInterpreterToolSet("python_interpreter")
+
+    async def start_toolset():
+        await toolset.run()
+
+    with Engine() as engine:
+        job = ProcessJob(start_toolset)
+        await engine.submit_async(job)
+        await job.wait_until_status("running")
+        s = await connect_remote(toolset.service_id)
+        res = await s.invoke("run_code", {"code": "res = 1 + 1", "result_var_name": "res"})
+        assert res == 2
         await job.cancel()
         await engine.wait_async()

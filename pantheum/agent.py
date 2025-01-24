@@ -111,6 +111,7 @@ class Agent:
                         params[__CTX_VARS_NAME__] = context_variables
                     result = await run_func(func, **params)
                 else:
+                    # remote toolset
                     assert func_name in self._func_to_proxy, \
                         f"Function `{func_name}` is not found in the toolset or local functions"
                     proxy = self.toolset_proxies[self._func_to_proxy[func_name]]

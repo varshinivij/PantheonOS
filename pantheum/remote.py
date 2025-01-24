@@ -2,9 +2,12 @@ from typing import Callable
 from functools import partial
 import inspect
 import asyncio
+from abc import ABC
 
 from magique.worker import MagiqueWorker
 from magique.client import connect_to_server, ServiceProxy
+
+from .utils.log import logger
 
 
 DEFAULT_SERVER_HOST = "magique.spateo.aristoteleo.com"
@@ -26,7 +29,7 @@ def tool(func: Callable | None = None, **kwargs):
     return func
 
 
-class ToolSet:
+class ToolSet(ABC):
     def __init__(
             self, name: str,
             worker_params: dict | None = None
@@ -53,8 +56,16 @@ class ToolSet:
     def service_id(self):
         return self.worker.service_id
 
-    async def run(self, *args, **kwargs):
-        return await self.worker.run(*args, **kwargs)
+    async def run_setup(self):
+        """Setup the toolset before running it."""
+        pass
+
+    async def run(self):
+        await self.run_setup()
+        logger.info(f"Remote Server: {self.worker.server_uri}")
+        logger.info(f"Service Name: {self.worker.service_name}")
+        logger.info(f"Service ID: {self.service_id}")
+        return await self.worker.run()
 
 
 async def connect_remote(

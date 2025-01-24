@@ -32,11 +32,12 @@ See the [examples](examples) folder for more details.
 
 ## TODO
 
-[ ] REPL for meeting and agent
-[ ] Team Meeting
-[ ] Code Execution
-[ ] Distributed tools/environments/agents
-[ ] Reasoning with O1 / Flash Thinking
-[ ] RAG
-[ ] Long Term Memory
-[ ] Documentation
+- [x] REPL for meeting and agent
+- [x] Reasoning with O1 / Gemini Flash Thinking / Deepseek-R1
+- [x] Distributed
+  + [x] Tools
+  + [ ] Agents
+- [x] Code Execution
+- [ ] RAG
+- [ ] Long Term Memory
+- [ ] Documentation
