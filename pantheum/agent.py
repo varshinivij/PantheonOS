@@ -6,9 +6,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, create_model
 from litellm import acompletion, stream_chunk_builder
+from funcdesc import parse_func
 
-from .utils.misc import func_to_openai_dict
+from .utils.misc import desc_to_openai_dict
 from .types import AgentResponse, ResponseDetails, AgentInput
+from .remote import (
+    ServiceProxy,
+    connect_remote, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+)
 
 
 __CTX_VARS_NAME__ = "context_variables"
@@ -35,7 +40,9 @@ class Agent:
         self.name = name
         self.instructions = instructions
         self.model = model
-        self.functions = {}
+        self.functions: dict[str, Callable] = {}
+        self.toolset_proxies: dict[str, ServiceProxy] = {}
+        self._func_to_proxy: dict[str, str] = {}
         if tools:
             for func in tools:
                 self.functions[func.__name__] = func
@@ -52,16 +59,42 @@ class Agent:
         self.functions[func.__name__] = func
         return self
 
+    async def remote_toolset(
+            self,
+            service_id_or_name: str,
+            server_host: str = DEFAULT_SERVER_HOST,
+            server_port: int = DEFAULT_SERVER_PORT,
+            **kwargs,
+            ):
+        """Add a remote toolset to the agent."""
+        s = await connect_remote(
+            service_id_or_name,
+            server_host,
+            server_port,
+            **kwargs,
+        )
+        self.toolset_proxies[s.service_info.service_id] = s
+        return self
+
     def _convert_functions(self) -> list[dict]:
         """Convert function to the format that the model can understand."""
         functions = []
 
         for func in self.functions.values():
-            func_dict = func_to_openai_dict(
-                func,
+            func_dict = desc_to_openai_dict(
+                parse_func(func),
                 skip_params=[__CTX_VARS_NAME__],
             )
             functions.append(func_dict)
+
+        for proxy in self.toolset_proxies.values():
+            for name, desc in proxy.service_info.functions_description.items():
+                self._func_to_proxy[name] = proxy.service_info.service_id
+                func_dict = desc_to_openai_dict(
+                    desc,
+                    skip_params=[__CTX_VARS_NAME__]
+                )
+                functions.append(func_dict)
         return functions
 
     async def handle_tool_calls(
@@ -71,10 +104,17 @@ class Agent:
             try:
                 func_name = call["function"]["name"]
                 params = json.loads(call["function"]["arguments"])
-                func = self.functions[func_name]
-                if __CTX_VARS_NAME__ in func.__code__.co_varnames:
-                    params[__CTX_VARS_NAME__] = context_variables
-                result = await run_func(func, **params)
+                if func_name in self.functions:
+                    # call local functions
+                    func = self.functions[func_name]
+                    if __CTX_VARS_NAME__ in func.__code__.co_varnames:
+                        params[__CTX_VARS_NAME__] = context_variables
+                    result = await run_func(func, **params)
+                else:
+                    assert func_name in self._func_to_proxy, \
+                        f"Function `{func_name}` is not found in the toolset or local functions"
+                    proxy = self.toolset_proxies[self._func_to_proxy[func_name]]
+                    result = await proxy.invoke(func_name, parameters=params)
             except Exception as e:
                 result = str(e)
 

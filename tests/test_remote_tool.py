@@ -1,10 +1,8 @@
-import asyncio
-
 from magique.client import MagiqueError
 from pantheum.remote import tool, ToolSet, connect_remote
 from pantheum.tools.web_browse import WebBrowseToolSet
 
-from executor.engine import Engine, ProcessJob
+from executor.engine import Engine, LocalJob, ProcessJob
 
 
 def test_remote_toolset():
@@ -27,7 +25,6 @@ async def test_web_browse_toolset():
         job = ProcessJob(start_toolset)
         engine.submit(job)
         await job.wait_until_status("running")
-        await asyncio.sleep(3)
         s = await connect_remote(toolset.service_id)
         try:
             res = await s.invoke("duckduckgo_search", {"query": "Hello, world!"})
@@ -36,3 +33,40 @@ async def test_web_browse_toolset():
             await engine.wait_async()
         except MagiqueError as e:
             print(e)
+
+
+async def test_agent_call_toolset():
+    from pantheum.agent import Agent
+
+    a = False
+
+    class MyToolSet(ToolSet):
+        @tool
+        def print_hello(self):
+            """Print hello"""
+            nonlocal a
+            a = True
+            return "Hello, world!"
+
+    toolset = MyToolSet("my_toolset")
+
+    async def start_toolset():
+        await toolset.run()
+
+    with Engine() as engine:
+        job = LocalJob(start_toolset)
+        await engine.submit_async(job)
+        await job.wait_until_status("running")
+
+        agent = Agent(
+            "test",
+            "You are an asistant, help me test my code",
+        )
+        await agent.remote_toolset(toolset.service_id)
+
+        resp = await agent.run("Call function `print_hello`")
+        print(resp.content)
+        assert a
+
+        await job.cancel()
+        await engine.wait_async()
