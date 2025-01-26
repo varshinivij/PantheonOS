@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import List
 
 from funcdesc.desc import NotDef
 from funcdesc.pydantic import desc_to_pydantic, Description

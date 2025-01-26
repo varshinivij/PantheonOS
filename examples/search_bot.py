@@ -1,6 +1,3 @@
-import warnings
-warnings.filterwarnings("ignore")
-
 import asyncio
 from pantheon.agent import Agent
 from pantheon.tools.web_browse.duckduckgo import duckduckgo_search

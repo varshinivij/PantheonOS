@@ -5,10 +5,10 @@ from typing import Callable, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, create_model
-from litellm import acompletion, stream_chunk_builder
 from funcdesc import parse_func
 
 from .utils.misc import desc_to_openai_dict
+from .utils.llm import litellm
 from .types import AgentResponse, ResponseDetails, AgentInput
 from .remote import (
     ServiceProxy,
@@ -167,7 +167,7 @@ class Agent:
                 tools = self._convert_functions() or None
             else:
                 tools = None
-            response = await acompletion(
+            response = await litellm.acompletion(
                 model=self.model,
                 messages=history_clear_parsed,
                 tools=tools,
@@ -180,7 +180,7 @@ class Agent:
                     if choice.finish_reason == "stop":
                         break
                     await run_func(process_chunk, choice.delta.model_dump())
-            complete_resp = stream_chunk_builder(response.chunks)
+            complete_resp = litellm.stream_chunk_builder(response.chunks)
             message = complete_resp.choices[0].message.model_dump()
 
             if Response is not None:

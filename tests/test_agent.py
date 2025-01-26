@@ -90,17 +90,20 @@ async def test_structured_output_with_tool_use():
         books: List[SciFiBook]
         ratings: List[float] = Field(description="Use function call to get the rating of each book.")
 
+    called = False
+
     @agent.tool
     def get_book_rating(title: str) -> float:
         """Get the rating of a book."""
-        print(title)
+        nonlocal called
+        called = True
         return random.random()
 
     answer = await agent.run(
-        "Recommend me 5 sci-fi books.",
+        "Recommend me 5 sci-fi books, and use `get_book_rating` function to get the rating of each book.",
         response_format=SciFiBookList,
     )
-    print(answer)
+    assert called
     assert isinstance(answer.content, SciFiBookList)
     assert len(answer.content.books) == 5
     for r in answer.content.ratings:

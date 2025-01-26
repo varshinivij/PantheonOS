@@ -1,17 +1,14 @@
-import warnings
-warnings.filterwarnings("ignore")
-
 import asyncio
 from pantheon.agent import Agent
-from pantheon.reasoning import reasoning_flash_thinking_2
+from pantheon.reasoning import reasoning_deepseek_reasoner
 
 
 reasoning_bot = Agent(
     name="reasoning_bot",
     instructions="You are an AI assistant with reasoning abilities. " \
         "You can use `reasoning` to solve complex problems.",
-    model="gemini/gemini-1.5-flash",
-    tools=[reasoning_flash_thinking_2],
+    model="deepseek/deepseek-chat",
+    tools=[reasoning_deepseek_reasoner],
 )
 
 
