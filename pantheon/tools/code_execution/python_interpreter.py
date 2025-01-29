@@ -25,7 +25,7 @@ class PythonInterpreterToolSet(ToolSet):
         self._engine = engine
         self.engine = None
         self.clientid_to_interpreterid = {}
-    
+
     def _init_engine(self):
         if self.engine is None:
             if self._engine is None:
@@ -70,7 +70,7 @@ class PythonInterpreterToolSet(ToolSet):
         by providing the interpreter id. """
         self._init_engine()
 
-        def interpreter():
+        async def interpreter():
             __res = None
             __stdout = io.StringIO()
             __stderr = io.StringIO()
@@ -81,7 +81,7 @@ class PythonInterpreterToolSet(ToolSet):
                 try:
                     with redirect_stdout(__stdout), redirect_stderr(__stderr):
                         exec(code, globals())
-                except Exception as e:
+                except Exception:
                     traceback_str = traceback.format_exc()
                     __res = PythonInterpreterError(traceback_str)
                     continue
@@ -95,7 +95,7 @@ class PythonInterpreterToolSet(ToolSet):
         await job.wait_until_status("running")
         self.jobs[job.id] = job
         g = job.result()
-        g.send(None)  # Initialize the generator
+        await g.asend(None)  # Initialize the generator
         self.interpreters[job.id] = g
         return job.id
 
@@ -112,7 +112,7 @@ class PythonInterpreterToolSet(ToolSet):
         await job.cancel()
         del self.interpreters[interpreter_id]
         del self.jobs[interpreter_id]
-        self.engine.remove(job)
+        self.engine.jobs.remove(job)
 
     @tool
     async def run_code_in_interpreter(
@@ -135,7 +135,7 @@ class PythonInterpreterToolSet(ToolSet):
         if interpreter_id not in self.interpreters:
             raise ValueError(f"Interpreter {interpreter_id} not found")
         g = self.interpreters[interpreter_id]
-        result, stdout, stderr = g.send((code, result_var_name))
+        result, stdout, stderr = await g.asend((code, result_var_name))
         if isinstance(result, PythonInterpreterError):
             raise result
         return {

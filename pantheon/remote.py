@@ -129,6 +129,7 @@ async def run_toolsets(
     for job in jobs:
         await job.cancel()
     await engine.wait_async()
+    engine.stop()
 
 
 def toolset_cli(toolset_type: type[ToolSet], default_service_name: str):

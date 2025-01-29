@@ -1,9 +1,10 @@
 from magique.client import MagiqueError
 from pantheon.remote import tool, ToolSet, connect_remote
 from pantheon.tools.web_browse import WebBrowseToolSet
-from pantheon.tools.code_execution import PythonInterpreterToolSet
+from pantheon.tools.code_execution.python_interpreter import PythonInterpreterToolSet, PythonInterpreterError
 
 from executor.engine import Engine, LocalJob, ProcessJob
+import pytest
 
 
 def test_remote_toolset():
@@ -84,6 +85,8 @@ async def test_python_interpreter_toolset():
         await engine.submit_async(job)
         await job.wait_until_status("running")
         s = await connect_remote(toolset.service_id)
+        with pytest.raises(MagiqueError):
+            resp = await s.invoke("run_code", {"code": "xxxxx"})
         resp = await s.invoke("run_code", {"code": "res = 1 + 1", "result_var_name": "res"})
         assert resp["result"] == 2
         resp = await s.invoke("run_code", {"code": "", "result_var_name": "res"})

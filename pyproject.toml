@@ -4,7 +4,7 @@ description = "A framework for building distributed LLM based multi-agent system
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "executor-engine>=0.3.0",
+    "executor-engine>=0.3.1",
     "fire>=0.7.0",
     "funcdesc>=0.1.7.2",
     "litellm>=1.56.4",
@@ -41,6 +41,7 @@ dev = [
     "duckduckgo-search>=7.1.1",
     "pip>=24.3.1",
     "textual-dev>=1.7.0",
+    "build>=1.2.2.post1",
 ]
 
 [tool.setuptools]
