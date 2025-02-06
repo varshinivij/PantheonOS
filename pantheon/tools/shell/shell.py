@@ -40,7 +40,7 @@ class ShellToolSet(ToolSet):
         del self.shells[shell_id]
 
     @tool
-    async def run_command_in_shell(self, command: str, shell_id: str, timeout: int = 100):
+    async def run_command_in_shell(self, command: str, shell_id: str, timeout: int = 10):
         """Run a command in a shell.
 
         Args:
@@ -74,7 +74,7 @@ class ShellToolSet(ToolSet):
         return output
 
     @tool
-    async def run_command(self, command: str, timeout: int = 100, __client_id__: str | None = None):
+    async def run_command(self, command: str, timeout: int = 10, __client_id__: str | None = None):
         """Run shell command and get the output.
 
         Args:
