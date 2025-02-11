@@ -1,6 +1,6 @@
 import asyncio
 
-from pantheon.agent import Agent
+from pantheon.agent import Agent, AgentTransfer
 from pydantic import BaseModel, Field
 from typing import List
 import random
@@ -197,3 +197,28 @@ async def test_tool_timeout():
     resp = await agent.run("What is the weather in Palo Alto?")
     assert flag
     print(resp)
+
+
+async def test_agent_transfer():
+    scifi_fan = Agent(
+        name="scifi_fan",
+        instructions="You are a sci-fi fan, you can answer any sci-fi related questions.",
+        model="gpt-4o-mini",
+    )
+
+    classic_literature_fan = Agent(
+        name="classic_literature_fan",
+        instructions="You are a classic literature fan, you can answer any classic literature related questions.",
+        model="gpt-4o-mini",
+    )
+
+
+    @scifi_fan.tool
+    def transfer_to_classic_literature_fan():
+        """Transfer the question to the classic literature fan."""
+        return classic_literature_fan
+
+    resp = await scifi_fan.run("What is the best classic literature book?")
+    assert isinstance(resp, AgentTransfer)
+    assert resp.from_agent == scifi_fan.name
+    assert resp.to_agent == classic_literature_fan.name

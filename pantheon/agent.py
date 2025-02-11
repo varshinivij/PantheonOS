@@ -10,7 +10,7 @@ from funcdesc import parse_func
 
 from .utils.misc import desc_to_openai_dict
 from .utils.llm import litellm, process_messages
-from .types import AgentResponse, ResponseDetails, AgentInput
+from .types import AgentResponse, ResponseDetails, AgentInput, AgentTransfer
 from .remote import (
     ServiceProxy,
     connect_remote, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
@@ -106,7 +106,7 @@ class Agent:
             tool_calls: list,
             context_variables: dict,
             timeout: int,
-            ):
+            ) -> list[dict]:
         messages = []
         for call in tool_calls:
             try:
@@ -133,17 +133,47 @@ class Agent:
             except Exception as e:
                 result = repr(e)
 
-            if isinstance(result, Agent):
-                return result
-
             context_variables[call["id"]] = result
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "tool_name": func_name,
-                "content": repr(result),
-            })
+            if isinstance(result, Agent):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "tool_name": func_name,
+                    "content": result.name,
+                    "transfer": True,
+                })
+            else:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "tool_name": func_name,
+                    "content": repr(result),
+                })
         return messages
+
+    async def acompletion(
+            self,
+            messages: list[dict],
+            tools: list[dict] | None = None,
+            response_format: Any | None = None,
+            process_chunk: Callable | None = None,
+            ) -> dict:
+        response = await litellm.acompletion(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            response_format=response_format,
+            stream=True,
+        )
+        async for chunk in response:
+            if process_chunk:
+                choice = chunk.choices[0]
+                await run_func(process_chunk, choice.delta.model_dump())
+                if choice.finish_reason == "stop":
+                    break
+        complete_resp = litellm.stream_chunk_builder(response.chunks)
+        message = complete_resp.choices[0].message.model_dump()
+        return message
 
     async def run_stream(
         self,
@@ -156,22 +186,20 @@ class Agent:
         tool_use: bool = True,
         tool_timeout: int | None = None,
         model: str | None = None,
-    ):
+    ) -> ResponseDetails | AgentTransfer:
         model = model or self.model
         response_format = response_format or self.response_format
         history = copy.deepcopy(messages)
         tool_timeout = tool_timeout or self.tool_timeout
-
-        history.insert(0, {"role": "system", "content": self.instructions})
+        if (len(history) > 0) and (history[0]["role"] == "system"):
+            history[0]["content"] = self.instructions
+        else:
+            history.insert(0, {"role": "system", "content": self.instructions})
         init_len = len(history)
-        if context_variables is None:
-            context_variables = {}
+        context_variables = context_variables or {}
 
         if response_format:
-            Response = create_model(
-                "Response",
-                result=(response_format, ...),
-            )
+            Response = create_model("Response", result=(response_format, ...))
         else:
             Response = None
 
@@ -182,21 +210,13 @@ class Agent:
                 tools = self._convert_functions() or None
             else:
                 tools = None
-            response = await litellm.acompletion(
-                model=self.model,
-                messages=processed_messages,
+
+            message = await self.acompletion(
+                processed_messages,
                 tools=tools,
                 response_format=Response,
-                stream=True,
+                process_chunk=process_chunk,
             )
-            async for chunk in response:
-                if process_chunk:
-                    choice = chunk.choices[0]
-                    await run_func(process_chunk, choice.delta.model_dump())
-                    if choice.finish_reason == "stop":
-                        break
-            complete_resp = litellm.stream_chunk_builder(response.chunks)
-            message = complete_resp.choices[0].message.model_dump()
 
             if Response is not None:
                 content = message.get("content")
@@ -220,9 +240,19 @@ class Agent:
             history.extend(tool_messages)
             for msg in tool_messages:
                 self.events_queue.put_nowait(msg)
+
             if process_step_message:
                 for msg in tool_messages:
                     await run_func(process_step_message, msg)
+
+            for msg in tool_messages:
+                if msg.get("transfer"):
+                    return AgentTransfer(
+                        from_agent=self.name,
+                        to_agent=msg["content"],
+                        history=history,
+                        context_variables=context_variables,
+                    )
 
         return ResponseDetails(
             messages=history[init_len:],
@@ -234,14 +264,16 @@ class Agent:
             msg: AgentInput,
             use_memory: bool,
             ) -> list[dict]:
-        assert isinstance(msg, (list, str, BaseModel, AgentResponse)), \
-            "Message must be a list, string, BaseModel or AgentResponse"
+        assert isinstance(msg, (list, str, BaseModel, AgentResponse, AgentTransfer)), \
+            "Message must be a list, string, BaseModel or AgentResponse, AgentTransfer"
         if isinstance(msg, AgentResponse):
             # For acceping the result of previous run or other agent
             msg = msg.content
 
         # Convert message to the openai message format
-        if isinstance(msg, BaseModel):
+        if isinstance(msg, AgentTransfer):
+            messages = msg.history
+        elif isinstance(msg, BaseModel):
             messages = [{"role": "user", "content": msg.model_dump_json()}]
         elif isinstance(msg, str):
             messages = [{"role": "user", "content": msg}]
@@ -258,9 +290,11 @@ class Agent:
                         "Message must be a string, BaseModel or dict"
                     new_messages.append(m)
             messages = new_messages
+
         if use_memory:
             messages = self.memory + messages
         return messages
+
 
     async def run(
             self, msg: AgentInput,
@@ -273,7 +307,7 @@ class Agent:
             update_memory: bool = True,
             tool_timeout: int | None = None,
             model: str | None = None,
-            ) -> AgentResponse:
+            ) -> AgentResponse | AgentTransfer:
         """Run the agent.
 
         Args:
@@ -293,6 +327,9 @@ class Agent:
             _use_m = use_memory
         messages = self.input_to_openai_messages(msg, _use_m)
         response_format = response_format or self.response_format
+        context_variables = context_variables or {}
+        if isinstance(msg, AgentTransfer):
+            context_variables = msg.context_variables
 
         details = await self.run_stream(
             messages=messages,
@@ -305,18 +342,21 @@ class Agent:
             model=model,
         )
 
-        final_msg = details.messages[-1]
-        if response_format:
-            content = final_msg.get("parsed")
+        if isinstance(details, AgentTransfer):
+            return details
         else:
-            content = final_msg.get("content")
-        if self.use_memory and update_memory:
-            self.memory.extend(details.messages)
-        return AgentResponse(
-            agent_name=self.name,
-            content=content,
-            details=details,
-        )
+            final_msg = details.messages[-1]
+            if response_format:
+                content = final_msg.get("parsed")
+            else:
+                content = final_msg.get("content")
+            if self.use_memory and update_memory:
+                self.memory.extend(details.messages)
+            return AgentResponse(
+                agent_name=self.name,
+                content=content,
+                details=details,
+            )
 
     async def chat(self, message: str | dict | None = None):
         """Chat with the agent with a REPL interface."""
