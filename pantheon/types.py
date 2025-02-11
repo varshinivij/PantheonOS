@@ -13,5 +13,11 @@ class AgentResponse(BaseModel):
     details: Any
 
 
-AgentInput = str | BaseModel | AgentResponse | List[str | BaseModel | dict]
+class AgentTransfer(BaseModel):
+    from_agent: str
+    to_agent: str
+    history: list[dict]
+    context_variables: dict
 
+
+AgentInput = str | BaseModel | AgentResponse | List[str | BaseModel | dict] | AgentTransfer

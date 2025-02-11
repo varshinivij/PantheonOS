@@ -1,15 +1,21 @@
-from typing import List
+from typing import List, TYPE_CHECKING
 
 from funcdesc.desc import NotDef
 from funcdesc.pydantic import desc_to_pydantic, Description
 from openai import pydantic_function_tool
 from rich.console import Console
 from rich.panel import Panel
+from rich.markdown import Markdown
+
+
+if TYPE_CHECKING:
+    from ..agent import Agent
 
 
 def desc_to_openai_dict(
         desc: Description,
         skip_params: List[str] = []) -> dict:
+
     # remove skip_params from desc.inputs
     new_inputs = []
     for arg in desc.inputs:
@@ -67,14 +73,25 @@ def print_agent_message(
         print_tool_call: bool = True,
         print_assistant_message: bool = True,
         print_tool_response: bool = True,
+        print_markdown: bool = True,
     ):
     if console is None:
         def _print(msg: str, title: str):
             print(msg)
+
+        def _print_markdown(msg: str):
+            print(msg)
     else:
-        def _print(msg: str, title: str):
-            panel = Panel(msg, title=title)
-            console.print(panel)
+        def _print(msg: str, title: str | None = None):
+            if title is not None:
+                panel = Panel(msg, title=title)
+                console.print(panel)
+            else:
+                console.print(msg)
+
+        def _print_markdown(msg: str):
+            markdown = Markdown(msg)
+            console.print(markdown)
 
     if print_tool_call and (tool_calls := message.get("tool_calls")):
         for call in tool_calls:
@@ -93,8 +110,33 @@ def print_agent_message(
         )
     elif print_assistant_message and message.get("role") == "assistant":
         if message.get("content"):
-            _print(
-                f"[bold]Agent [blue]{agent_name}[/blue]'s message:[/bold]\n"
-                f"[yellow]{message.get('content')}[/yellow]",
-                "Agent Message"
-            )
+            if print_markdown:
+                _print(f"[bold][blue]{agent_name}[/blue]:[/bold]")
+                _print_markdown(message.get("content"))
+            else:
+                _print(
+                    f"[bold]Agent [blue]{agent_name}[/blue]'s message:[/bold]\n"
+                    f"[yellow]{message.get('content')}[/yellow]",
+                    "Agent Message"
+                )
+
+
+def print_agent(agent: "Agent", console: Console | None = None):
+    if console is None:
+        def _print(msg: str):
+            print(msg)
+    else:
+        def _print(msg: str):
+            console.print(msg)
+    _print(f"  - [blue]{agent.name}[/blue]")
+    # print agent instructions
+    _print(f"    - [green]Instructions:[/green] {agent.instructions}")
+    # print agent tools
+    if agent.functions:
+        _print("    - [green]Tools:[/green]")
+        for func in agent.functions.values():
+            _print(f"      - {func.__name__}")
+    if agent.toolset_proxies:
+        _print("    - [green]Remote ToolSets:[/green]")
+        for proxy in agent.toolset_proxies.values():
+            _print(f"      - {proxy.service_info.service_name}")
