@@ -10,12 +10,11 @@ dependencies = [
     "litellm>=1.56.4",
     "loguru>=0.7.3",
     "magique>=0.2.2",
+    "magique-ai>=0.1.1",
     "openai>=1.58.1",
     "pillow>=10.4.0",
     "rich>=13.9.4",
     "textual>=1.0.0",
-    "pyyaml>=6.0.2",
-    "lancedb>=0.20.0"
 ]
 dynamic = ["version"]
 
@@ -28,10 +27,6 @@ pythonpath = ["."]
 dev = [
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.0",
-]
-tool = [
-    "crawl4ai>=0.5.0",
-    "duckduckgo-search>=7.1.1",
 ]
 slack = [
     "slack-sdk",

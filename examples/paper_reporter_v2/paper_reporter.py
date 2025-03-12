@@ -3,9 +3,9 @@ import os
 
 from pantheon.task import Task, TasksSolver
 from pantheon.agent import Agent
-from pantheon.tools.web_browse.duckduckgo import duckduckgo_search
-from pantheon.tools.web_browse.web_crawl import web_crawl
 from pantheon.smart_func import smart_func
+from magique.ai.tools.web_browse.duckduckgo import duckduckgo_search
+from magique.ai.tools.web_browse.web_crawl import web_crawl
 
 
 def write_file(content: str, file_path: str):

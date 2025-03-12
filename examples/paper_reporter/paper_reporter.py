@@ -17,8 +17,8 @@ import asyncio
 
 import fire
 from pantheon.smart_func import smart_func
-from pantheon.tools.web_browse.duckduckgo import duckduckgo_search
-from pantheon.tools.web_browse.web_crawl import web_crawl
+from magique.ai.tools.web_browse.duckduckgo import duckduckgo_search
+from magique.ai.tools.web_browse.web_crawl import web_crawl
 from loguru import logger
 from pydantic import BaseModel, Field
 

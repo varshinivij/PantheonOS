@@ -5,8 +5,8 @@ import asyncio
 from pantheon.agent import Agent
 from pantheon.meeting import BrainStorm
 from pantheon.smart_func import smart_func
-from pantheon.tools.web_browse.duckduckgo import duckduckgo_search
-from pantheon.tools.web_browse.web_crawl import web_crawl
+from magique.ai.tools.web_browse.duckduckgo import duckduckgo_search
+from magique.ai.tools.web_browse.web_crawl import web_crawl
 
 
 biologist = Agent(

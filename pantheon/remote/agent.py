@@ -1,11 +1,11 @@
 import sys
 
 from magique.worker import MagiqueWorker
+from magique.ai.utils.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+from magique.ai.utils.remote import connect_remote
 
 from ..agent import Agent
 from ..types import AgentInput
-from .constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
-from .utils import connect_remote
 
 
 class AgentService:

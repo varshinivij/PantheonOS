@@ -7,6 +7,8 @@ from uuid import uuid4
 from pydantic import BaseModel, create_model
 from funcdesc import parse_func
 from magique.client import ServiceProxy
+from magique.ai.utils.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+from magique.ai.utils.remote import connect_remote
 
 from .utils.misc import desc_to_openai_dict, run_func
 from .utils.llm import (
@@ -18,8 +20,6 @@ from .utils.llm import (
 )
 from .utils.vision import vision_to_openai
 from .types import AgentResponse, ResponseDetails, AgentInput, AgentTransfer, VisionInput
-from .remote.utils import connect_remote
-from .remote.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
 
 
 __CTX_VARS_NAME__ = "context_variables"

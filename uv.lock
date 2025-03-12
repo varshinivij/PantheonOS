@@ -1258,6 +1258,23 @@ wheels = [
 ]
 
 [[package]]
+name = "magique-ai"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "crawl4ai" },
+    { name = "duckduckgo-search" },
+    { name = "executor-engine" },
+    { name = "fire" },
+    { name = "lancedb" },
+    { name = "loguru" },
+    { name = "magique" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/b3/ce2ed7a5c1ffcd763930aebe91c0b8189bb71b0d910b9864322634ba1f6f/magique_ai-0.1.1-py3-none-any.whl", hash = "sha256:918f2b03cab717a8f0ddeee233c051d4108afe862764cd5141aa689b9ef700b8", size = 21845 },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1578,19 +1595,18 @@ wheels = [
 
 [[package]]
 name = "pantheon-agents"
-version = "0.2.3"
+version = "0.2.4"
 source = { virtual = "." }
 dependencies = [
     { name = "executor-engine" },
     { name = "fire" },
     { name = "funcdesc" },
-    { name = "lancedb" },
     { name = "litellm" },
     { name = "loguru" },
     { name = "magique" },
+    { name = "magique-ai" },
     { name = "openai" },
     { name = "pillow" },
-    { name = "pyyaml" },
     { name = "rich" },
     { name = "textual" },
 ]
@@ -1603,10 +1619,6 @@ dev = [
 slack = [
     { name = "slack-bolt" },
     { name = "slack-sdk" },
-]
-tool = [
-    { name = "crawl4ai" },
-    { name = "duckduckgo-search" },
 ]
 
 [package.dev-dependencies]
@@ -1626,20 +1638,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "crawl4ai", marker = "extra == 'tool'", specifier = ">=0.5.0" },
-    { name = "duckduckgo-search", marker = "extra == 'tool'", specifier = ">=7.1.1" },
     { name = "executor-engine", specifier = ">=0.3.1" },
     { name = "fire", specifier = ">=0.7.0" },
     { name = "funcdesc", specifier = ">=0.1.8" },
-    { name = "lancedb", specifier = ">=0.20.0" },
     { name = "litellm", specifier = ">=1.56.4" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "magique", specifier = ">=0.2.2" },
+    { name = "magique-ai", specifier = ">=0.1.1" },
     { name = "openai", specifier = ">=1.58.1" },
     { name = "pillow", specifier = ">=10.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25.0" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "slack-bolt", marker = "extra == 'slack'" },
     { name = "slack-sdk", marker = "extra == 'slack'" },
