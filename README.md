@@ -23,8 +23,7 @@
 ## Installation
 
 ```bash
-# Install with the built-in tools
-pip install pantheon-agents[tool]
+pip install pantheon-agents
 ```
 
 See the [examples](examples) folder for more details.
