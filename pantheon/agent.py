@@ -146,12 +146,14 @@ class Agent:
                     "transfer": True,
                 })
             else:
+                if isinstance(result, dict):
+                    result = remove_hidden_fields(result)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],
                     "tool_name": func_name,
                     "raw_content": result,
-                    "content": repr(remove_hidden_fields(result)),
+                    "content": repr(result),
                 })
         return messages
 
