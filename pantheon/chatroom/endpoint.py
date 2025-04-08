@@ -130,6 +130,7 @@ class Endpoint:
         self.worker.register(self.open_file_for_write)
         self.worker.register(self.write_chunk)
         self.worker.register(self.close_file)
+        self.worker.register(self.read_file)
 
     async def list_services(self) -> list[dict]:
         res = []
@@ -170,7 +171,7 @@ class Endpoint:
             return {"success": False, "error": "Directory does not exist"}
         if (sub_dir is not None) and ('..' in sub_dir):
             return {"success": False, "error": "Sub directory cannot contain '..'"}
-        if sub_dir is None:
+        if sub_dir is None or sub_dir == "":
             files = list(self.path.glob("*"))
         else:
             files = list(self.path.glob(f"{sub_dir}/*"))
@@ -201,28 +202,29 @@ class Endpoint:
         dir_path = self.path / sub_dir
         if not dir_path.exists():
             return {"success": False, "error": "Directory does not exist"}
-        
+        if not dir_path.is_dir():
+            return {"success": False, "error": "Path is not a directory"}
         shutil.rmtree(dir_path)
         return {"success": True}
 
-    async def delete_file(self, file_name: str):
+    async def delete_file(self, file_path: str):
         """Delete a file."""
-        if '..' in file_name:
-            return {"success": False, "error": "File name cannot contain '..'"}
-        file_path = self.path / file_name
-        if not file_path.exists():
+        if '..' in file_path:
+            return {"success": False, "error": "File path cannot contain '..'"}
+        path = self.path / file_path
+        if not path.exists():
             return {"success": False, "error": "File does not exist"}
-        file_path.unlink()
+        path.unlink()
         return {"success": True}
 
-    async def open_file_for_write(self, file_name: str):
+    async def open_file_for_write(self, file_path: str):
         """Open a file for writing."""
-        if '..' in file_name:
-            return {"error": "File name cannot contain '..'"}
-        file_path = self.path / file_name
+        if '..' in file_path:
+            return {"error": "File path cannot contain '..'"}
+        path = self.path / file_path
         handle_id = str(uuid.uuid4())
         try:
-            handle = open(file_path, "wb")
+            handle = open(path, "wb")
             self._handles[handle_id] = handle
             return {"success": True, "handle_id": handle_id}
         except Exception as e:
@@ -245,14 +247,14 @@ class Endpoint:
         del self._handles[handle_id]
         return {"success": True}
 
-    async def read_file(self, file_name: str, receive_chunk, chunk_size: int = 1024):
+    async def read_file(self, file_path: str, receive_chunk, chunk_size: int = 1024):
         """Read a file."""
-        if '..' in file_name:
-            return {"error": "File name cannot contain '..'"}
-        file_path = self.path / file_name
-        if not file_path.exists():
+        if '..' in file_path:
+            return {"error": "File path cannot contain '..'"}
+        path = self.path / file_path
+        if not path.exists():
             return {"error": "File does not exist"}
-        with open(file_path, "rb") as f:
+        with open(path, "rb") as f:
             while True:
                 data = f.read(chunk_size)
                 if not data:
