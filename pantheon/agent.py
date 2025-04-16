@@ -31,7 +31,7 @@ class Agent:
         self,
         name: str,
         instructions: str,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-4.1-mini",
         icon: str = '🤖',
         tools: list[Callable] | None = None,
         response_format: Any | None = None,

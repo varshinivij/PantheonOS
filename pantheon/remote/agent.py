@@ -3,6 +3,7 @@ import asyncio
 from typing import Callable
 
 from magique.worker import MagiqueWorker
+from magique.client import PyFunction
 from magique.ai.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
 from magique.ai.utils.remote import connect_remote
 
@@ -111,7 +112,7 @@ class RemoteAgent:
 
     async def tool(self, func: Callable):
         s = await self._connect()
-        await s.invoke("add_tool", {"func": func})
+        await s.invoke("add_tool", {"func": PyFunction(func)})
 
     async def chat(self, message: str | dict | None = None):
         """Chat with the agent with a REPL interface."""

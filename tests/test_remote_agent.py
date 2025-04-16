@@ -7,7 +7,6 @@ async def test_remote_agent():
     agent = Agent(
         "scifi_fan",
         "You are a scifi fan.",
-        model="gpt-4o-mini",
     )
     service = AgentService(agent)
     service_task = asyncio.create_task(service.run())
@@ -22,7 +21,6 @@ async def test_remote_agent_print_chunk():
     agent = Agent(
         "scifi_fan",
         "You are a scifi fan.",
-        model="gpt-4o-mini",
     )
     service = AgentService(agent)
     service_task = asyncio.create_task(service.run())
@@ -47,16 +45,12 @@ async def test_remote_agent_tool():
     agent = Agent(
         "assistant",
         "You are a assistant, you can use tools to get information.",
-        model="gpt-4o-mini",
     )
     service = AgentService(agent)
     service_task = asyncio.create_task(service.run())
     await asyncio.sleep(1.0)
     remote_agent = RemoteAgent(service.worker.service_id)
-    _flag = False
     def fetch_weather(city: str):
-        nonlocal _flag
-        _flag = True
         print(f"fetching weather in {city}")
         return f"The weather in {city} is sunny"
     await remote_agent.tool(fetch_weather)
@@ -70,4 +64,3 @@ async def test_remote_agent_tool():
     )
     assert isinstance(res, AgentResponse)
     service_task.cancel()
-    assert _flag

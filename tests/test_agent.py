@@ -15,7 +15,6 @@ async def test_stream():
     agent = Agent(
         name="test",
         instructions="You are a sci-fi fan, you can answer any sci-fi related questions. Just give me a number without any other words and symbols.",
-        model="gpt-4o-mini",
     )
     msgs = [{"role": "user", "content": "What is the meaning of life?"}]
     resp = await agent.run_stream(
@@ -30,7 +29,6 @@ async def test_tool_use():
     agent = Agent(
         name="test",
         instructions="You are a weather agent, you can use the weather API to get the weather of a city.",
-        model="gpt-4o-mini",
     )
 
     @agent.tool
@@ -50,7 +48,6 @@ async def test_structured_output():
     agent = Agent(
         name="test",
         instructions="You are a sci-fi fan, you can answer any sci-fi related questions.",
-        model="gpt-4o-mini",
     )
 
     class SciFiBook(BaseModel):
@@ -85,7 +82,6 @@ async def test_structured_output_with_tool_use():
     agent = Agent(
         name="test",
         instructions="You are a sci-fi fan, you can answer any sci-fi related questions, and you can use the tool calls to get the rating of each book.",
-        model="gpt-4o-mini",
     )
 
     class SciFiBook(BaseModel):
@@ -121,19 +117,16 @@ async def test_agent_result_passing():
     scifi_fan = Agent(
         name="scifi_fan",
         instructions="You are a sci-fi fan, you can answer any sci-fi related questions.",
-        model="gpt-4o-mini",
     )
 
     scifi_critic = Agent(
         name="scifi_critic",
         instructions="You are a scifi critic, you can review a sci-fi book and give a rating.",
-        model="gpt-4o-mini",
     )
 
     summary_agent = Agent(
         name="summary_agent",
         instructions="You are a summary agent, you can summarize the answer of other agent give a human readable format.",
-        model="gpt-4o-mini",
     )
 
     class SciFiBook(BaseModel):
@@ -175,7 +168,6 @@ async def test_tool_timeout():
     agent = Agent(
         name="test",
         instructions="",
-        model="gpt-4o-mini",
         tool_timeout=1,
         use_memory=False,
     )
@@ -208,13 +200,11 @@ async def test_agent_transfer():
     scifi_fan = Agent(
         name="scifi_fan",
         instructions="You are a sci-fi fan, you can answer any sci-fi related questions.",
-        model="gpt-4o-mini",
     )
 
     classic_literature_fan = Agent(
         name="classic_literature_fan",
         instructions="You are a classic literature fan, you can answer any classic literature related questions.",
-        model="gpt-4o-mini",
     )
 
 
@@ -233,7 +223,6 @@ async def test_agent_force_litellm():
     agent = Agent(
         name="test",
         instructions="",
-        model="gpt-4o-mini",
         force_litellm=True,
     )
 
@@ -252,7 +241,6 @@ async def test_vision():
     agent = Agent(
         name="test",
         instructions="You are a vision agent, you can answer any vision related questions.",
-        model="gpt-4o-mini",
     )
 
     resp = await agent.run(

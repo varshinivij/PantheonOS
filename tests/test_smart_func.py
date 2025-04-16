@@ -4,7 +4,7 @@ from pantheon.smart_func import smart_func
 
 
 async def test_smart_func():
-    @smart_func(model="gpt-4o-mini")
+    @smart_func
     async def translate(text: str) -> str:
         """Translate the given text to English."""
 
@@ -20,7 +20,7 @@ async def test_smart_func_with_tools():
         _city = city
         return {"weather": "sunny"}
 
-    @smart_func(model="gpt-4o-mini", tools=[get_weather])
+    @smart_func(tools=[get_weather])
     async def get_weather_info(city: str) -> str:
         """Get the weather information of the given city."""
 
@@ -34,7 +34,7 @@ async def test_smart_func_structured_output():
         author: str
         price: float
 
-    @smart_func(model="gpt-4o-mini")
+    @smart_func
     async def recommend_book() -> Book:
         """Recommend a book."""
 
@@ -43,7 +43,7 @@ async def test_smart_func_structured_output():
 
 
 def test_smart_func_sync():
-    @smart_func(model="gpt-4o-mini")
+    @smart_func
     def translate(text: str) -> str:
         """Translate the given text to English."""
 
