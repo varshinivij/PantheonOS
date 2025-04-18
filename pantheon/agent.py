@@ -14,7 +14,8 @@ from magique.ai.utils.remote import connect_remote
 from .utils.misc import desc_to_openai_dict, run_func
 from .utils.llm import (
     acompletion_openai,
-    process_messages,
+    process_messages_for_model,
+    process_messages_for_hook_func,
     remove_hidden_fields,
     acompletion_litellm,
 )
@@ -190,7 +191,7 @@ class Agent:
             process_chunk: Callable | None = None,
             ) -> dict:
         force_litellm = self.force_litellm
-        messages = process_messages(messages, model)
+        messages = process_messages_for_model(messages, model)
         provider = "openai"
         if "/" in model:
             provider = model.split("/")[0]
@@ -288,7 +289,7 @@ class Agent:
                 self.events_queue.put_nowait(msg)
 
             if process_step_message:
-                for msg in tool_messages:
+                for msg in process_messages_for_hook_func(tool_messages):
                     await run_func(process_step_message, msg)
 
             for msg in tool_messages:

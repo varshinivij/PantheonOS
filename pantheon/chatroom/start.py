@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Callable, Awaitable
 
 from .room import ChatRoom
-from ..remote.memory import MemoryManagerService, RemoteMemoryManager
 from ..agent import Agent
 from ..team import Team
 from .endpoint import Endpoint
+from ..memory import MemoryManager
 
 
 async def default_agent_factory() -> Agent | Team:
@@ -26,14 +26,10 @@ async def start_services(
     agent_factory: Callable[[], Awaitable[Agent | Team]] = default_agent_factory,
     log_level: str = "INFO",
 ):
+    memory_manager = MemoryManager(memory_path)
     agent = await agent_factory()
     w_path = Path(workspace_path)
     w_path.mkdir(parents=True, exist_ok=True)
-    memory_service = MemoryManagerService(memory_path)
-    asyncio.create_task(memory_service.run(log_level=log_level))
-    await asyncio.sleep(0.5)
-    remote_memory_manager = RemoteMemoryManager(memory_service.worker.service_id)
-    await remote_memory_manager.connect()
     endpoint = Endpoint(workspace_path=workspace_path)
     asyncio.create_task(endpoint.run(log_level=log_level))
     await asyncio.sleep(0.5)
@@ -50,5 +46,10 @@ async def start_services(
     if isinstance(agent, Agent):
         await agent.remote_toolset(s["id"])
 
-    chat_room = ChatRoom(agent, endpoint.worker.service_id, remote_memory_manager, name=service_name)
+    chat_room = ChatRoom(
+        agent,
+        endpoint.worker.service_id,
+        memory_manager,
+        name=service_name,
+    )
     await chat_room.run(log_level=log_level)

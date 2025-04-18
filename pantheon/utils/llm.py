@@ -123,12 +123,12 @@ def remove_unjsonifiable_raw_content(messages: list[dict]) -> list[dict]:
         if "raw_content" in msg:
             try:
                 json.dumps(msg["raw_content"])
-            except:
+            except Exception:
                 del msg["raw_content"]
     return messages
 
 
-def process_messages(messages: list[dict], model: str) -> list[dict]:
+def process_messages_for_model(messages: list[dict], model: str) -> list[dict]:
     messages = deepcopy(messages)
     messages = remove_parsed(messages)
     messages = remove_raw_content(messages)
@@ -138,6 +138,12 @@ def process_messages(messages: list[dict], model: str) -> list[dict]:
 def process_messages_for_store(messages: list[dict]) -> list[dict]:
     messages = deepcopy(messages)
     messages = remove_parsed(messages)
+    messages = remove_unjsonifiable_raw_content(messages)
+    return messages
+
+
+def process_messages_for_hook_func(messages: list[dict]) -> list[dict]:
+    messages = deepcopy(messages)
     messages = remove_unjsonifiable_raw_content(messages)
     return messages
 

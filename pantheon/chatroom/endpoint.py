@@ -7,89 +7,12 @@ import uuid
 
 from magique.ai.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
 from magique.worker import MagiqueWorker
-from magique.ai.toolset import run_toolsets, ToolSet, tool
-from magique.ai.tools.python import PythonInterpreterToolSet
+from magique.ai.toolset import run_toolsets, ToolSet
 from magique.ai.tools.file_manager import FileManagerToolSet
-from magique.ai.tools.file_transfer import FileTransferToolSet
 from magique.ai.tools.web_browse import WebBrowseToolSet
 from magique.ai import connect_remote
 
-
-class PythonInterpreterToolSetPatchMatplotlib(PythonInterpreterToolSet):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.init_code = """try:
-    import matplotlib; matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import os
-    import uuid
-
-    GLOBAL_FIG_PATH = None
-    GLOBAL_FIG_DIR = ".matplotlib_figs"
-
-    original_show = plt.show
-
-    def __custom_plt_show(*args, **kwargs):
-        global GLOBAL_FIG_PATH
-        fig = plt.gcf()
-        if not fig.get_axes():
-            print("No active figure to save.")
-            plt.close(fig)
-            return
-
-        fig_uuid = str(uuid.uuid4())
-        os.makedirs(GLOBAL_FIG_DIR, exist_ok=True)
-        GLOBAL_FIG_PATH = os.path.join(GLOBAL_FIG_DIR, fig_uuid + ".png")
-        fig.savefig(GLOBAL_FIG_PATH, format='png')
-        plt.close(fig)
-
-    __plt_show = plt.show
-    plt.show = __custom_plt_show
-except Exception as e:
-    print(f"Error in matplotlib initialization: {e}")
-"""
-
-    @tool
-    async def run_code_in_interpreter(
-            self,
-            code: str,
-            interpreter_id: str,
-            result_var_name: str | None = None,
-            ) -> dict:
-        """Run code in an interpreter.
-
-        Args:
-            code: The code to run.
-            interpreter_id: The id of the interpreter to run the code in.
-            result_var_name: The name of the variable you want to get the result from.
-                If not needed, set to None. Default is None.
-
-        Returns:
-            A dictionary with the result, stdout, and stderr.
-        """
-        code = "GLOBAL_FIG_PATH = None\n" + code
-        res = await super().run_code_in_interpreter(
-            code,
-            interpreter_id,
-            result_var_name,
-        )
-        res2 = await super().run_code_in_interpreter(
-            "None",
-            interpreter_id,
-            "GLOBAL_FIG_PATH",
-        )
-        fig_path = res2["result"]
-        if fig_path is not None:
-            res["fig_storage_path"] = fig_path
-            open_path = fig_path
-            if self.workdir:
-                open_path = os.path.join(self.workdir, fig_path)
-            with open(open_path, "rb") as f:
-                base64_img = base64.b64encode(f.read()).decode("utf-8")
-            base64_uri = f"data:image/png;base64,{base64_img}"
-            res["plt_show_base64_uri"] = base64_uri
-            res["hidden_to_model"] = ["plt_show_base64_uri"]
-        return res
+from .python_interpreter import ScientificPythonInterpreterToolSet
 
 
 class Endpoint:
@@ -298,7 +221,7 @@ class Endpoint:
         return None
 
     def create_services(self):
-        toolset = PythonInterpreterToolSetPatchMatplotlib(
+        toolset = ScientificPythonInterpreterToolSet(
             name="python_interpreter",
             workdir=str(self.path),
         )
