@@ -174,7 +174,7 @@ class ChatRoom:
     async def chat(
         self,
         chat_id: str,
-        message: str,
+        message: list[dict],
         process_chunk=None,
         process_step_message=None,
     ):

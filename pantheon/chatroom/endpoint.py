@@ -7,13 +7,12 @@ import uuid
 
 from magique.worker import MagiqueWorker
 from magique.ai.toolset import run_toolsets, ToolSet
-from magique.ai.tools.file_manager import FileManagerToolSet
 from magique.ai.tools.web_browse import WebBrowseToolSet
 from magique.ai import connect_remote
 from magique.ai.constant import DEFAULT_SERVER_URL
 
 from .python_interpreter import ScientificPythonInterpreterToolSet
-
+from .file_manager import FileManagerToolSet
 
 class Endpoint:
     def __init__(
