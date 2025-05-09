@@ -8,7 +8,7 @@ from pydantic import BaseModel, create_model
 from funcdesc import parse_func, Description, Value
 from magique.client import ServiceProxy
 from magique.worker import ReverseCallable
-from magique.ai.constant import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+from magique.ai.constant import DEFAULT_SERVER_URL
 from magique.ai.utils.remote import connect_remote
 
 from .utils.misc import desc_to_openai_dict, run_func
@@ -25,6 +25,7 @@ from .memory import Memory
 
 
 __CTX_VARS_NAME__ = "context_variables"
+__SKIP_PARAMS__ = [__CTX_VARS_NAME__, "__client_id__", "__agent_run__"]
 
 
 class Agent:
@@ -77,15 +78,13 @@ class Agent:
     async def remote_toolset(
             self,
             service_id_or_name: str,
-            server_host: str = DEFAULT_SERVER_HOST,
-            server_port: int = DEFAULT_SERVER_PORT,
+            server_url: str = DEFAULT_SERVER_URL,
             **kwargs,
             ):
         """Add a remote toolset to the agent."""
         s = await connect_remote(
             service_id_or_name,
-            server_host,
-            server_port,
+            server_url,
             **kwargs,
         )
         self.toolset_proxies[s.service_info.service_id] = s
@@ -105,7 +104,7 @@ class Agent:
                 desc = parse_func(func)
             func_dict = desc_to_openai_dict(
                 desc,
-                skip_params=[__CTX_VARS_NAME__, "__client_id__"],
+                skip_params=__SKIP_PARAMS__,
                 litellm_mode=litellm_mode,
             )
             functions.append(func_dict)
@@ -115,7 +114,7 @@ class Agent:
                 self._func_to_proxy[name] = proxy.service_info.service_id
                 func_dict = desc_to_openai_dict(
                     desc,
-                    skip_params=[__CTX_VARS_NAME__, "__client_id__"],
+                    skip_params=__SKIP_PARAMS__,
                     litellm_mode=litellm_mode,
                 )
                 functions.append(func_dict)
@@ -151,6 +150,10 @@ class Agent:
                     assert func_name in self._func_to_proxy, \
                         f"Function `{func_name}` is not found in the toolset or local functions"
                     proxy = self.toolset_proxies[self._func_to_proxy[func_name]]
+                    service_info = await proxy.fetch_service_info()
+                    func_desc = service_info.functions_description[func_name]
+                    if "__agent_run__" in [v.name for v in func_desc.inputs]:
+                        params["__agent_run__"] = self.run
                     result = await asyncio.wait_for(
                         proxy.invoke(func_name, parameters=params),
                         timeout=timeout,
@@ -200,6 +203,9 @@ class Agent:
         tools = None
         if tool_use:
             tools = self._convert_functions(litellm_mode) or None
+
+        if process_chunk:
+            await run_func(process_chunk, {"begin": True})
 
         if not litellm_mode:
             complete_resp = await acompletion_openai(
@@ -270,6 +276,8 @@ class Agent:
                 if content:
                     parsed = Response.model_validate_json(content)
                     message["parsed"] = parsed.result
+
+            message["agent_name"] = self.name
 
             history.append(message)
             self.events_queue.put_nowait(message)
