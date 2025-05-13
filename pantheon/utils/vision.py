@@ -3,8 +3,12 @@ import base64
 from pathlib import Path
 
 from PIL import Image
+from pydantic import BaseModel
 
-from ..types import VisionInput
+
+class VisionInput(BaseModel):
+    images: list[str]
+    prompt: str
 
 
 def vision_input(prompt: str, image_paths: list[str] | str, from_path: bool = False) -> VisionInput:

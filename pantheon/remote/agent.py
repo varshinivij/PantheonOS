@@ -7,8 +7,7 @@ from magique.client import PyFunction
 from magique.ai.utils.remote import connect_remote
 from magique.ai.constant import DEFAULT_SERVER_URL
 
-from ..agent import Agent
-from ..types import AgentInput
+from ..agent import Agent, AgentInput
 
 
 class AgentService:

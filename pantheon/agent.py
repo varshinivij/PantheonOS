@@ -19,13 +19,33 @@ from .utils.llm import (
     remove_hidden_fields,
     acompletion_litellm,
 )
-from .utils.vision import vision_to_openai
-from .types import AgentResponse, ResponseDetails, AgentInput, AgentTransfer, VisionInput
+from .utils.vision import vision_to_openai, VisionInput
 from .memory import Memory
 
 
 __CTX_VARS_NAME__ = "context_variables"
 __SKIP_PARAMS__ = [__CTX_VARS_NAME__, "__client_id__", "__agent_run__"]
+
+
+class ResponseDetails(BaseModel):
+    messages: list[dict]
+    context_variables: dict
+
+
+class AgentResponse(BaseModel):
+    agent_name: str
+    content: Any
+    details: Any
+
+
+class AgentTransfer(BaseModel):
+    from_agent: str
+    to_agent: str
+    history: list[dict]
+    context_variables: dict
+
+
+AgentInput = str | BaseModel | AgentResponse | list[str | BaseModel | dict] | AgentTransfer | VisionInput
 
 
 class Agent:
@@ -90,7 +110,7 @@ class Agent:
         self.toolset_proxies[s.service_info.service_id] = s
         return self
 
-    def _convert_functions(self, litellm_mode: bool) -> list[dict]:
+    def _convert_functions(self, litellm_mode: bool, allow_transfer: bool) -> list[dict]:
         """Convert function to the format that the model can understand."""
         functions = []
 
@@ -102,6 +122,10 @@ class Agent:
                 )
             else:
                 desc = parse_func(func)
+            if not allow_transfer:
+                if desc.name.startswith("transfer_to_"):
+                    # NOTE: transfer function should start with `transfer_to_`
+                    continue
             func_dict = desc_to_openai_dict(
                 desc,
                 skip_params=__SKIP_PARAMS__,
@@ -153,7 +177,11 @@ class Agent:
                     service_info = await proxy.fetch_service_info()
                     func_desc = service_info.functions_description[func_name]
                     if "__agent_run__" in [v.name for v in func_desc.inputs]:
-                        params["__agent_run__"] = self.run
+                        async def agent_run(msg: AgentInput):
+                            resp = await self.run(msg, allow_transfer=False)
+                            return resp.content
+
+                        params["__agent_run__"] = agent_run
                     result = await asyncio.wait_for(
                         proxy.invoke(func_name, parameters=params),
                         timeout=timeout,
@@ -192,6 +220,7 @@ class Agent:
             tool_use: bool = True,
             response_format: Any | None = None,
             process_chunk: Callable | None = None,
+            allow_transfer: bool = True,
             ) -> dict:
         force_litellm = self.force_litellm
         messages = process_messages_for_model(messages, model)
@@ -202,7 +231,7 @@ class Agent:
 
         tools = None
         if tool_use:
-            tools = self._convert_functions(litellm_mode) or None
+            tools = self._convert_functions(litellm_mode, allow_transfer) or None
 
         if process_chunk:
             await run_func(process_chunk, {"begin": True})
@@ -243,6 +272,7 @@ class Agent:
         tool_use: bool = True,
         tool_timeout: int | None = None,
         model: str | None = None,
+        allow_transfer: bool = True,
     ) -> ResponseDetails | AgentTransfer:
         model = model or self.model
         response_format = response_format or self.response_format
@@ -269,6 +299,7 @@ class Agent:
                 tool_use=tool_use,
                 response_format=Response,
                 process_chunk=process_chunk,
+                allow_transfer=allow_transfer,
             )
 
             if Response is not None:
@@ -362,6 +393,7 @@ class Agent:
             update_memory: bool = True,
             tool_timeout: int | None = None,
             model: str | None = None,
+            allow_transfer: bool = True,
             ) -> AgentResponse | AgentTransfer:
         """Run the agent.
 
@@ -402,6 +434,7 @@ class Agent:
             process_step_message=process_step_message,
             tool_timeout=tool_timeout,
             model=model,
+            allow_transfer=allow_transfer,
         )
 
         if isinstance(details, AgentTransfer):
