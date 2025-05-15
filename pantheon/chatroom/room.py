@@ -178,15 +178,19 @@ class ChatRoom:
         process_chunk=None,
         process_step_message=None,
     ):
-        memory = await run_func(self.memory_manager.get_memory, chat_id)
-        resp = await self.team.run(
-            message,
-            memory=memory,
-            process_chunk=process_chunk,
-            process_step_message=process_step_message,
-        )
-        await run_func(self.memory_manager.save)
-        return {"success": True, "response": resp.content}
+        try:
+            memory = await run_func(self.memory_manager.get_memory, chat_id)
+            resp = await self.team.run(
+                message,
+                memory=memory,
+                process_chunk=process_chunk,
+                process_step_message=process_step_message,
+            )
+            await run_func(self.memory_manager.save)
+            return {"success": True, "response": resp.content}
+        except Exception as e:
+            logger.error(f"Error chatting: {e}")
+            return {"success": False, "message": str(e)}
 
     async def run(self, log_level: str = "INFO"):
         from loguru import logger
