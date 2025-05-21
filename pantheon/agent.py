@@ -43,6 +43,7 @@ class AgentTransfer(BaseModel):
     to_agent: str
     history: list[dict]
     context_variables: dict
+    init_message_length: int
 
 
 AgentInput = str | BaseModel | AgentResponse | list[str | BaseModel | dict] | AgentTransfer | VisionInput
@@ -338,6 +339,7 @@ class Agent:
                         to_agent=msg["content"],
                         history=history,
                         context_variables=context_variables,
+                        init_message_length=init_len,
                     )
 
         return ResponseDetails(
@@ -423,6 +425,7 @@ class Agent:
         response_format = response_format or self.response_format
         context_variables = context_variables or {}
         if isinstance(msg, AgentTransfer):
+            new_input_messages = []
             context_variables = msg.context_variables
 
         details = await self.run_stream(
@@ -438,6 +441,9 @@ class Agent:
         )
 
         if isinstance(details, AgentTransfer):
+            if self.use_memory and update_memory:
+                await run_func(memory.add_messages, new_input_messages)
+                await run_func(memory.add_messages, details.history[details.init_message_length:])
             return details
         else:
             final_msg = details.messages[-1]
