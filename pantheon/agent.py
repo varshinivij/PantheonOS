@@ -428,22 +428,30 @@ class Agent:
             new_input_messages = []
             context_variables = msg.context_variables
 
+        if update_memory:
+            await run_func(memory.add_messages, new_input_messages)
+            if process_step_message is not None:
+                async def _process_step_message(step_message: dict):
+                    await run_func(memory.add_messages, [step_message])
+                    await run_func(process_step_message, step_message)
+            else:
+                _process_step_message = process_step_message
+        else:
+            _process_step_message = process_step_message
+
         details = await self.run_stream(
             messages=messages,
             response_format=response_format,
             tool_use=tool_use,
             context_variables=context_variables,
             process_chunk=process_chunk,
-            process_step_message=process_step_message,
+            process_step_message=_process_step_message,
             tool_timeout=tool_timeout,
             model=model,
             allow_transfer=allow_transfer,
         )
 
         if isinstance(details, AgentTransfer):
-            if self.use_memory and update_memory:
-                await run_func(memory.add_messages, new_input_messages)
-                await run_func(memory.add_messages, details.history[details.init_message_length:])
             return details
         else:
             final_msg = details.messages[-1]
@@ -451,9 +459,6 @@ class Agent:
                 content = final_msg.get("parsed")
             else:
                 content = final_msg.get("content")
-            if self.use_memory and update_memory:
-                await run_func(memory.add_messages, new_input_messages)
-                await run_func(memory.add_messages, details.messages)
             return AgentResponse(
                 agent_name=self.name,
                 content=content,
