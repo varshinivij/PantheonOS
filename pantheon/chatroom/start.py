@@ -70,6 +70,7 @@ async def start_services(
         endpoint_service_id = endpoint.worker.service_id
         await asyncio.sleep(endpoint_wait_time)
 
+    endpoint_connect_params = endpoint_connect_params or {}
     endpoint = await connect_remote(endpoint_service_id, **endpoint_connect_params)
 
     agents = await agents_factory(endpoint)
