@@ -1,5 +1,7 @@
 import sys
+import asyncio
 from datetime import datetime
+from typing import Callable
 
 from magique.worker import MagiqueWorker
 from magique.ai import connect_remote
@@ -7,7 +9,7 @@ from magique.ai.constant import DEFAULT_SERVER_URL
 
 from ..agent import Agent
 from ..team import SwarmCenterTeam
-from ..memory import MemoryManager
+from ..memory import MemoryManager, Memory
 from ..remote.memory import RemoteMemoryManager
 from ..remote.agent import RemoteAgent
 from ..utils.misc import run_func
@@ -20,6 +22,88 @@ def default_triage_agent():
         instructions="You are a helpful assistant that can answer questions and help with tasks.",
         model="gpt-4.1",
     )
+
+
+class Thread:
+    def __init__(
+            self,
+            team: SwarmCenterTeam,
+            memory: Memory,
+            message: list[dict],
+            run_hook_timeout: int = 5,
+            ):
+        self.team = team
+        self.memory = memory
+        self.message = message
+        self._process_chunk_hooks: list[Callable] = []
+        self._process_step_message_hooks: list[Callable] = []
+        self.response = None
+        self.run_hook_timeout = run_hook_timeout
+
+    def add_chunk_hook(self, hook: Callable):
+        self._process_chunk_hooks.append(hook)
+
+    def add_step_message_hook(self, hook: Callable):
+        self._process_step_message_hooks.append(hook)
+
+    async def process_chunk(self, chunk: dict):
+        chunk["chat_id"] = self.memory.id
+        _coros = []
+        for hook in self._process_chunk_hooks:
+            async def _run_hook(hook: Callable, chunk: dict):
+                res = None
+                try:
+                    res = await asyncio.wait_for(
+                        run_func(hook, chunk),
+                        timeout=self.run_hook_timeout
+                    )
+                except Exception as e:
+                    logger.error(f"Error running process_chunk hook: {str(e)}")
+                    self._process_chunk_hooks.remove(hook)
+                return res
+            _coros.append(_run_hook(hook, chunk))
+        await asyncio.gather(*_coros)
+
+    async def process_step_message(self, step_message: dict):
+        step_message["chat_id"] = self.memory.id
+        _coros = []
+        for hook in self._process_step_message_hooks:
+            async def _run_hook(hook: Callable, step_message: dict):
+                res = None
+                try:
+                    res = await asyncio.wait_for(
+                        run_func(hook, step_message),
+                        timeout=self.run_hook_timeout
+                    )
+                except Exception as e:
+                    logger.error(f"Error running process_step_message hook: {str(e)}")
+                    self._process_step_message_hooks.remove(hook)
+                return res
+            _coros.append(_run_hook(hook, step_message))
+        await asyncio.gather(*_coros)
+
+    async def run(self):
+        try:
+            if len(self.memory.get_messages()) == 0:
+                # summary to get new name using LLM
+                prompt = "Please summarize the question to get a name for the chat: \n"
+                prompt += str(self.message)
+                prompt += "\n\nPlease directly return the name, no other text or explanation."
+                new_name = await self.team.run(prompt, use_memory=False, update_memory=False)
+                self.memory.name = new_name.content
+
+            resp = await self.team.run(
+                self.message,
+                memory=self.memory,
+                process_chunk=self.process_chunk,
+                process_step_message=self.process_step_message,
+            )
+            self.response = {"success": True, "response": resp.content, "chat_id": self.memory.id}
+        except Exception as e:
+            logger.error(f"Error chatting: {e}")
+            import traceback
+            traceback.print_exc()
+            self.response = {"success": False, "message": str(e), "chat_id": self.memory.id}
 
 
 class ChatRoom:
@@ -59,6 +143,7 @@ class ChatRoom:
         self.worker = MagiqueWorker(**_worker_params)
         self.setup_handlers()
         self.endpoint_connect_params = endpoint_connect_params or {}
+        self.threads: dict[str, Thread] = {}
 
     def setup_handlers(self):
         self.worker.register(self.create_chat)
@@ -71,6 +156,7 @@ class ChatRoom:
         self.worker.register(self.get_agents)
         self.worker.register(self.set_active_agent)
         self.worker.register(self.get_active_agent)
+        self.worker.register(self.attach_hooks)
 
     async def get_endpoint(self) -> dict:
         s = await connect_remote(
@@ -196,6 +282,26 @@ class ChatRoom:
                 "message": str(e),
                 }
 
+    async def attach_hooks(
+            self, chat_id: str,
+            process_chunk: Callable | None = None,
+            process_step_message: Callable | None = None,
+            wait: bool = True,
+            time_delta: int = 0.1,
+            ):
+        thread = self.threads.get(chat_id, None)
+        if thread is None:
+            return {"success": False, "message": "Chat doesn't have a thread"}
+        if process_chunk is not None:
+            thread.add_chunk_hook(process_chunk)
+        if process_step_message is not None:
+            thread.add_step_message_hook(process_step_message)
+        while wait:  # wait for thread end, for keep hooks alive
+            if chat_id not in self.threads:
+                break
+            await asyncio.sleep(time_delta)
+        return {"success": True, "message": "Hooks attached successfully"}
+
     async def chat(
         self,
         chat_id: str,
@@ -203,49 +309,22 @@ class ChatRoom:
         process_chunk=None,
         process_step_message=None,
     ):
-        try:
-            memory = await run_func(self.memory_manager.get_memory, chat_id)
-            memory.extra_data["running"] = True
-            memory.extra_data["last_activity_date"] = datetime.now().isoformat()
+        if chat_id in self.threads:
+            return {"success": False, "message": "Chat is already running"}
+        memory = await run_func(self.memory_manager.get_memory, chat_id)
+        memory.extra_data["running"] = True
+        memory.extra_data["last_activity_date"] = datetime.now().isoformat()
 
-            if len(memory.get_messages()) == 0:
-                # summary to get new name using LLM
-                prompt = "Please summarize the question to get a name for the chat: \n"
-                prompt += str(message)
-                prompt += "\n\nPlease directly return the name, no other text or explanation."
-                new_name = await self.team.run(prompt, use_memory=False, update_memory=False)
-                memory.name = new_name.content
+        thread = Thread(self.team, memory, message)
+        self.threads[chat_id] = thread
+        await self.attach_hooks(chat_id, process_chunk, process_step_message, wait=False)
+        await thread.run()
 
-            if process_chunk is not None:
-                async def _process_chunk(chunk: dict):
-                    chunk["chat_id"] = chat_id
-                    await run_func(process_chunk, chunk)
-            else:
-                _process_chunk = None
-
-            if process_step_message is not None:
-                async def _process_step_message(step_message: dict):
-                    step_message["chat_id"] = chat_id
-                    await run_func(process_step_message, step_message)
-            else:
-                _process_step_message = None
-
-            resp = await self.team.run(
-                message,
-                memory=memory,
-                process_chunk=_process_chunk,
-                process_step_message=_process_step_message,
-            )
-            return {"success": True, "response": resp.content, "chat_id": chat_id}
-        except Exception as e:
-            logger.error(f"Error chatting: {e}")
-            import traceback
-            traceback.print_exc()
-            return {"success": False, "message": str(e), "chat_id": chat_id}
-        finally:
-            memory.extra_data["running"] = False
-            memory.extra_data["last_activity_date"] = datetime.now().isoformat()
-            await run_func(self.memory_manager.save)
+        memory.extra_data["running"] = False
+        memory.extra_data["last_activity_date"] = datetime.now().isoformat()
+        await run_func(self.memory_manager.save)
+        del self.threads[chat_id]
+        return thread.response
 
     async def run(self, log_level: str = "INFO"):
         from loguru import logger
