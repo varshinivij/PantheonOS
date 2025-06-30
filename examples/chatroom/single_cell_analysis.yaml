@@ -49,7 +49,7 @@ single_cell_expert:
     - openai/gpt-4.1
   icon: 🧬
   toolsets:
-    - single_cell_python_env
+    - sc_analysis_python
     - file_manager
     - single-cell-python-packages-rag
     - web_browse
