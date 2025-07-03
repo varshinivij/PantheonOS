@@ -33,6 +33,8 @@ class ChatRoom:
         server_url: str | list[str] | None = None,
         endpoint_connect_params: dict | None = None,
         speech_to_text_model: str = "gpt-4o-mini-transcribe",
+        check_before_chat: Callable | None = None,
+        get_db_info: Callable | None = None,
     ):
         self.memory_dir = Path(memory_dir)
         self.memory_manager = MemoryManager(self.memory_dir)
@@ -75,6 +77,8 @@ class ChatRoom:
         self.endpoint_connect_params = endpoint_connect_params or {}
         self.speech_to_text_model = speech_to_text_model
         self.threads: dict[str, Thread] = {}
+        self.check_before_chat = check_before_chat
+        self.get_db_info = get_db_info
 
     async def setup_agents(self):
         endpoint = await connect_remote(
@@ -110,6 +114,14 @@ class ChatRoom:
         self.worker.register(self.get_active_agent)
         self.worker.register(self.attach_hooks)
         self.worker.register(self.speech_to_text)
+
+    async def get_db_info(self) -> dict:
+        if self.get_db_info is not None:
+            return {
+                "success": True,
+                "info": await self.get_db_info(),
+            }
+        return {"success": False, "message": "Not implemented"}
 
     async def get_endpoint(self) -> dict:
         s = await connect_remote(
@@ -290,6 +302,13 @@ class ChatRoom:
         process_chunk=None,
         process_step_message=None,
     ):
+        if self.check_before_chat is not None:
+            try:
+                await self.check_before_chat(chat_id, message)
+            except Exception as e:
+                logger.error(f"Error in check_before_chat: {e}")
+                return {"success": False, "message": str(e)}
+
         if chat_id in self.threads:
             return {"success": False, "message": "Chat is already running"}
         memory = await run_func(self.memory_manager.get_memory, chat_id)
