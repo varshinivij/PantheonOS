@@ -251,6 +251,10 @@ class ChatRoom:
                         if isinstance(message["raw_content"], dict):
                             if "base64_uri" in message["raw_content"]:
                                 del message["raw_content"]["base64_uri"]
+                            for _k in ['stdout', 'stderr']: # truncate large stdout/stderr outputs
+                                MAX_LENGTH = 10000
+                                if _k in message["raw_content"]:
+                                    message["raw_content"][_k] = message["raw_content"][_k][:MAX_LENGTH]
                     new_messages.append(message)
                 messages = new_messages
             return {"success": True, "messages": messages}
