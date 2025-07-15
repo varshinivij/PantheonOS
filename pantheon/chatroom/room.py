@@ -160,6 +160,7 @@ class ChatRoom:
             return {
                 "name": agent.name,
                 "instructions": agent.instructions,
+                "toolful": getattr(agent, "toolful", False),
                 "tools": [t for t in agent.functions.keys()],
                 "toolsets": [
                     {
