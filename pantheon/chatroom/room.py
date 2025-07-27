@@ -139,11 +139,6 @@ class ChatRoom:
 
     async def set_endpoint(self, endpoint_service_id: str) -> dict:
         try:
-            await connect_remote(
-                endpoint_service_id,
-                self.server_urls,
-                **self.endpoint_connect_params,
-            )
             self.endpoint_service_id = endpoint_service_id
             await self.setup_agents()
             return {"success": True, "message": "Endpoint set successfully"}
