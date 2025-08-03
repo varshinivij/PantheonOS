@@ -12,7 +12,6 @@ Base Team Class
    :members:
    :undoc-members:
    :show-inheritance:
-   :abstract:
 
 Team Types
 ----------

@@ -12,8 +12,7 @@ Agent Class
    :members:
    :undoc-members:
    :show-inheritance:
-
-   .. automethod:: __init__
+   :no-inherited-members:
 
 Constructor Parameters
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -62,11 +61,12 @@ Constructor Parameters
 Methods
 -------
 
-.. automethod:: pantheon.agent.Agent.tool
-.. automethod:: pantheon.agent.Agent.chat
-.. automethod:: pantheon.agent.Agent.run
-.. automethod:: pantheon.agent.Agent.remote_toolset
-.. automethod:: pantheon.agent.Agent.async_setup
+The Agent class provides the following key methods:
+
+- ``tool(func)``: Decorator to add a tool function to the agent
+- ``chat()``: Start an interactive chat session
+- ``run(messages)``: Run the agent with given messages
+- ``remote_toolset(service_id)``: Connect to a remote toolset
 
 Response Classes
 ----------------

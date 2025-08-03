@@ -153,14 +153,17 @@ Agents can transfer control to each other:
    if __name__ == "__main__":
        asyncio.run(main())
 
-Using the ChatRoom Service
---------------------------
+Creating and Configuring ChatRoom
+----------------------------------
 
-The ChatRoom service provides a web interface:
+The ChatRoom service provides a web interface for interacting with your agents:
+
+Basic ChatRoom Setup
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   # Start the chatroom
+   # Start the chatroom with default configuration
    export OPENAI_API_KEY=your_key
    python -m pantheon.chatroom
 
@@ -170,6 +173,83 @@ Then:
 2. Go to https://pantheon-ui.vercel.app/
 3. Paste the service ID and click "Connect"
 4. Start chatting with your agents!
+
+ChatRoom with Configuration File
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create a YAML configuration file to define your ChatRoom:
+
+.. code-block:: yaml
+
+   # chatroom_config.yaml
+   name: "Research Assistant ChatRoom"
+   description: "A chatroom with specialized research agents"
+   
+   agents:
+     - name: "researcher"
+       instructions: "You are an expert researcher who can search and analyze information."
+       model: "gpt-4o"
+       tools:
+         - "web_search"
+         - "web_crawl"
+   
+     - name: "writer"
+       instructions: "You are a technical writer who creates clear documentation."
+       model: "gpt-4o-mini"
+   
+   team:
+     type: "sequential"
+     agents: ["researcher", "writer"]
+
+Then start the ChatRoom with your configuration:
+
+.. code-block:: bash
+
+   python -m pantheon.chatroom --config chatroom_config.yaml
+
+Programmatic ChatRoom Creation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can also create ChatRooms programmatically:
+
+.. code-block:: python
+
+   import asyncio
+   from pantheon.chatroom import ChatRoom
+   from pantheon.agent import Agent
+   from pantheon.team import SequentialTeam
+   
+   async def main():
+       # Create agents
+       researcher = Agent(
+           name="researcher",
+           instructions="You are an expert researcher.",
+           model="gpt-4o"
+       )
+       
+       writer = Agent(
+           name="writer",
+           instructions="You are a technical writer.",
+           model="gpt-4o-mini"
+       )
+       
+       # Create team
+       team = SequentialTeam([researcher, writer])
+       
+       # Create and start ChatRoom
+       chatroom = ChatRoom(
+           name="Research ChatRoom",
+           team=team
+       )
+       
+       await chatroom.start()
+       print(f"ChatRoom started with ID: {chatroom.service_id}")
+       
+       # Keep the chatroom running
+       await asyncio.Event().wait()
+   
+   if __name__ == "__main__":
+       asyncio.run(main())
 
 Custom Tools
 ------------

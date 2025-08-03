@@ -1,87 +1,414 @@
 /* Custom styles for Pantheon Agents documentation */
 
-/* Enhanced code blocks for dark mode */
-@media (prefers-color-scheme: dark) {
-    .highlight pre {
-        background-color: #1e1e1e !important;
-    }
+/* ===== Typography and Base Styles ===== */
+:root {
+    /* Light mode colors */
+    --pantheon-primary: #2563eb;
+    --pantheon-primary-hover: #1d4ed8;
+    --pantheon-secondary: #7c3aed;
+    --pantheon-accent: #10b981;
+    --pantheon-code-bg: #f8fafc;
+    --pantheon-code-border: #e2e8f0;
+    --pantheon-inline-code-bg: #f1f5f9;
+    --pantheon-inline-code-color: #e11d48;
     
-    .highlight .linenos {
-        background-color: #2d2d2d !important;
+    /* Syntax highlighting colors for light mode */
+    --hl-keyword: #7c3aed;
+    --hl-string: #059669;
+    --hl-number: #dc2626;
+    --hl-comment: #64748b;
+    --hl-function: #2563eb;
+    --hl-class: #ea580c;
+    --hl-operator: #0f172a;
+    --hl-punctuation: #475569;
+}
+
+/* Dark mode color overrides */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --pantheon-primary: #60a5fa;
+        --pantheon-primary-hover: #93bbfc;
+        --pantheon-secondary: #a78bfa;
+        --pantheon-accent: #34d399;
+        --pantheon-code-bg: #1e293b;
+        --pantheon-code-border: #334155;
+        --pantheon-inline-code-bg: #334155;
+        --pantheon-inline-code-color: #f472b6;
+        
+        /* Syntax highlighting colors for dark mode */
+        --hl-keyword: #c084fc;
+        --hl-string: #4ade80;
+        --hl-number: #fb7185;
+        --hl-comment: #94a3b8;
+        --hl-function: #60a5fa;
+        --hl-class: #fbbf24;
+        --hl-operator: #e2e8f0;
+        --hl-punctuation: #cbd5e1;
     }
+}
+
+/* Better font rendering */
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+/* Enhanced headings */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+/* ===== Code Blocks - Light Mode ===== */
+.highlight {
+    border: 1px solid var(--pantheon-code-border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    margin: 1.5rem 0;
+}
+
+.highlight pre {
+    background-color: var(--pantheon-code-bg) !important;
+    padding: 1.25rem;
+    margin: 0;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.7;
+}
+
+/* Line numbers styling */
+.highlight .linenos {
+    background-color: var(--pantheon-code-bg) !important;
+    border-right: 1px solid var(--pantheon-code-border);
+    padding-right: 0.75rem;
+    margin-right: 0.75rem;
+    color: #94a3b8;
+    user-select: none;
+}
+
+/* Syntax highlighting for light mode */
+.highlight .k,     /* Keyword */
+.highlight .kd,    /* Keyword.Declaration */
+.highlight .kn,    /* Keyword.Namespace */
+.highlight .kp,    /* Keyword.Pseudo */
+.highlight .kr,    /* Keyword.Reserved */
+.highlight .kt {   /* Keyword.Type */
+    color: var(--hl-keyword) !important;
+    font-weight: 500;
+}
+
+.highlight .s,     /* String */
+.highlight .sb,    /* String.Backtick */
+.highlight .sc,    /* String.Char */
+.highlight .sd,    /* String.Doc */
+.highlight .s2,    /* String.Double */
+.highlight .se,    /* String.Escape */
+.highlight .sh,    /* String.Heredoc */
+.highlight .si,    /* String.Interpol */
+.highlight .sx,    /* String.Other */
+.highlight .sr,    /* String.Regex */
+.highlight .s1,    /* String.Single */
+.highlight .ss {   /* String.Symbol */
+    color: var(--hl-string) !important;
+}
+
+.highlight .m,     /* Number */
+.highlight .mb,    /* Number.Bin */
+.highlight .mf,    /* Number.Float */
+.highlight .mh,    /* Number.Hex */
+.highlight .mi,    /* Number.Integer */
+.highlight .mo {   /* Number.Oct */
+    color: var(--hl-number) !important;
+}
+
+.highlight .c,     /* Comment */
+.highlight .ch,    /* Comment.Hashbang */
+.highlight .cm,    /* Comment.Multiline */
+.highlight .c1,    /* Comment.Single */
+.highlight .cs {   /* Comment.Special */
+    color: var(--hl-comment) !important;
+    font-style: italic;
+}
+
+.highlight .n,     /* Name */
+.highlight .na,    /* Name.Attribute */
+.highlight .nb,    /* Name.Builtin */
+.highlight .bp,    /* Name.Builtin.Pseudo */
+.highlight .nc,    /* Name.Class */
+.highlight .no,    /* Name.Constant */
+.highlight .nd,    /* Name.Decorator */
+.highlight .ni,    /* Name.Entity */
+.highlight .ne,    /* Name.Exception */
+.highlight .nf,    /* Name.Function */
+.highlight .nl,    /* Name.Label */
+.highlight .nn {   /* Name.Namespace */
+    color: var(--hl-function) !important;
+}
+
+.highlight .o,     /* Operator */
+.highlight .ow {   /* Operator.Word */
+    color: var(--hl-operator) !important;
+    font-weight: 500;
+}
+
+.highlight .p {    /* Punctuation */
+    color: var(--hl-punctuation) !important;
+}
+
+/* Inline code */
+code.literal {
+    background-color: var(--pantheon-inline-code-bg) !important;
+    color: var(--pantheon-inline-code-color) !important;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-weight: 500;
+    border: 1px solid var(--pantheon-code-border);
+}
+
+/* Code block enhancements */
+.highlight:hover button.copybtn {
+    opacity: 1;
+}
+
+.highlight button.copybtn {
+    opacity: 0;
+    transition: opacity 0.2s;
+    background-color: var(--pantheon-primary);
+    color: white;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+}
+
+.highlight button.copybtn:hover {
+    background-color: var(--pantheon-primary-hover);
+}
+
+/* ===== Enhanced Components ===== */
+
+/* Links */
+a {
+    color: var(--pantheon-primary);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+a:hover {
+    color: var(--pantheon-primary-hover);
+    text-decoration: underline;
+}
+
+/* Admonitions */
+.admonition {
+    border-radius: 0.5rem;
+    margin: 1.5rem 0;
+    border: 1px solid;
+    overflow: hidden;
+}
+
+.admonition-title {
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+    margin: 0;
+}
+
+.admonition.note {
+    border-color: var(--pantheon-primary);
+    background-color: rgba(37, 99, 235, 0.05);
+}
+
+.admonition.note .admonition-title {
+    background-color: rgba(37, 99, 235, 0.1);
+    color: var(--pantheon-primary);
+}
+
+.admonition.warning {
+    border-color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.05);
+}
+
+.admonition.warning .admonition-title {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: #d97706;
+}
+
+.admonition.tip {
+    border-color: var(--pantheon-accent);
+    background-color: rgba(16, 185, 129, 0.05);
+}
+
+.admonition.tip .admonition-title {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: #059669;
 }
 
 /* Grid cards enhancement */
 .sd-card {
     transition: transform 0.2s, box-shadow 0.2s;
+    border-radius: 0.5rem;
+    border: 1px solid var(--color-background-border);
 }
 
 .sd-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    border-color: var(--pantheon-primary);
 }
 
-/* Dark mode grid cards */
-@media (prefers-color-scheme: dark) {
-    .sd-card:hover {
-        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
-    }
-}
-
-/* Admonition styling */
-.admonition {
-    border-radius: 0.25rem;
-    margin: 1rem 0;
-}
-
-/* Copy button enhancement */
-.highlight button.copybtn {
-    transition: opacity 0.2s;
-}
-
-/* Mermaid diagram support */
-.mermaid {
-    text-align: center;
-    margin: 1rem 0;
-}
-
-@media (prefers-color-scheme: dark) {
-    .mermaid {
-        filter: invert(0.85) hue-rotate(180deg);
-    }
-}
-
-/* Enhanced navigation */
-.sidebar-drawer {
-    transition: all 0.3s ease;
-}
-
-/* Better spacing for API docs */
-.py.class, .py.function, .py.method {
-    margin-top: 2rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--color-background-border);
-}
-
-/* Logo adjustments */
-.sidebar-logo {
-    max-width: 200px;
-    margin: 0 auto;
-}
-
-/* Enhanced search */
-.sidebar-search-container {
-    margin-bottom: 1rem;
-}
-
-/* Responsive tables */
+/* Tables */
 table {
     display: block;
     overflow-x: auto;
-    margin: 1rem 0;
+    margin: 1.5rem 0;
+    border-collapse: collapse;
+    font-size: 0.875rem;
 }
 
-/* Print styles */
+table th {
+    background-color: var(--pantheon-code-bg);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 2px solid var(--pantheon-code-border);
+}
+
+table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--pantheon-code-border);
+}
+
+table tr:hover {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+    table tr:hover {
+        background-color: rgba(255, 255, 255, 0.02);
+    }
+}
+
+/* ===== Sidebar and Navigation ===== */
+
+/* Logo adjustments */
+.sidebar-logo {
+    max-width: 120px;
+    margin: 0 auto;
+}
+
+.sidebar-brand img {
+    max-width: 120px;
+    height: auto;
+    margin-bottom: 0.5rem;
+}
+
+.sidebar-brand {
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.sidebar-brand-text {
+    margin-top: 0;
+    font-weight: 700;
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
+}
+
+.sidebar-logo-container {
+    margin-bottom: 0.5rem;
+}
+
+/* Sidebar navigation */
+.sidebar-tree .reference {
+    transition: color 0.2s, padding-left 0.2s;
+}
+
+.sidebar-tree .reference:hover {
+    color: var(--pantheon-primary);
+    padding-left: 0.25rem;
+}
+
+.sidebar-tree .current > .reference {
+    color: var(--pantheon-primary);
+    font-weight: 600;
+}
+
+/* Search enhancement */
+.sidebar-search-container {
+    margin-bottom: 1.5rem;
+}
+
+.sidebar-search-container input {
+    border-radius: 0.375rem;
+    border: 1px solid var(--color-sidebar-search-border);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sidebar-search-container input:focus {
+    border-color: var(--pantheon-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* ===== API Documentation ===== */
+
+.py.class, .py.function, .py.method {
+    margin-top: 2.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-background-border);
+}
+
+.sig-name {
+    font-weight: 600;
+    color: var(--pantheon-primary);
+}
+
+.sig-param {
+    color: var(--hl-function);
+}
+
+.sig-return-typehint {
+    color: var(--hl-class);
+}
+
+/* ===== Responsive Design ===== */
+
+@media (max-width: 768px) {
+    .highlight pre {
+        padding: 1rem;
+        font-size: 0.8125rem;
+    }
+    
+    table {
+        font-size: 0.8125rem;
+    }
+    
+    table th,
+    table td {
+        padding: 0.5rem 0.75rem;
+    }
+}
+
+/* ===== Animations ===== */
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* ===== Print Styles ===== */
+
 @media print {
     .sidebar-drawer, .mobile-header, .prev-next-area {
         display: none !important;
@@ -93,5 +420,44 @@ table {
     
     main {
         max-width: 100% !important;
+    }
+    
+    .highlight {
+        border: 1px solid #000;
+    }
+    
+    code.literal {
+        border: 1px solid #000;
+        background-color: #f0f0f0 !important;
+        color: #000 !important;
+    }
+}
+
+/* ===== Miscellaneous Enhancements ===== */
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Better focus styles */
+:focus-visible {
+    outline: 2px solid var(--pantheon-primary);
+    outline-offset: 2px;
+}
+
+/* Mermaid diagram support */
+.mermaid {
+    text-align: center;
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background-color: var(--pantheon-code-bg);
+    border: 1px solid var(--pantheon-code-border);
+    border-radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mermaid {
+        filter: invert(0.85) hue-rotate(180deg);
     }
 }

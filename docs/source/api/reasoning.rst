@@ -14,6 +14,7 @@ The reasoning module enables agents to use advanced reasoning models like O1, Ge
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Reasoning Models
 ----------------

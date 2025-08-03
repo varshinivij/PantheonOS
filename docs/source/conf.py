@@ -40,9 +40,9 @@ exclude_patterns = []
 
 html_theme = 'furo'
 html_static_path = ['_static']
-html_title = "Pantheon Agents"
-# Logo and favicon will be added when available
-# html_logo = "_static/logo.png"  
+html_title = "Pantheon"
+# Logo configuration
+html_logo = "_static/pantheon.png"
 # html_favicon = "_static/favicon.ico"
 html_css_files = ['custom.css']
 

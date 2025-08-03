@@ -100,7 +100,16 @@ Simple Agent Example
 .. toctree::
    :hidden:
    :maxdepth: 2
-   :caption: Getting Started
+   :caption: Home
+
+   overview
+   highlights
+   architecture
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Quick Start
 
    installation
    quickstart
@@ -108,26 +117,76 @@ Simple Agent Example
 .. toctree::
    :hidden:
    :maxdepth: 2
-   :caption: User Guide
+   :caption: Concepts
 
-   guides/index
-   guides/agents
-   guides/teams
-   guides/chatroom
+   concepts/index
+   concepts/agent
+   concepts/team
+   concepts/memory
+   concepts/toolset
+   concepts/endpoint
+   concepts/chatroom
 
 .. toctree::
    :hidden:
    :maxdepth: 2
-   :caption: Examples
+   :caption: Agent
 
-   examples/index
+   agent/index
+   agent/agent_api
+   agent/smart_func_api
+   agent/remote_agent
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Team
+
+   team/index
+   team/sequential_team
+   team/moa_team
+   team/swarm_team
+   team/swarm_center_team
+   team/pantheon_team
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Toolsets
+
+   toolsets/index
+   toolsets/python_interpreter
+   toolsets/r_interpreter
+   toolsets/shell
+   toolsets/web_browse
+   toolsets/scraper_api
+   toolsets/file_editor
+   toolsets/vector_rag
+   toolsets/rag_system
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Endpoint and Chatroom
+
+   endpoint_chatroom/index
+   endpoint_chatroom/architecture
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Development
+   :caption: Contribution Guide
 
    contributing
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+   :caption: Additional Resources
+
+   api/index
+   guides/index
+   examples/index
 
 Indices and tables
 ==================
