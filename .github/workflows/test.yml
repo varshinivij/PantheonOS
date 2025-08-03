@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "*" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -35,8 +35,34 @@ jobs:
         python -m playwright install --with-deps chromium
         pip install -e .[dev]
 
+    - name: Start Magique server in background
+      run: |
+        python -m magique.server --port 8765 > server.log 2>&1 &
+        echo $! > server.pid
+        sleep 5  # Give the server time to start
+        
+        # Verify server is running by checking if process is alive
+        if kill -0 $(cat server.pid) 2>/dev/null; then
+          echo "Magique server started successfully (PID: $(cat server.pid))"
+          echo "Server log:"
+          tail -10 server.log
+        else
+          echo "Server process failed to start, checking logs:"
+          cat server.log
+          exit 1
+        fi
+
     - name: Run tests
       env:
+        MAGIQUE_SERVER_URL: ws://localhost:8765/ws
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         pytest -s tests/
+
+    - name: Stop Magique server
+      if: always()
+      run: |
+        if [ -f server.pid ]; then
+          kill $(cat server.pid) || true
+          echo "Magique server stopped"
+        fi
