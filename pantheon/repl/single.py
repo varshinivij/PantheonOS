@@ -15,6 +15,7 @@ from rich.columns import Columns
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.syntax import Syntax
+from rich.layout import Layout
 
 # Simple readline support for history
 try:
@@ -28,6 +29,14 @@ from ..agent import Agent
 from ..remote.agent import RemoteAgent
 from ..utils.misc import print_agent_message, print_agent, print_banner, print_agent_message_modern_style
 
+# Import toolsets from pantheon-toolsets
+try:
+    from pantheon.toolsets.python import PythonInterpreterToolSet
+    PYTHON_TOOLSET_AVAILABLE = True
+except ImportError:
+    PYTHON_TOOLSET_AVAILABLE = False
+    print("Warning: PythonInterpreterToolSet not available. Install pantheon-toolsets for Python execution.")
+
 
 class Repl:
     """REPL for a single agent.
@@ -35,7 +44,7 @@ class Repl:
     Args:
         agent: The agent to use for the REPL.
     """
-    def __init__(self, agent: Agent | RemoteAgent):
+    def __init__(self, agent: Agent | RemoteAgent, enable_python: bool = True):
         self.agent = agent
         self.console = Console()
         self.current_task = None
@@ -49,14 +58,46 @@ class Repl:
         self.current_input_tokens = 0
         self.current_output_tokens = 0
         
+        # Processing status tracking
+        self._current_live_display = None
+        self._tools_executing = False
+        
         # Setup history file
         self.history_file = Path.home() / ".pantheon_history"
         self.command_history = []
         self.history_index = -1
         
+        # Setup Python toolset if available and enabled
+        self.python_enabled = enable_python and PYTHON_TOOLSET_AVAILABLE
+        if self.python_enabled:
+            self._setup_python_toolset()
+        
         # Setup input system
         self._setup_input_system()
         self._load_history()
+        
+        # Simple fixed input panel at bottom
+        self.input_panel = Panel(
+            Text("Type your message here...", style="dim"),
+            title="Input",
+            border_style="bright_blue"
+        )
+
+    def _setup_python_toolset(self):
+        """Setup Python toolset for code execution"""
+        try:
+            self.python_toolset = PythonInterpreterToolSet("python_interpreter")
+            # Claude Code style is handled by the toolset itself
+            self.agent.toolset(self.python_toolset)
+            self.console.print("[dim]Python execution enabled[/dim]")
+        except Exception as e:
+            self.console.print(f"[dim]Warning: Failed to setup Python toolset: {e}[/dim]")
+            self.python_enabled = False
+            self.python_toolset = None
+
+    def _setup_shell_toolset_callback(self):
+        """Setup shell toolset callback - simplified"""
+        pass
 
     async def print_greeting(self):
         await print_banner(self.console)
@@ -71,40 +112,80 @@ class Repl:
         if hasattr(self.agent, 'models') and self.agent.models:
             model = self.agent.models[0] if isinstance(self.agent.models, list) else self.agent.models
             agent_info += f" [dim]•[/dim] [yellow]{model}[/yellow]"
+        
         self.console.print(agent_info)
         self.console.print("[dim]Type your message, 'exit' to quit, or 'help' for commands[/dim]")
         if READLINE_AVAILABLE:
             self.console.print("[dim]Use ↑/↓ arrows for command history[/dim]")
         self.console.print()
 
-    def print_tool_call(self, tool_name: str, args: str):
-        """Print tool call in Claude Code style"""
-        self.console.print(f"[dim]▶ Using {tool_name}[/dim]")
+    def print_tool_call(self, tool_name: str, args: dict = None):
+        """Print tool call in simple style (toolsets handle their own display)"""
+        # Mark that tools are executing
+        self._tools_executing = True
         
-    def print_tool_result(self, result: str, truncate: bool = True):
-        """Print tool result in a clean format"""
-        if truncate and len(result) > 500:
-            result = result[:500] + "..."
+        # Python and Shell toolsets now handle their own Claude Code style display
+        # Shell tools: run_command, run_command_in_shell, new_shell, close_shell, get_shell_output
+        # Python tools: run_code, run_code_in_interpreter
+        shell_tools = ["run_command", "run_command_in_shell", "new_shell", "close_shell", "get_shell_output"]
+        python_tools = ["run_code", "run_code_in_interpreter"]
         
-        # Try to format as JSON if possible
-        try:
-            parsed = json.loads(result)
-            formatted_result = json.dumps(parsed, indent=2)
-            self.console.print(Syntax(formatted_result, "json", theme="monokai", line_numbers=False))
-        except (json.JSONDecodeError, TypeError):
-            # If not JSON, print as regular text with syntax highlighting if it looks like code
-            if any(keyword in result.lower() for keyword in ['def ', 'import ', 'class ', 'function', '#!/']):
-                self.console.print(Syntax(result, "python", theme="monokai", line_numbers=False))
-            else:
-                self.console.print(f"[dim]{result}[/dim]")
+        if tool_name not in shell_tools + python_tools:
+            self.console.print(f"[dim]▶ Using {tool_name}[/dim]")
+        
+    def print_tool_result(self, tool_name: str, result: dict):
+        """Print tool result (toolsets handle their own display)"""
+        # Python and Shell toolsets now handle their own results display
+        # Shell tools: run_command, run_command_in_shell, new_shell, close_shell, get_shell_output
+        # Python tools: run_code, run_code_in_interpreter
+        shell_tools = ["run_command", "run_command_in_shell", "new_shell", "close_shell", "get_shell_output"]
+        python_tools = ["run_code", "run_code_in_interpreter"]
+        
+        if tool_name not in shell_tools + python_tools:
+            # Generic tool result handling for other tools
+            result_str = str(result)
+            if len(result_str) > 1000:
+                result_str = result_str[:1000] + "..."
+            self.console.print(f"[dim]{result_str}[/dim]")
 
     async def print_message(self):
         """Enhanced message handler with Claude Code style formatting"""
         while True:
             message = await self.agent.events_queue.get()
             
-            # Skip tool calls and responses - we handle content in main loop
-            if message.get("tool_calls") or message.get("role") == "tool":
+            # Handle tool calls with Claude Code style
+            if tool_calls := message.get("tool_calls"):
+                for call in tool_calls:
+                    tool_name = call.get('function', {}).get('name')
+                    if tool_name:
+                        try:
+                            args = json.loads(call.get('function', {}).get('arguments', '{}'))
+                        except:
+                            args = {}
+                        self.print_tool_call(tool_name, args)
+                continue
+                
+            # Handle tool responses with enhanced formatting
+            elif message.get("role") == "tool":
+                tool_name = message.get("tool_name", "")
+                content = message.get("content", "")
+                
+                # Shell and Python tools handle their own display, skip raw output
+                shell_tools = ["run_command", "run_command_in_shell", "new_shell", "close_shell", "get_shell_output"]
+                python_tools = ["run_code", "run_code_in_interpreter"]
+                
+                if tool_name in shell_tools + python_tools:
+                    # Skip displaying results for shell/python tools - they handle their own display
+                    pass
+                else:
+                    try:
+                        # Try to parse as JSON for structured results
+                        result = json.loads(content)
+                        self.print_tool_result(tool_name, result)
+                    except:
+                        # Fallback to raw content for other tools
+                        if content.strip():
+                            self.console.print(f"[dim]{content}[/dim]")
                 continue
                 
             # Skip assistant messages - we handle them in main loop via content_buffer
@@ -158,10 +239,21 @@ class Repl:
             self._save_history()
             self.history_index = len(self.command_history)
     
+    def show_input_panel(self):
+        """Show the input panel at bottom"""
+        self.console.print("\n")
+        self.console.print(self.input_panel)
+
     def ask_user_input(self) -> str:
-        """Get user input with simple Claude-style prompt"""
+        """Get user input with simple input panel"""
         try:
-            return input('> ')
+            # Show input panel
+            self.show_input_panel()
+            
+            # Get input from user
+            user_input = Prompt.ask("[bright_blue]>[/bright_blue]", console=self.console)
+            
+            return user_input.strip()
         except (KeyboardInterrupt, EOFError):
             raise
     
@@ -198,19 +290,22 @@ class Repl:
         loguru.logger.remove()
         loguru.logger.add(sys.stdout, level="WARNING")
 
+        # Set up shell toolset callback now that agent is fully configured
+        self._setup_shell_toolset_callback()
+
+        # Simple greeting 
         await self.print_greeting()
+        
+        # Start the message printing task
         print_task = asyncio.create_task(self.print_message())
 
         # Handle initial message if provided
-        initial_message = message
-        if initial_message is not None:
-            self.console.print(f"> {initial_message}")
-            self._add_to_history(initial_message)
+        current_message = message
+        if current_message is not None:
+            self._add_to_history(current_message)
 
         # Main message processing loop
-        current_message = initial_message
-        
-        while True:
+        while True:            
             # Get message (either initial message or new user input)
             if current_message is None:
                 try:
@@ -259,7 +354,7 @@ class Repl:
             input_tokens = self._estimate_tokens(current_message)
             output_tokens = 0
             
-            # Create live status with real-time token tracking
+            # Create live status with real-time token tracking (Claude Code style)
             content_buffer = []
             
             def process_chunk(chunk: dict):
@@ -267,32 +362,48 @@ class Repl:
                 if content is not None:
                     content_buffer.append(content)
 
-            # Use Live display for real-time token updates
-            with Live(console=self.console, refresh_per_second=4) as live:
-                def update_live_display():
+            # Tetris-style animation frames (different from Claude's *)
+            animation_frames = ["▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩"]
+            frame_index = 0
+            
+            # Show Processing message immediately after user input (Claude Code style)
+            processing_live = Live(console=self.console, refresh_per_second=4)
+            processing_live.start()
+            
+            try:
+                def update_processing_status():
+                    nonlocal frame_index
                     current_output_tokens = self._estimate_tokens(''.join(content_buffer))
                     elapsed = time.time() - start_time
                     
-                    # Create processing message with real-time token info
-                    status_text = f"[dim]Processing... • {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    # Create processing message with animated tetris block and real-time token info
+                    current_frame = animation_frames[frame_index % len(animation_frames)]
+                    status_text = f"[dim]{current_frame} Processing... • {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
                     if elapsed > 1:
                         status_text += f" • {elapsed:.1f}s"
                     status_text += "[/dim]"
                     
-                    live.update(Text.from_markup(status_text))
+                    processing_live.update(Text.from_markup(status_text))
+                    frame_index += 1
 
                 try:
-                    # Initial display
-                    update_live_display()
+                    # Initial processing status display
+                    update_processing_status()
                     
-                    # Custom process_chunk that updates display
-                    def live_process_chunk(chunk: dict):
-                        process_chunk(chunk)  # Original processing
-                        update_live_display()  # Update display
+                    # Track if tools are executing
+                    self._tools_executing = False
                     
+                    def smart_process_chunk(chunk: dict):
+                        # Store content
+                        process_chunk(chunk)
+                        # Only update processing status if no tools are executing
+                        if not self._tools_executing:
+                            update_processing_status()
+                    
+                    # Process with agent - tool outputs will display independently
                     await self.agent.run(
                         current_message,
-                        process_chunk=live_process_chunk,
+                        process_chunk=smart_process_chunk,
                     )
                     
                     # Final output token calculation
@@ -306,20 +417,33 @@ class Repl:
                     self.message_count += 1
                     
                 except KeyboardInterrupt:
-                    live.stop()
                     self.console.print("\n[yellow]Interrupted by user[/yellow]")
                     current_message = None  # Reset to get new input
                     continue
                 except Exception as e:
-                    live.stop()
-                    self.console.print(f"[red]Error:[/red] {str(e)}")
+                    self.console.print(f"\n[red]Error:[/red] {str(e)}")
                     self.console.print("[dim]You can continue the conversation or type 'exit' to quit[/dim]")
+                finally:
+                    # Stop processing display
+                    processing_live.stop()
+                    self._tools_executing = False
+            finally:
+                # Ensure processing is stopped
+                if 'processing_live' in locals():
+                    processing_live.stop()
+            
+            # Processing is complete - clear the status line and show final content
+            self.console.print()  # Clear processing status with newline
             
             # Print accumulated content after processing
             if content_buffer:
                 full_content = ''.join(content_buffer)
                 if full_content.strip():
-                    self.console.print(Markdown(full_content))
+                    # Check if content contains code blocks - if so, use plain text
+                    if '```' in full_content or 'def ' in full_content or 'import ' in full_content:
+                        self.console.print(full_content)
+                    else:
+                        self.console.print(Markdown(full_content))
             
             self.console.print()  # Add spacing
             current_message = None  # Reset to get new input
@@ -344,7 +468,10 @@ class Repl:
         self.console.print("\n[bold]Examples:[/bold]")
         self.console.print("[dim]analyze single cell data[/dim]")
         self.console.print("[dim]run quality control[/dim]")
-        self.console.print("[dim]create UMAP plot[/dim]\n")
+        self.console.print("[dim]create UMAP plot[/dim]")
+        if self.python_enabled:
+            self.console.print("[dim]write python script to calculate statistics[/dim]")
+        self.console.print()
     
     def _print_history(self):
         """Print recent command history"""
