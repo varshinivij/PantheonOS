@@ -691,11 +691,11 @@ class Agent:
         should_inject_context = self._should_inject_context_variables(prefixed_name)
 
         async def _call_agent_wrap(
-                messages: list,
-                system_prompt: str | None = None,
-                model: str | None = None,
-                use_memory: bool = False,
-                ) -> dict:
+            messages: list,
+            system_prompt: str | None = None,
+            model: str | None = None,
+            use_memory: bool = False,
+        ) -> dict:
             if use_memory:
                 memory = self.memory[:-1]
             else:
@@ -1443,8 +1443,13 @@ class Agent:
         # ============ Unified message processing: Always detect attachments ============
         async def _process_step_message(step_message: dict):
             # Get execution_context_id from ExecutionContext
-            if exec_context.execution_context_id is not None:
-                step_message["execution_context_id"] = exec_context.execution_context_id
+            if (
+                exec_context.execution_context_id is not None
+                and "execution_context_id" not in step_message
+            ):
+                step_message["execution_context_id"] = (
+                    exec_context.execution_context_id
+                )
 
             await _detect_attachments(step_message)
 
@@ -1458,7 +1463,10 @@ class Agent:
                     logger.error(f"Error in process_step_message: {e}")
 
         async def _process_chunk(chunk: dict):
-            if exec_context.execution_context_id is not None:
+            if (
+                exec_context.execution_context_id is not None
+                and "execution_context_id" not in chunk
+            ):
                 chunk["execution_context_id"] = exec_context.execution_context_id
             if process_chunk is not None:
                 try:

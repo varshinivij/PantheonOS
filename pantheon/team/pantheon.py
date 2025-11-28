@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 
@@ -13,6 +14,93 @@ from ..memory import Memory
 from ..utils.log import logger
 from ..utils.misc import run_func
 from .base import Team
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return slug or "agent"
+
+
+def _build_execution_context_id(
+    parent_metadata: dict,
+    run_context,
+    depth: int,
+    target_name: str,
+) -> str:
+    """Return ID formatted as '<root>|d<depth>|<agent>|<rand4>'.
+
+    - root: derived from parent's execution_context_id or caller memory id
+    - depth: current delegation depth
+    - agent: safe version of the child agent name
+    - rand4: short random suffix to keep IDs unique even for parallel calls
+    """
+
+    def _extract_root_token() -> str:
+        execution_context_id = parent_metadata.get("execution_context_id")
+        if execution_context_id and "|" in execution_context_id:
+            return execution_context_id.split("|", 1)[0]
+
+        memory = getattr(run_context, "memory", None)
+        memory_id = getattr(memory, "id", "memory")
+        mem_prefix = str(memory_id)[:8] if memory_id else "memory"
+        return f"{mem_prefix}-{uuid.uuid4().hex[:6]}"
+
+    root_token = _extract_root_token()
+
+    return "|".join(
+        [
+            root_token,
+            f"d{depth}",
+            _slugify(target_name),
+            uuid.uuid4().hex[:4],
+        ]
+    )
+
+
+def _build_child_context_metadata(
+    run_context,
+    target_agent: Agent,
+    context_variables: dict,
+    max_depth: int = 5,
+) -> dict:
+    if run_context is None:
+        raise RuntimeError(
+            "call_agent must be executed within an active agent tool call"
+        )
+    parent_metadata = context_variables.get("_metadata") or {}
+    parent_path = parent_metadata.get("chain_path")
+    if parent_path:
+        chain_path = list(parent_path)
+    else:
+        chain_path = [run_context.agent.name]
+    if target_agent.name in chain_path:
+        raise RuntimeError(
+            "Delegation loop detected: this agent already appears in the current chain."
+        )
+    chain_path.append(target_agent.name)
+
+    child_depth = max(len(chain_path) - 1, 0)
+    if child_depth > max_depth:
+        raise RuntimeError("Delegation depth limit reached.")
+
+    execution_context_id = _build_execution_context_id(
+        parent_metadata, run_context, child_depth, target_agent.name
+    )
+
+    tool_call_id = context_variables.get("tool_call_id") or (
+        "call_" + uuid.uuid4().hex[:12]
+    )
+
+    metadata = {
+        "execution_context_id": execution_context_id,
+        "chain_path": chain_path,
+        "parent": {
+            "agent": run_context.agent.name,
+            "call_id": tool_call_id,
+        },
+    }
+
+    return metadata
 
 
 class PantheonTeam(Team):
@@ -37,6 +125,7 @@ class PantheonTeam(Team):
         agents: list[Agent | RemoteAgent],
         sub_agents: list[Agent | RemoteAgent] = None,
         use_summary: bool = False,
+        max_delegate_depth: int | None = 5,
     ):
         """Initialize PantheonTeam with clear agent type separation.
 
@@ -56,6 +145,7 @@ class PantheonTeam(Team):
         self.team_agents = agents  # Main team agents
         self.sub_agents = sub_agents or []  # Track sub-agents separately
         self.use_summary = use_summary
+        self.max_delegate_depth = max_delegate_depth
 
         # Initialize parent with all agents (team + sub)
         all_agents = agents + (sub_agents or [])
@@ -68,19 +158,16 @@ class PantheonTeam(Team):
         self.has_transfer_agents = len(self.team_agents) > 1  # More than just one agent
         self.has_sub_agents = len(self.sub_agents) > 0
 
-        # Mark all agents as capable of delegating if there are other agents
+        # Mark all agents as capable of delegating. Sub-agents stay in SUBAGENT mode
+        # but can now coordinate with peers through call_agent.
         for agent in self.team_agents:
             if isinstance(agent, Agent):
                 agent.system_prompt_mode = SystemPromptMode.FULL
-                agent.can_delegate = self.has_transfer_agents or self.has_sub_agents
-        # Configure sub-agents to use SUBAGENT mode (streamlined for direct execution)
-        # and ensure they cannot delegate to other agents
+                agent.can_delegate = True
         for agent in self.sub_agents:
             if isinstance(agent, Agent):
-                # Force SUBAGENT mode for sub-agents
                 agent.system_prompt_mode = SystemPromptMode.SUBAGENT
-                # Prevent sub-agents from delegating (no second-level delegation)
-                agent.can_delegate = False
+                agent.can_delegate = True
 
         # Keep triage reference for backward compatibility (it's the first agent)
         self.triage = self.team_agents[0]
@@ -99,75 +186,53 @@ class PantheonTeam(Team):
     def set_active_agent(self, memory: Memory, agent_name: str):
         memory.extra_data["active_agent"] = agent_name
 
-    def list_agents_descriptions(self) -> list[dict]:
-        """Get structured information about all available sub-agents.
-
-        Returns only sub-agent name and description - agents use this
-        to discover which teammates can be delegated to via call_agent().
-
-        Returns:
-            List of dicts with sub-agent name and description only.
-        """
-        agents_info = []
-        for agent_name, agent in self.agents.items():
-            # Only include sub-agents (not main agents)
-            if agent_name not in self._sub_agent_names:
-                continue
-            # convert agent name to lower case
-            agent_name = agent_name.replace(" ", "_").lower()
-            agent_info = {
-                "name": agent_name,
-            }
-
-            # Add description if available (main focus for parent agent)
-            if hasattr(agent, "description") and agent.description:
-                agent_info["description"] = agent.description
-
-            agents_info.append(agent_info)
-
-        return agents_info
-
     async def add_list_agents_tool(self):
-        """Add list_agents() tool to all agents.
+        """Add list_agents() tool to all agents."""
 
-        This tool allows agents to dynamically discover available sub-agents
-        at runtime without hardcoded knowledge of the team composition.
-        """
+        # Add list_agents() to all agents (team + sub) so everyone can discover peers
+        def get_agents_info(exclude_slug: str | None = None) -> list[dict]:
+            agents_info = []
+            for agent_name, agent in self.agents.items():
+                if agent_name not in self._sub_agent_names:
+                    continue
+                slug = _slugify(agent_name)
+                if slug == exclude_slug:
+                    continue
+                info = {"name": slug}
+                if hasattr(agent, "description") and agent.description:
+                    info["description"] = agent.description
+                agents_info.append(info)
+            return agents_info
 
-        def list_agents():
-            """List all available sub-agents and their capabilities."""
-            agents_info = self.list_agents_descriptions()
-            if not agents_info:
-                return "No sub-agents available."
+        for agent in self.team_agents + self.sub_agents:
+            caller_slug = _slugify(agent.name)
 
-            # Format for readability - show name and description only
-            output = "**Available Sub-Agents:**\n\n"
-            for agent in agents_info:
-                output += f"- **{agent['name']}**"
-                if "description" in agent:
-                    output += f": {agent['description']}"
-                output += "\n"
+            def list_agents():
+                """List all available sub-agents and their capabilities."""
+                agents_info = get_agents_info(exclude_slug=caller_slug)
+                if not agents_info:
+                    return "No sub-agents available."
 
-            return output
+                output = "**Available Sub-Agents:**\n\n"
+                for info in agents_info:
+                    output += f"- **{info['name']}**"
+                    if "description" in info:
+                        output += f": {info['description']}"
+                    output += "\n"
 
-        list_agents.__name__ = "list_agents"
-        list_agents.__doc__ = (
-            "List all available sub-agents and their capabilities. "
-            "Use this to understand which agents you can delegate to via call_agent(). "
-            "Returns agent names and descriptions of their expertise."
-        )
+                return output
 
-        # Add list_agents() to all agents (not just triage)
-        for agent in self.team_agents:
+            list_agents.__name__ = "list_agents"
+            list_agents.__doc__ = (
+                "List all available sub-agents and their capabilities. "
+                "Use this to understand which agents you can delegate to via call_agent(). "
+                "Returns agent names and descriptions of their expertise."
+            )
+
             await run_func(agent.tool, list_agents)
 
     async def add_unified_call_agent_tool(self):
-        """Add unified call_agent(agent_name, instruction) tool for agents.
-
-        This tool allows agents to delegate tasks to sub-agents in the team.
-        Only agents get this capability - sub-agents are computation frameworks.
-        call_agent() can ONLY target sub-agents, not other agents.
-        """
+        """Add unified call_agent(agent_name, instruction) tool for agents."""
 
         async def _add_call_agent_tool_to_agent(
             calling_agent: Agent | RemoteAgent,
@@ -190,33 +255,18 @@ class PantheonTeam(Team):
                 """
                 target_agent = self.get_taget_agent(agent_name, instruction)
                 run_context = get_current_run_context()
-                if run_context is None:
-                    raise RuntimeError(
-                        "call_agent must be executed within an active agent tool call"
-                    )
 
                 context_variables = dict(context_variables or {})
-                context_variables.setdefault("parent_agent", run_context.agent.name)
+                child_metadata = _build_child_context_metadata(
+                    run_context,
+                    target_agent,
+                    context_variables,
+                    self.max_delegate_depth,
+                )
+                execution_context_id = child_metadata["execution_context_id"]
 
-                parent_step_hook = run_context.process_step_message
-                parent_chunk_hook = run_context.process_chunk
-
-                def update_metadata(data: dict):
-                    metadata = dict(data.get("metadata") or {})
-                    metadata["tool_call_id"] = context_variables.get("tool_call_id")
-                    metadata["parent_agent"] = run_context.agent.name
-                    metadata["sub_agent"] = target_agent.name
-                    data["_metadata"] = metadata
-
-                async def wrapped_step(step_message: dict):
-                    update_metadata(step_message)
-                    if parent_step_hook is not None:
-                        await run_func(parent_step_hook, step_message)
-
-                async def wrapped_chunk(chunk: dict):
-                    update_metadata(chunk)
-                    if parent_chunk_hook is not None:
-                        await run_func(parent_chunk_hook, chunk)
+                child_context_variables = dict(context_variables)
+                child_context_variables["_metadata"] = child_metadata
 
                 # Build history summary for sub-agent task message
                 task_message = await create_delegation_task_message(
@@ -229,7 +279,23 @@ class PantheonTeam(Team):
                 if not task_message:
                     return ""
 
-                execution_context_id = f"ctx_{str(uuid.uuid4())[:12]}"
+                parent_step_hook = run_context.process_step_message
+                parent_chunk_hook = run_context.process_chunk
+
+                async def wrapped_step(step_message: dict):
+                    metadata = step_message.get("_metadata")
+                    if not metadata or "execution_context_id" not in metadata:
+                        step_message["_metadata"] = child_metadata
+                    if parent_step_hook is not None:
+                        await run_func(parent_step_hook, step_message)
+
+                async def wrapped_chunk(chunk: dict):
+                    metadata = chunk.get("_metadata")
+                    if not metadata or "execution_context_id" not in metadata:
+                        chunk["_metadata"] = child_metadata
+                    if parent_chunk_hook is not None:
+                        await run_func(parent_chunk_hook, chunk)
+
                 child_memory = Memory(
                     name=f"{target_agent.name}-{execution_context_id}"
                 )
@@ -241,15 +307,9 @@ class PantheonTeam(Team):
                     process_step_message=wrapped_step,
                     process_chunk=wrapped_chunk,
                     execution_context_id=execution_context_id,
-                    context_variables=context_variables,
+                    context_variables=child_context_variables,
                     allow_transfer=False,
                 )
-
-                if isinstance(response, AgentTransfer):
-                    raise RuntimeError(
-                        "Sub-agent attempted to transfer execution, which is disabled "
-                        "during call_agent delegated runs."
-                    )
 
                 content = response.content if response else ""
                 return content
@@ -265,8 +325,8 @@ class PantheonTeam(Team):
             # Register tool
             await run_func(calling_agent.tool, call_agent)
 
-        # Add call_agent() to all agents (not sub-agents)
-        for agent in self.team_agents:
+        # Add call_agent() to all agents (team + sub-agents)
+        for agent in self.team_agents + self.sub_agents:
             await _add_call_agent_tool_to_agent(agent)
 
     async def add_transfer_tools_to_agents(self):

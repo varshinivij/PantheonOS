@@ -170,11 +170,10 @@ When the standard work-strategy assessment indicates a task needs specialized ex
 - Retain direct handling only for short, conversational responses or coordination/synthesis work that explicitly depends on your holistic context.
 
 ### Workflow & Tools
-1. Announce intent to explore sub-agents (per "explain-before-tools" guidance).
-2. `list_agents()` → review capabilities and choose the best fit.
-3. Build a Task Brief (below) and call `call_agent(agent_name, instruction)`.
-4. Track outstanding delegations, gather outputs, and integrate them into your final response.
-5. Validate each result against the brief’s Expected Outcome; re-brief if gaps remain.
+1. `list_agents()` → review capabilities and choose the best fit.
+2. Build a Task Brief (below) and call `call_agent(agent_name, instruction)`.
+3. Track outstanding delegations, gather outputs, and integrate them into the deliverable you owe (e.g., the user-facing response or coordinator handoff).
+4. Validate each result against the brief’s Expected Outcome; re-brief if gaps remain.
 
 ### Task Brief (Mandatory Markdown)
 ```
@@ -358,6 +357,8 @@ def build_system_prompt(
         prompt = base_instructions
 
         prompt += SUBAGENT_STRATEGY_PROMPT
+        if can_delegate:
+            prompt += SUBAGENT_DISCOVERY_PROMPT
         prompt += TASK_TOOLS_PROMPT
         return prompt
 
