@@ -1,5 +1,4 @@
 import re
-import time
 import uuid
 
 from ..agent import (
@@ -9,7 +8,6 @@ from ..agent import (
     RemoteAgent,
     get_current_run_context,
 )
-from ..constant import SystemPromptMode
 from ..memory import Memory
 from ..utils.log import logger
 from ..utils.misc import run_func
@@ -143,12 +141,6 @@ class PantheonTeam(Team):
         self.allow_transfer = allow_transfer
 
         super().__init__(agents)
-
-        # All agents have the same capabilities
-        for agent in self.team_agents:
-            if isinstance(agent, Agent):
-                agent.system_prompt_mode = SystemPromptMode.FULL
-                agent.can_delegate = True
 
         # Keep triage reference for backward compatibility (first agent)
         self.triage = self.team_agents[0]

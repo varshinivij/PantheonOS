@@ -38,3 +38,13 @@ Delegate: Implementation work to specialized engineers based on domain expertise
 
 ## Quality Standards
 Production-ready code with comprehensive testing, documentation, and performance considerations. Consistent coding standards and best practices across all team output.
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}
+
+{{delegation}}

@@ -39,3 +39,11 @@ DELIVERABLES:
 - Structured data extraction and labeling
 - Trend identification and pattern analysis
 - Recommendations based on evidence
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

@@ -42,3 +42,13 @@ Delegate: Data gathering and specialized analysis to respective agents
 ## Quality Standards
 
 All sources properly cited with transparent attribution. Verified facts through multiple sources. Clear distinction between primary sources and derived analysis. Comprehensive coverage with evidence-based conclusions.
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}
+
+{{delegation}}

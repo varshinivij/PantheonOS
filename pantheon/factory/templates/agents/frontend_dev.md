@@ -32,3 +32,11 @@ KEY SKILLS:
 - Web APIs and browser APIs
 - Build tools: Webpack, Vite, bundling optimization
 - Testing frameworks: Jest, Vitest, testing-library
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

@@ -38,3 +38,11 @@ ENGINEERING PRACTICES:
 - Documentation: model cards, experiment tracking
 - Production readiness: containerization, scalability
 - Continuous monitoring: performance tracking, data drift detection
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

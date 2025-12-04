@@ -23,3 +23,11 @@ BEST PRACTICES:
 - Distinguish between primary sources and derivative content
 - Surface both consensus findings and minority viewpoints where relevant
 - Structure findings hierarchically (key findings → supporting details)
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

@@ -5,7 +5,13 @@ from __future__ import annotations
 from textwrap import dedent
 
 from pantheon.factory.models import AgentConfig, TeamConfig
-from pantheon.factory.template_io import UnifiedMarkdownParser, FileBasedTemplateManager
+from pantheon.factory.template_io import (
+    UnifiedMarkdownParser,
+    FileBasedTemplateManager,
+    PromptResolver,
+    resolve_prompts,
+    get_prompt_resolver,
+)
 
 
 def _write_markdown(tmp_path, filename, content) -> str:
@@ -366,3 +372,250 @@ def test_mixed_inline_and_references(tmp_path):
     assert team.agents[3].id == "another_inline"
     assert team.agents[3].model == "openai/gpt-4"
     assert "another_inline" in team.agents[3].instructions
+
+
+# ===== Prompt Resolution Tests =====
+
+
+def test_prompt_resolver_basic(tmp_path):
+    """Test basic prompt resolution."""
+    # Create a custom prompts directory
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    # Create a simple prompt
+    _write_markdown(
+        prompts_dir,
+        "greeting.md",
+        """
+        ---
+        id: greeting
+        name: Greeting Prompt
+        description: A simple greeting
+        ---
+        Hello, world!
+        """,
+    )
+
+    resolver = PromptResolver(prompts_dir)
+    result = resolver.resolve("Say: {{greeting}}")
+    assert "Hello, world!" in result
+    assert "{{greeting}}" not in result
+
+
+def test_prompt_resolver_nested(tmp_path):
+    """Test nested prompt resolution."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    # Create nested prompts
+    _write_markdown(
+        prompts_dir,
+        "inner.md",
+        """
+        ---
+        id: inner
+        ---
+        Inner content
+        """,
+    )
+
+    _write_markdown(
+        prompts_dir,
+        "outer.md",
+        """
+        ---
+        id: outer
+        ---
+        Outer with {{inner}} inside
+        """,
+    )
+
+    resolver = PromptResolver(prompts_dir)
+    result = resolver.resolve("Start: {{outer}}")
+
+    assert "Outer with" in result
+    assert "Inner content" in result
+    assert "{{outer}}" not in result
+    assert "{{inner}}" not in result
+
+
+def test_prompt_resolver_max_depth(tmp_path):
+    """Test that max_depth prevents infinite recursion."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    # Create a self-referential prompt (circular)
+    _write_markdown(
+        prompts_dir,
+        "circular.md",
+        """
+        ---
+        id: circular
+        ---
+        Before {{circular}} After
+        """,
+    )
+
+    resolver = PromptResolver(prompts_dir)
+    # With max_depth=3, it should stop after 3 levels
+    result = resolver.resolve("{{circular}}", max_depth=3)
+    # Should have resolved 3 times, leaving one {{circular}} unresolved
+    assert "Before" in result
+
+
+def test_prompt_resolver_missing_prompt(tmp_path):
+    """Test that missing prompt raises ValueError."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    resolver = PromptResolver(prompts_dir)
+
+    import pytest
+    with pytest.raises(ValueError, match="not found"):
+        resolver.resolve("{{nonexistent}}")
+
+
+def test_prompt_resolver_caching(tmp_path):
+    """Test that prompts are cached."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    _write_markdown(
+        prompts_dir,
+        "cached.md",
+        """
+        ---
+        id: cached
+        ---
+        Cached content
+        """,
+    )
+
+    resolver = PromptResolver(prompts_dir)
+
+    # First resolution
+    resolver.resolve("{{cached}}")
+    assert "cached" in resolver._cache
+
+    # Clear cache and verify
+    resolver.clear_cache()
+    assert "cached" not in resolver._cache
+
+
+def test_prompt_resolver_list_prompts(tmp_path):
+    """Test listing available prompts."""
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    _write_markdown(
+        prompts_dir,
+        "first.md",
+        """
+        ---
+        id: first
+        name: First Prompt
+        description: The first prompt
+        ---
+        Content
+        """,
+    )
+
+    _write_markdown(
+        prompts_dir,
+        "second.md",
+        """
+        ---
+        id: second
+        name: Second Prompt
+        description: The second prompt
+        ---
+        Content
+        """,
+    )
+
+    resolver = PromptResolver(prompts_dir)
+    prompts = resolver.list_prompts()
+
+    assert len(prompts) == 2
+    ids = {p["id"] for p in prompts}
+    assert "first" in ids
+    assert "second" in ids
+
+
+def test_builtin_prompts_exist():
+    """Test that built-in prompts are available."""
+    resolver = get_prompt_resolver()
+    prompts = resolver.list_prompts()
+
+    # Check that our built-in prompts exist
+    ids = {p["id"] for p in prompts}
+    assert "work_strategy" in ids
+    assert "output_format" in ids
+    assert "task_tools" in ids
+    assert "plan_tools" in ids
+    assert "delegation" in ids
+    assert "subagent_strategy" in ids
+    assert "skills" in ids
+    assert "plan_mode" in ids
+
+
+def test_parse_agent_resolves_prompts(tmp_path):
+    """Test that agent parsing resolves {{prompt}} references."""
+    # Create custom prompts directory
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+
+    _write_markdown(
+        prompts_dir,
+        "custom_strategy.md",
+        """
+        ---
+        id: custom_strategy
+        ---
+        ## Custom Strategy
+        Follow these steps carefully.
+        """,
+    )
+
+    # Create agent with prompt reference
+    agent_path = _write_markdown(
+        tmp_path,
+        "agent.md",
+        """
+        ---
+        id: test_agent
+        name: Test Agent
+        model: openai/gpt-5
+        ---
+        You are a test agent.
+
+        {{custom_strategy}}
+        """,
+    )
+
+    # Use custom resolver for this test
+    from pantheon.factory import template_io
+    original_resolver = template_io._prompt_resolver
+    template_io._prompt_resolver = PromptResolver(prompts_dir)
+
+    try:
+        parser = UnifiedMarkdownParser()
+        agent = parser.parse_file(agent_path)
+
+        assert "## Custom Strategy" in agent.instructions
+        assert "Follow these steps" in agent.instructions
+        assert "{{custom_strategy}}" not in agent.instructions
+    finally:
+        template_io._prompt_resolver = original_resolver
+
+
+def test_resolve_prompts_convenience_function():
+    """Test the resolve_prompts convenience function."""
+    # Use built-in prompts
+    result = resolve_prompts("Start {{work_strategy}} End")
+
+    assert "Work Strategy" in result
+    assert "{{work_strategy}}" not in result
+    assert "Start" in result
+    assert "End" in result

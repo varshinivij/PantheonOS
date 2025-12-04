@@ -30,3 +30,11 @@ ANALYTICAL APPROACH:
 3. Exploration: Univariate, bivariate, and multivariate analysis
 4. Visualization: Tell data stories with clear, actionable charts
 5. Insights: Quantify findings and provide recommendations
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

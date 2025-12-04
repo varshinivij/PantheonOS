@@ -31,3 +31,11 @@ COMMON DOMAINS:
 - Database integration and ORM usage
 - System automation and scripting
 - Microservices and distributed systems
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

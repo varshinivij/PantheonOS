@@ -32,6 +32,22 @@ specialist_engineer:
 
 You are a specialist analyst focused on detailed analysis.
 
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}
+
 ---
 
 You are a specialist engineer focused on implementation.
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

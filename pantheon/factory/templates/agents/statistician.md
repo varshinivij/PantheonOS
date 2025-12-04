@@ -38,3 +38,11 @@ TECHNICAL TOOLS:
 - R: tidyverse, ggplot2, statistical packages
 - Python: scipy, statsmodels, scikit-learn
 - Statistical programming and reproducible research
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

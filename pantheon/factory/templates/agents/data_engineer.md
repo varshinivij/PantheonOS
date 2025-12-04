@@ -38,3 +38,11 @@ TECHNICAL STACK:
 - Apache Spark, Airflow for orchestration
 - Cloud-native tools and APIs
 - Version control and deployment automation
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

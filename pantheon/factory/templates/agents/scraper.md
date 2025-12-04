@@ -39,3 +39,11 @@ ETHICAL & TECHNICAL CONSIDERATIONS:
 - Handle API rate limits gracefully
 - Monitor for structural changes in scraping targets
 - Provide transparent data sourcing documentation
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

@@ -13,7 +13,6 @@ from uuid import uuid4
 from funcdesc import parse_func
 from pydantic import BaseModel, create_model
 
-from .constant import SystemPromptMode, build_system_prompt
 from .memory import Memory
 from .remote import (
     RemoteBackendFactory,
@@ -317,6 +316,8 @@ class Agent:
         name: The name of the agent.
         instructions: The instructions for the agent.
             The instructions are the system instructions that the agent will follow.
+            All prompt composition (work strategy, delegation, skills, etc.) should be
+            done at template parsing time, not at runtime.
         model: The model to use for the agent.
             Can be a single model or list of fallback models.
         model_params: The additional parameters for the model(LLM).
@@ -331,7 +332,6 @@ class Agent:
         force_litellm: Whether to force using LiteLLM. (default: False)
         max_tool_content_length: The maximum length of the tool content. (default: 100000)
         description: The description of the agent. (default: None)
-        enable_skills: Whether to inject Pantheon Skills guidance into the system prompt. (default: False)
     """
 
     def __init__(
@@ -348,9 +348,7 @@ class Agent:
         tool_timeout: int = 10 * 60,
         force_litellm: bool = False,
         max_tool_content_length: int | None = 100000,
-        system_prompt_mode: SystemPromptMode | None = None,
         description: str | None = None,
-        enable_skills: bool = False,
     ):
         self.id = uuid4()
         self.name = name
@@ -385,17 +383,6 @@ class Agent:
         # Provider management (MCP, ToolSet, etc.)
         self.providers: dict[str, ToolProvider] = {}  # name -> ToolProvider instance
         self.not_loaded_toolsets: list[str] = []  # Track which toolsets failed to load
-
-        # Plan Mode support
-        self.plan_mode = False
-
-        # Can delegate to other agents - set by Team if this agent can delegate/coordinate
-        # Used in unified architecture: True when has_transfer_agents or has_sub_agents
-        self.can_delegate = False
-
-        # System prompt mode
-        self.system_prompt_mode = system_prompt_mode
-        self.enable_skills = enable_skills
 
     @staticmethod
     def _filter_messages_by_execution_context(
@@ -472,33 +459,6 @@ class Agent:
             return True
 
         return False
-
-    def enable_plan_mode(self) -> dict:
-        """Enable Plan Mode - a read-only environment for safe planning and analysis."""
-        if self.plan_mode:
-            return {"already_in_plan_mode": True, "message": "Already in Plan Mode"}
-
-        # Set flag - system prompt will enforce restrictions
-        self.plan_mode = True
-        logger.info(f"🔒 [Agent:{self.name}] Entered Plan Mode (Read-Only). ")
-
-        return {
-            "success": True,
-            "plan_mode": True,
-            "message": "Plan Mode activated. Tool restrictions enforced via system prompt.",
-        }
-
-    def _disable_plan_mode_internal(self):
-        """Internal method to disable Plan Mode (called by exit_plan_mode tool)."""
-        if not self.plan_mode:
-            return
-
-        # Clear flag - system prompt will return to normal
-        self.plan_mode = False
-
-        logger.info(
-            f"🔓 [Agent:{self.name}] Exited Plan Mode. Full tool access restored."
-        )
 
     async def toolset(self, toolset: Union["ToolSet", "ToolProvider"]) -> "Agent":
         """Add a toolset to the agent (supports both ToolSet and ToolProvider)
@@ -1120,20 +1080,15 @@ class Agent:
         history = copy.deepcopy(messages)
         tool_timeout = tool_timeout or self.tool_timeout
 
-        system_prompt = build_system_prompt(
-            self.instructions,
-            plan_mode=self.plan_mode,
-            can_delegate=self.can_delegate,
-            system_prompt_mode=self.system_prompt_mode,
-            enable_skills=self.enable_skills,
-        )
+        # Use instructions directly - all prompt composition happens at template parsing time
+        system_prompt = self.instructions
         current_timestamp = time.time()
 
         if (len(history) > 0) and (history[0]["role"] == "system"):
             history[0]["content"] = system_prompt
-            history[0]["timestamp"] = current_timestamp  # 添加时间戳
+            history[0]["timestamp"] = current_timestamp
             if "id" not in history[0]:
-                history[0]["id"] = str(uuid4())  # 添加唯一ID（如果没有的话）
+                history[0]["id"] = str(uuid4())
             # Mark system message with execution_context_id (not done in _process_step_message)
             if execution_context_id is not None:
                 history[0]["execution_context_id"] = execution_context_id
@@ -1141,8 +1096,8 @@ class Agent:
             system_msg = {
                 "role": "system",
                 "content": system_prompt,
-                "timestamp": current_timestamp,  # 添加时间戳
-                "id": str(uuid4()),  # 添加唯一ID
+                "timestamp": current_timestamp,
+                "id": str(uuid4()),
             }
             # Mark system message with execution_context_id (not done in _process_step_message)
             if execution_context_id is not None:

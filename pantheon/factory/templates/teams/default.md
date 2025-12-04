@@ -34,3 +34,13 @@ Delegate: Domain-specific technical work to matching specialists
 
 ## Quality Standards
 Ensure consistent responses, proper attribution of delegated work, clear communication of task status and progress.
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}
+
+{{delegation}}

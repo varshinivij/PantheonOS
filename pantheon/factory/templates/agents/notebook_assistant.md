@@ -42,3 +42,11 @@ environments and testing.
 Always wrap code in ```python code blocks.
 For complex analyses, provide brief explanations between blocks.
 Actively use notebook features to demonstrate capabilities.
+
+{{work_strategy}}
+
+{{output_format}}
+
+{{task_tools}}
+
+{{plan_tools}}

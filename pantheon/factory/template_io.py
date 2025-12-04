@@ -4,6 +4,7 @@ Unified Template I/O for Pantheon
 Combines markdown parsing and file-based template management:
 - UnifiedMarkdownParser: Parse/generate markdown with YAML frontmatter
 - FileBasedTemplateManager: File CRUD operations for agents and teams
+- PromptResolver: Resolve {{prompt_name}} references in instructions
 
 Template Storage:
 - User templates: pwd/agents/, pwd/teams/
@@ -24,6 +25,152 @@ except ImportError:
 
 from ..utils.log import logger
 from .models import AgentConfig, TeamConfig
+
+
+# ===== PROMPT RESOLVER =====
+
+
+class PromptResolver:
+    """
+    Resolves {{prompt_name}} references in instructions.
+
+    Loads prompt templates from the prompts/ directory and expands
+    references in text. Supports nested references (prompts can
+    reference other prompts).
+
+    Usage:
+        resolver = PromptResolver()
+        expanded = resolver.resolve("{{work_strategy}}\\n\\nYour role is...")
+    """
+
+    # Pattern to match {{prompt_name}}
+    PATTERN = re.compile(r'\{\{(\w+)\}\}')
+
+    def __init__(self, prompts_dir: Optional[Path] = None):
+        """
+        Initialize the prompt resolver.
+
+        Args:
+            prompts_dir: Directory containing prompt templates.
+                        Defaults to templates/prompts/ in this package.
+        """
+        if prompts_dir is None:
+            prompts_dir = Path(__file__).parent / "templates" / "prompts"
+        self.prompts_dir = prompts_dir
+        self._cache: Dict[str, str] = {}
+
+    def resolve(self, text: str, max_depth: int = 10) -> str:
+        """
+        Expand all {{name}} references in the text.
+
+        Args:
+            text: Text containing {{prompt_name}} references
+            max_depth: Maximum recursion depth for nested references
+
+        Returns:
+            Text with all references expanded
+
+        Raises:
+            ValueError: If a referenced prompt is not found
+            RecursionError: If max_depth is exceeded (circular references)
+        """
+        if not text or max_depth <= 0:
+            return text
+
+        def replacer(match: re.Match) -> str:
+            name = match.group(1)
+            content = self._load_prompt(name)
+            # Recursively resolve nested references
+            return self.resolve(content, max_depth - 1)
+
+        return self.PATTERN.sub(replacer, text)
+
+    def _load_prompt(self, name: str) -> str:
+        """
+        Load a prompt template by name.
+
+        Args:
+            name: Prompt name (without .md extension)
+
+        Returns:
+            Prompt content (body only, without frontmatter)
+
+        Raises:
+            ValueError: If prompt file not found
+        """
+        if name in self._cache:
+            return self._cache[name]
+
+        path = self.prompts_dir / f"{name}.md"
+        if not path.exists():
+            raise ValueError(f"Prompt '{name}' not found: {path}")
+
+        try:
+            content = path.read_text(encoding="utf-8")
+            post = frontmatter.loads(content)
+            # Use body content only (strip frontmatter)
+            prompt_content = (post.content or "").strip()
+            self._cache[name] = prompt_content
+            return prompt_content
+        except Exception as exc:
+            raise ValueError(f"Failed to load prompt '{name}': {exc}") from exc
+
+    def list_prompts(self) -> List[Dict[str, Any]]:
+        """
+        List all available prompts.
+
+        Returns:
+            List of dicts with prompt metadata (id, name, description)
+        """
+        prompts = []
+        if not self.prompts_dir.exists():
+            return prompts
+
+        for path in self.prompts_dir.glob("*.md"):
+            try:
+                content = path.read_text(encoding="utf-8")
+                post = frontmatter.loads(content)
+                prompts.append({
+                    "id": post.metadata.get("id", path.stem),
+                    "name": post.metadata.get("name", path.stem),
+                    "description": post.metadata.get("description", ""),
+                })
+            except Exception as exc:
+                logger.warning(f"Failed to parse prompt {path}: {exc}")
+
+        return prompts
+
+    def clear_cache(self):
+        """Clear the prompt cache."""
+        self._cache.clear()
+
+
+# Global resolver instance (lazy initialization)
+_prompt_resolver: Optional[PromptResolver] = None
+
+
+def get_prompt_resolver() -> PromptResolver:
+    """Get the global PromptResolver instance."""
+    global _prompt_resolver
+    if _prompt_resolver is None:
+        _prompt_resolver = PromptResolver()
+    return _prompt_resolver
+
+
+def resolve_prompts(text: str) -> str:
+    """
+    Convenience function to resolve prompts in text.
+
+    Args:
+        text: Text containing {{prompt_name}} references
+
+    Returns:
+        Text with all references expanded
+    """
+    return get_prompt_resolver().resolve(text)
+
+
+# ===== HELPER FUNCTIONS =====
 
 
 def _is_path_reference(entry: str) -> bool:
@@ -74,12 +221,16 @@ class UnifiedMarkdownParser:
         if not agent_id:
             raise ValueError("Agent must have 'id' in frontmatter")
 
+        # Resolve {{prompt_name}} references in instructions
+        instructions = (post.content or "").strip()
+        instructions = resolve_prompts(instructions)
+
         return AgentConfig(
             id=agent_id,
             name=str(metadata.get("name", "")),
             model=str(metadata.get("model", "")),
             icon=str(metadata.get("icon", "🤖")),
-            instructions=(post.content or "").strip(),
+            instructions=instructions,
             toolsets=list(metadata.get("toolsets", []) or []),
             mcp_servers=list(metadata.get("mcp_servers", []) or []),
             tags=list(metadata.get("tags", []) or []),
@@ -175,6 +326,9 @@ class UnifiedMarkdownParser:
                 if inline_idx < len(instruction_sections):
                     instructions = instruction_sections[inline_idx].strip()
                 inline_idx += 1
+
+                # Resolve {{prompt_name}} references in instructions
+                instructions = resolve_prompts(instructions)
 
                 agents.append(
                     AgentConfig(
