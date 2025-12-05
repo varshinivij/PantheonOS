@@ -236,6 +236,80 @@ class FileManagerToolSet(FileManagerToolSetBase):
         return {"success": True}
 
     @tool
+    async def update_file(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False,
+    ) -> dict:
+        """Update a text file by replacing specific content.
+
+        This tool performs precise string replacement within a file.
+        The old_string must match exactly (including whitespace and indentation).
+
+        Args:
+            file_path: The path to the file to update.
+            old_string: The exact string to find and replace.
+            new_string: The string to replace old_string with.
+            replace_all: If True, replace all occurrences. If False (default),
+                         only replace if there's exactly one match.
+
+        Returns:
+            dict: Success status, number of replacements made, or error message.
+        """
+        if ".." in file_path:
+            return {"success": False, "error": "File path cannot contain '..'"}
+
+        target_path = self.path / file_path
+        if not target_path.exists():
+            return {"success": False, "error": "File does not exist"}
+        if not target_path.is_file():
+            return {"success": False, "error": "Path is not a file"}
+
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Count occurrences
+            count = content.count(old_string)
+
+            if count == 0:
+                return {
+                    "success": False,
+                    "error": "old_string not found in file",
+                }
+
+            if count > 1 and not replace_all:
+                return {
+                    "success": False,
+                    "error": f"old_string found {count} times. Set replace_all=True to replace all, or provide more context to make it unique.",
+                }
+
+            # Perform replacement
+            if replace_all:
+                new_content = content.replace(old_string, new_string)
+                replacements = count
+            else:
+                new_content = content.replace(old_string, new_string, 1)
+                replacements = 1
+
+            # Write back
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+            return {
+                "success": True,
+                "replacements": replacements,
+            }
+
+        except UnicodeDecodeError:
+            return {"success": False, "error": "File is not a valid text file"}
+        except Exception as e:
+            logger.error(f"update_file failed for {file_path}: {e}")
+            return {"success": False, "error": str(e)}
+
+    @tool
     async def observe_images(self, question: str, image_paths: list[str]) -> dict:
         """Observe images and answer a question about them.
 
