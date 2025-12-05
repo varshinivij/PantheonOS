@@ -47,29 +47,56 @@ class FileManagerToolSetBase(ToolSet):
         return {"success": True, "cwd": str(self.path)}
 
     @tool
-    async def list_files(self, sub_dir: str | None = None) -> dict:
-        """List all files in the directory."""
+    async def list_files(self, sub_dir: str | None = None, recursive: bool = False) -> dict:
+        """List all files in the directory.
+        
+        Args:
+            sub_dir: The sub directory to list. If not provided, the entire directory will be listed.
+                Note that the sub_dir is relative to the current working directory.
+            recursive: When True, the entire directory will be listed recursively.
+        """
         if not self.path.exists():
             return {"success": False, "error": "Directory does not exist"}
-        if sub_dir is None or sub_dir == "":
-            files = list(self.path.glob("*"))
+        if not recursive:
+            if sub_dir is None or sub_dir == "":
+                files = list(self.path.glob("*"))
+            else:
+                files = list(self.path.glob(f"{sub_dir}/*"))
+            return {
+                "success": True,
+                "files": [
+                    {
+                        "name": file.name,
+                        "size": file.stat().st_size if file.is_file() else 0,
+                        "type": "file" if file.is_file() else "directory",
+                        "last_modified": datetime.fromtimestamp(
+                            file.stat().st_mtime
+                        ).strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    for file in files
+                    if file.name not in self.black_list
+                ],
+            }
         else:
-            files = list(self.path.glob(f"{sub_dir}/*"))
-        return {
-            "success": True,
-            "files": [
-                {
-                    "name": file.name,
-                    "size": file.stat().st_size if file.is_file() else 0,
-                    "type": "file" if file.is_file() else "directory",
-                    "last_modified": datetime.fromtimestamp(
-                        file.stat().st_mtime
-                    ).strftime("%Y-%m-%d %H:%M:%S"),
+            def _list_tree(path: Path) -> dict:
+                """Helper function to recursively build the tree structure."""
+                result = {
+                    "name": path.name,
+                    "type": "directory" if path.is_dir() else "file",
+                    "size": path.stat().st_size if path.is_file() else 0,
                 }
-                for file in files
-                if file.name not in self.black_list
-            ],
-        }
+                if path.is_dir():
+                    result["children"] = []
+                    for item in sorted(path.iterdir()):
+                        result["children"].append(_list_tree(item))
+                return result
+
+            target_path = self.path / sub_dir if sub_dir else self.path
+            if not target_path.exists():
+                return {"success": False, "error": "Target directory does not exist"}
+
+            return _list_tree(target_path)
+
 
     @tool
     async def create_directory(self, sub_dir: str | list[str]) -> dict:
