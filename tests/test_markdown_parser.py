@@ -732,7 +732,8 @@ def test_prompt_with_absolute_path_param(tmp_path):
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
 
-    absolute_path = "/absolute/path/to/skills"
+    # Use a real absolute path (cross-platform compatible)
+    absolute_path = str(tmp_path / "absolute_skills")
 
     _write_markdown(
         prompts_dir,
@@ -965,3 +966,198 @@ def test_quoted_param_values(tmp_path):
     # Unquoted simple value
     result = resolver.resolve("{{quoted(msg=simple)}}")
     assert "Message: simple" in result
+
+
+# ===== Prompt Path Reference Tests =====
+
+
+def test_prompt_relative_path_reference(tmp_path):
+    """Test prompt reference using relative path."""
+    # Create directory structure
+    agents_dir = tmp_path / "agents"
+    prompts_dir = tmp_path / "prompts"
+    agents_dir.mkdir()
+    prompts_dir.mkdir()
+
+    # Create an external prompt
+    _write_markdown(
+        prompts_dir,
+        "external_strategy.md",
+        """
+        ---
+        id: external_strategy
+        ---
+        ## External Strategy
+        This is loaded from an external path.
+        """,
+    )
+
+    # Create agent that references prompt via relative path
+    agent_path = _write_markdown(
+        agents_dir,
+        "test_agent.md",
+        """
+        ---
+        id: test_agent
+        name: Test Agent
+        model: openai/gpt-5
+        ---
+        You are an agent.
+
+        {{../prompts/external_strategy.md}}
+        """,
+    )
+
+    parser = UnifiedMarkdownParser()
+    agent = parser.parse_file(agent_path)
+
+    assert "## External Strategy" in agent.instructions
+    assert "external path" in agent.instructions
+    assert "{{../prompts/external_strategy.md}}" not in agent.instructions
+
+
+def test_prompt_nested_relative_paths(tmp_path):
+    """Test nested prompts with relative paths."""
+    # Create directory structure
+    agents_dir = tmp_path / "agents"
+    shared_dir = tmp_path / "shared"
+    common_dir = shared_dir / "common"
+    agents_dir.mkdir()
+    shared_dir.mkdir()
+    common_dir.mkdir()
+
+    # Create innermost prompt
+    _write_markdown(
+        common_dir,
+        "base.md",
+        """
+        ---
+        id: base
+        ---
+        Base content from common directory.
+        """,
+    )
+
+    # Create middle prompt that references base
+    _write_markdown(
+        shared_dir,
+        "middle.md",
+        """
+        ---
+        id: middle
+        ---
+        Middle layer with:
+        {{./common/base.md}}
+        """,
+    )
+
+    # Create agent that references middle prompt
+    agent_path = _write_markdown(
+        agents_dir,
+        "nested_agent.md",
+        """
+        ---
+        id: nested_agent
+        name: Nested Agent
+        model: openai/gpt-5
+        ---
+        Agent instructions:
+
+        {{../shared/middle.md}}
+        """,
+    )
+
+    parser = UnifiedMarkdownParser()
+    agent = parser.parse_file(agent_path)
+
+    # Both middle and base content should be resolved
+    assert "Middle layer" in agent.instructions
+    assert "Base content from common directory" in agent.instructions
+    assert "{{" not in agent.instructions  # All references resolved
+
+
+def test_prompt_path_with_params(tmp_path):
+    """Test prompt path reference with parameters."""
+    prompts_dir = tmp_path / "prompts"
+    agents_dir = tmp_path / "agents"
+    prompts_dir.mkdir()
+    agents_dir.mkdir()
+
+    # Create a parameterized external prompt
+    _write_markdown(
+        prompts_dir,
+        "param_prompt.md",
+        """
+        ---
+        id: param_prompt
+        params:
+          name:
+            type: string
+            default: "default_name"
+          count:
+            type: integer
+            default: 10
+        ---
+        Processing {name} with count {count}.
+        """,
+    )
+
+    # Resolve with parameters via path reference
+    from pantheon.factory.template_io import PromptResolver
+
+    resolver = PromptResolver(tmp_path / "builtin_prompts")  # Different dir
+    result = resolver.resolve(
+        '{{./prompts/param_prompt.md(name="custom", count=42)}}',
+        base_path=tmp_path
+    )
+
+    assert "Processing custom with count 42" in result
+
+
+def test_prompt_mixed_id_and_path_references(tmp_path):
+    """Test mixing ID references and path references."""
+    # Create custom prompts directory for resolver
+    builtin_dir = tmp_path / "builtin"
+    builtin_dir.mkdir()
+
+    # Create a builtin prompt (ID reference)
+    _write_markdown(
+        builtin_dir,
+        "builtin_prompt.md",
+        """
+        ---
+        id: builtin_prompt
+        ---
+        Builtin content.
+        """,
+    )
+
+    # Create external prompt (path reference)
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    _write_markdown(
+        external_dir,
+        "external.md",
+        """
+        ---
+        id: external
+        ---
+        External content.
+        """,
+    )
+
+    from pantheon.factory.template_io import PromptResolver
+
+    resolver = PromptResolver(builtin_dir)
+
+    # Mix both references
+    text = """
+    First: {{builtin_prompt}}
+    Second: {{./external/external.md}}
+    """
+
+    result = resolver.resolve(text, base_path=tmp_path)
+
+    assert "Builtin content" in result
+    assert "External content" in result
+    assert "{{" not in result

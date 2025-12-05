@@ -48,8 +48,9 @@ class PromptResolver:
         )
     """
 
-    # Pattern to match {{name}} or {{name(key=value, ...)}}
-    PATTERN = re.compile(r'\{\{(\w+)(?:\(([^)]*)\))?\}\}')
+    # Pattern to match {{name}} or {{path}} or {{name(key=value, ...)}}
+    # Supports: letters, digits, underscore, dot, slash, hyphen
+    PATTERN = re.compile(r'\{\{([\w./-]+)(?:\(([^)]*)\))?\}\}')
 
     # Pattern to parse key=value pairs (supports quoted values)
     PARAM_PATTERN = re.compile(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,\s]+))')
@@ -100,15 +101,26 @@ class PromptResolver:
             params_str = match.group(2) or ""
 
             # Load prompt content and parameter definitions
-            content, param_defs = self._load_prompt(name)
-            prompt_path = self.prompts_dir / f"{name}.md"
+            # Pass base_path for relative path resolution
+            content, param_defs = self._load_prompt(name, base_path)
+
+            # Determine the prompt file's directory for:
+            # 1. Resolving default path parameters
+            # 2. Resolving nested prompt references
+            if _is_prompt_path_reference(name):
+                if name.startswith('/'):
+                    prompt_dir = Path(name).parent
+                else:
+                    prompt_dir = (base_path / name).resolve().parent
+            else:
+                prompt_dir = self.prompts_dir
 
             # Parse passed parameters
             passed_params = self._parse_params(params_str)
 
             # Build final parameters with path resolution
             final_params = self._build_final_params(
-                param_defs, passed_params, base_path, prompt_path.parent
+                param_defs, passed_params, base_path, prompt_dir
             )
 
             # Apply parameters to content
@@ -116,7 +128,7 @@ class PromptResolver:
 
             # Recursively resolve nested prompts
             # Nested prompts use the prompt file's directory as base_path
-            return self.resolve(content, prompt_path.parent, max_depth - 1)
+            return self.resolve(content, prompt_dir, max_depth - 1)
 
         return self.PATTERN.sub(replacer, text)
 
@@ -237,12 +249,14 @@ class PromptResolver:
 
         return result
 
-    def _load_prompt(self, name: str) -> tuple:
+    def _load_prompt(self, name: str, base_path: Optional[Path] = None) -> tuple:
         """
-        Load a prompt template by name.
+        Load a prompt template by name or path.
 
         Args:
-            name: Prompt name (without .md extension)
+            name: Prompt name (without .md) or path (absolute/relative)
+            base_path: Base path for resolving relative paths.
+                       Required when name is a relative path.
 
         Returns:
             Tuple of (content, param_definitions)
@@ -250,23 +264,49 @@ class PromptResolver:
         Raises:
             ValueError: If prompt file not found
         """
-        if name in self._cache:
-            return self._cache[name]
+        # Determine the actual file path
+        if _is_prompt_path_reference(name):
+            # Path reference (absolute or relative)
+            if name.startswith('/'):
+                # Absolute path
+                path = Path(name)
+            else:
+                # Relative path - resolve against base_path
+                if base_path is None:
+                    raise ValueError(
+                        f"Cannot resolve relative prompt path '{name}' without base_path"
+                    )
+                path = (base_path / name).resolve()
 
-        path = self.prompts_dir / f"{name}.md"
+            # Use resolved path as cache key for path references
+            cache_key = str(path)
+        else:
+            # ID reference - load from prompts_dir
+            path = self.prompts_dir / f"{name}.md"
+            cache_key = name
+
+        # Check cache
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Validate file exists
         if not path.exists():
-            raise ValueError(f"Prompt '{name}' not found: {path}")
+            if _is_prompt_path_reference(name):
+                raise ValueError(f"Prompt file not found: {path}")
+            else:
+                raise ValueError(f"Prompt '{name}' not found in {self.prompts_dir}")
 
+        # Load and parse
         try:
             content = path.read_text(encoding="utf-8")
             post = frontmatter.loads(content)
             prompt_content = (post.content or "").strip()
             param_defs = post.metadata.get("params", {})
 
-            self._cache[name] = (prompt_content, param_defs)
+            self._cache[cache_key] = (prompt_content, param_defs)
             return prompt_content, param_defs
         except Exception as exc:
-            raise ValueError(f"Failed to load prompt '{name}': {exc}") from exc
+            raise ValueError(f"Failed to load prompt from '{path}': {exc}") from exc
 
     def list_prompts(self) -> List[Dict[str, Any]]:
         """
@@ -327,6 +367,20 @@ def resolve_prompts(text: str, base_path: Optional[Path] = None) -> str:
 
 
 # ===== HELPER FUNCTIONS =====
+
+
+def _is_prompt_path_reference(name: str) -> bool:
+    """
+    Check if a prompt reference is a path reference.
+
+    Path references contain '/' or end with '.md'.
+    Examples:
+        - './custom/prompt.md' -> True
+        - '../shared/prompt.md' -> True
+        - '/absolute/path/prompt.md' -> True
+        - 'work_strategy' -> False (ID reference)
+    """
+    return '/' in name or name.endswith('.md')
 
 
 def _is_path_reference(entry: str) -> bool:
