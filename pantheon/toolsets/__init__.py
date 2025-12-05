@@ -8,6 +8,7 @@ from .web import WebToolSet
 from .notebook import IntegratedNotebookToolSet, JupyterKernelToolSet
 from .scraper import ScraperToolSet
 from .rag import VectorRAGToolSet
+from .package import PackageToolSet
 from .database_api import DatabaseAPIQueryToolSet
 
 
@@ -22,6 +23,8 @@ __all__ = [
     # Web & scraping
     "WebToolSet",
     "ScraperToolSet",
+    # Workflows & code
+    "PackageToolSet",
     # Notebooks
     "JupyterKernelToolSet",
     "IntegratedNotebookToolSet",
