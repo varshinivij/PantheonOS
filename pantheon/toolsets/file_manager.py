@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import base64
 import io
+import itertools
 from datetime import datetime
 
 from PIL import Image
@@ -204,28 +205,35 @@ class FileManagerToolSet(FileManagerToolSetBase):
     """
 
     @tool
-    async def read_file(self, file_path: str, first_n_lines: int | None = None) -> dict:
-        """Read a text file.
+    async def read_file(self, file_path: str, limit: int | None = None, offset: int = 0) -> dict:
+        """Read a text file with optional line limits and offset.
 
         Args:
             file_path: The path to the file to read.
-            first_n_lines: The number of lines to read from the file. If not provided, the entire file will be read.
+            limit: The maximum number of lines to read. If not provided, reads to the end of the file from the offset.
+            offset: The line number to start reading from (0-indexed).
         """
         file_path = self.path / file_path
         if not file_path.exists():
             return {"success": False, "error": "File does not exist"}
-        with open(file_path, "r") as f:
-            if first_n_lines is not None:
-                lines = f.readlines()[:first_n_lines]
-                # Join lines without adding extra newlines since readlines() keeps original line endings
-                content = "".join(lines).rstrip("\n")
-            else:
-                content = f.read()
-            return {
-                "success": True,
-                "content": content,
-                "format": file_path.suffix.lower(),
-            }
+        
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                if limit is not None or offset > 0:
+                    # Efficiently slice the file iterator without reading the whole file
+                    sliced_lines = itertools.islice(f, offset, offset + limit if limit is not None else None)
+                    content = "".join(list(sliced_lines))
+                else:
+                    # Default behavior: read the entire file
+                    content = f.read()
+                
+                return {
+                    "success": True,
+                    "content": content,
+                    "format": file_path.suffix.lower(),
+                }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @tool
     async def write_file(
