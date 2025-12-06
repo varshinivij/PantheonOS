@@ -12,6 +12,7 @@ from pantheon.factory.template_io import (
     resolve_prompts,
     get_prompt_resolver,
 )
+from pantheon.factory.template_manager import TemplateManager
 
 
 def _write_markdown(tmp_path, filename, content) -> str:
@@ -558,8 +559,8 @@ def test_builtin_prompts_exist():
     assert "skills" in ids
 
 
-def test_parse_agent_resolves_prompts(tmp_path):
-    """Test that agent parsing resolves {{prompt}} references."""
+def test_parse_agent_preserves_prompts_until_prepare_team(tmp_path):
+    """Parser keeps prompt placeholders; prepare_team resolves them."""
     # Create custom prompts directory
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
@@ -601,9 +602,22 @@ def test_parse_agent_resolves_prompts(tmp_path):
         parser = UnifiedMarkdownParser()
         agent = parser.parse_file(agent_path)
 
-        assert "## Custom Strategy" in agent.instructions
-        assert "Follow these steps" in agent.instructions
-        assert "{{custom_strategy}}" not in agent.instructions
+        # Raw instructions still contain placeholder
+        assert "{{custom_strategy}}" in agent.instructions
+        assert "## Custom Strategy" not in agent.instructions
+
+        manager = TemplateManager(work_dir=tmp_path)
+        team = TeamConfig(
+            id="team",
+            name="Team",
+            description="",
+            agents=[agent],
+        )
+        manager.prepare_team(team)
+        resolved = team.agents[0].instructions
+        assert "## Custom Strategy" in resolved
+        assert "Follow these steps" in resolved
+        assert "{{custom_strategy}}" not in resolved
     finally:
         template_io._prompt_resolver = original_resolver
 
@@ -835,7 +849,7 @@ def test_builtin_skills_prompt_has_params():
 
 
 def test_parse_agent_with_parameterized_prompt(tmp_path):
-    """Test that agent parsing handles parameterized prompts correctly."""
+    """Parser keeps placeholder; prepare_team resolves parameterized prompts."""
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
 
@@ -886,9 +900,21 @@ def test_parse_agent_with_parameterized_prompt(tmp_path):
         parser = UnifiedMarkdownParser()
         agent = parser.parse_file(agent_path)
 
+        assert "{{skills_param" in agent.instructions
+
+        manager = TemplateManager(work_dir=tmp_path)
+        team = TeamConfig(
+            id="team",
+            name="Team",
+            description="",
+            agents=[agent],
+        )
+        manager.prepare_team(team)
+        resolved = team.agents[0].instructions
+
         # Path should be resolved relative to agent file
-        assert str(custom_skills) in agent.instructions
-        assert "{{skills_param" not in agent.instructions
+        assert str(custom_skills) in resolved
+        assert "{{skills_param" not in resolved
     finally:
         template_io._prompt_resolver = original_resolver
 
@@ -970,7 +996,7 @@ def test_quoted_param_values(tmp_path):
 
 
 def test_prompt_relative_path_reference(tmp_path):
-    """Test prompt reference using relative path."""
+    """Parser keeps path placeholder; prepare_team resolves it."""
     # Create directory structure
     agents_dir = tmp_path / "agents"
     prompts_dir = tmp_path / "prompts"
@@ -1009,13 +1035,20 @@ def test_prompt_relative_path_reference(tmp_path):
     parser = UnifiedMarkdownParser()
     agent = parser.parse_file(agent_path)
 
-    assert "## External Strategy" in agent.instructions
-    assert "external path" in agent.instructions
-    assert "{{../prompts/external_strategy.md}}" not in agent.instructions
+    assert "{{../prompts/external_strategy.md}}" in agent.instructions
+
+    manager = TemplateManager(work_dir=tmp_path)
+    team = TeamConfig(id="team", name="Team", description="", agents=[agent])
+    manager.prepare_team(team)
+    resolved = team.agents[0].instructions
+
+    assert "## External Strategy" in resolved
+    assert "external path" in resolved
+    assert "{{../prompts/external_strategy.md}}" not in resolved
 
 
 def test_prompt_nested_relative_paths(tmp_path):
-    """Test nested prompts with relative paths."""
+    """Parser keeps placeholders; prepare_team resolves nested paths."""
     # Create directory structure
     agents_dir = tmp_path / "agents"
     shared_dir = tmp_path / "shared"
@@ -1068,10 +1101,17 @@ def test_prompt_nested_relative_paths(tmp_path):
     parser = UnifiedMarkdownParser()
     agent = parser.parse_file(agent_path)
 
-    # Both middle and base content should be resolved
-    assert "Middle layer" in agent.instructions
-    assert "Base content from common directory" in agent.instructions
-    assert "{{" not in agent.instructions  # All references resolved
+    assert "{{../shared/middle.md}}" in agent.instructions
+
+    manager = TemplateManager(work_dir=tmp_path)
+    team = TeamConfig(id="team", name="Team", description="", agents=[agent])
+    manager.prepare_team(team)
+    resolved = team.agents[0].instructions
+
+    # Both middle and base content should be resolved after prepare_team
+    assert "Middle layer" in resolved
+    assert "Base content from common directory" in resolved
+    assert "{{" not in resolved
 
 
 def test_prompt_path_with_params(tmp_path):

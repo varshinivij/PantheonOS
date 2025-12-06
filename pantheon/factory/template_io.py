@@ -14,7 +14,7 @@ Template Storage:
 
 import re
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Union
 
 try:
     import frontmatter
@@ -25,7 +25,6 @@ except ImportError:
 
 from ..utils.log import logger
 from .models import AgentConfig, TeamConfig
-
 
 # ===== PROMPT RESOLVER =====
 
@@ -50,12 +49,15 @@ class PromptResolver:
 
     # Pattern to match {{name}} or {{path}} or {{name(key=value, ...)}}
     # Supports: letters, digits, underscore, dot, slash, hyphen
-    PATTERN = re.compile(r'\{\{([\w./-]+)(?:\(([^)]*)\))?\}\}')
+    PATTERN = re.compile(r"\{\{([\w./-]+)(?:\(([^)]*)\))?\}\}")
 
     # Pattern to parse key=value pairs (supports quoted values)
     PARAM_PATTERN = re.compile(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,\s]+))')
 
-    def __init__(self, prompts_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        prompts_dir: Optional[Path] = None,
+    ):
         """
         Initialize the prompt resolver.
 
@@ -108,7 +110,7 @@ class PromptResolver:
             # 1. Resolving default path parameters
             # 2. Resolving nested prompt references
             if _is_prompt_path_reference(name):
-                if name.startswith('/'):
+                if name.startswith("/"):
                     prompt_dir = Path(name).parent
                 else:
                     prompt_dir = (base_path / name).resolve().parent
@@ -267,7 +269,7 @@ class PromptResolver:
         # Determine the actual file path
         if _is_prompt_path_reference(name):
             # Path reference (absolute or relative)
-            if name.startswith('/'):
+            if name.startswith("/"):
                 # Absolute path
                 path = Path(name)
             else:
@@ -294,7 +296,7 @@ class PromptResolver:
             if _is_prompt_path_reference(name):
                 raise ValueError(f"Prompt file not found: {path}")
             else:
-                raise ValueError(f"Prompt '{name}' not found in {self.prompts_dir}")
+                raise ValueError(f"Prompt '{name}' not found")
 
         # Load and parse
         try:
@@ -323,12 +325,14 @@ class PromptResolver:
             try:
                 content = path.read_text(encoding="utf-8")
                 post = frontmatter.loads(content)
-                prompts.append({
-                    "id": post.metadata.get("id", path.stem),
-                    "name": post.metadata.get("name", path.stem),
-                    "description": post.metadata.get("description", ""),
-                    "params": post.metadata.get("params", {}),
-                })
+                prompts.append(
+                    {
+                        "id": post.metadata.get("id", path.stem),
+                        "name": post.metadata.get("name", path.stem),
+                        "description": post.metadata.get("description", ""),
+                        "params": post.metadata.get("params", {}),
+                    }
+                )
             except Exception as exc:
                 logger.warning(f"Failed to parse prompt {path}: {exc}")
 
@@ -343,11 +347,11 @@ class PromptResolver:
 _prompt_resolver: Optional[PromptResolver] = None
 
 
-def get_prompt_resolver() -> PromptResolver:
+def get_prompt_resolver(prompt_dir: Optional[Path] = None) -> PromptResolver:
     """Get the global PromptResolver instance."""
     global _prompt_resolver
     if _prompt_resolver is None:
-        _prompt_resolver = PromptResolver()
+        _prompt_resolver = PromptResolver(prompts_dir=prompt_dir)
     return _prompt_resolver
 
 
@@ -366,6 +370,25 @@ def resolve_prompts(text: str, base_path: Optional[Path] = None) -> str:
     return get_prompt_resolver().resolve(text, base_path)
 
 
+def resolve_prompts_for_team(team_config: TeamConfig) -> None:
+    """Expand prompt placeholders for all agents within a team."""
+
+    for agent in team_config.agents:
+        instructions = agent.instructions or ""
+        if not instructions.strip():
+            continue
+
+        base_path = None
+        source_path = getattr(agent, "source_path", None)
+        if source_path:
+            try:
+                base_path = Path(source_path).parent
+            except Exception:
+                base_path = None
+
+        agent.instructions = resolve_prompts(instructions, base_path)
+
+
 # ===== HELPER FUNCTIONS =====
 
 
@@ -380,7 +403,7 @@ def _is_prompt_path_reference(name: str) -> bool:
         - '/absolute/path/prompt.md' -> True
         - 'work_strategy' -> False (ID reference)
     """
-    return '/' in name or name.endswith('.md')
+    return "/" in name or name.endswith(".md")
 
 
 def _is_path_reference(entry: str) -> bool:
@@ -394,7 +417,7 @@ def _is_path_reference(entry: str) -> bool:
         - '/absolute/path/agent.md' -> True
         - 'python_dev' -> False (ID reference)
     """
-    return '/' in entry or entry.endswith('.md')
+    return "/" in entry or entry.endswith(".md")
 
 
 class UnifiedMarkdownParser:
@@ -417,9 +440,7 @@ class UnifiedMarkdownParser:
         try:
             post = frontmatter.loads(content)
         except Exception as exc:
-            raise ValueError(
-                f"Failed to parse markdown frontmatter: {exc}"
-            ) from exc
+            raise ValueError(f"Failed to parse markdown frontmatter: {exc}") from exc
 
         # Store file path for use in parse_agent/parse_team
         self._current_file_path = path
@@ -453,9 +474,9 @@ class UnifiedMarkdownParser:
         if base_path is None and self._current_file_path is not None:
             base_path = self._current_file_path.parent
 
-        # Resolve {{prompt_name}} or {{prompt_name(params)}} references in instructions
+        # Capture original instructions; resolution deferred unless explicitly requested
         instructions = (post.content or "").strip()
-        instructions = resolve_prompts(instructions, base_path)
+        source_path = str(self._current_file_path) if self._current_file_path else None
 
         return AgentConfig(
             id=agent_id,
@@ -466,6 +487,7 @@ class UnifiedMarkdownParser:
             toolsets=list(metadata.get("toolsets", []) or []),
             mcp_servers=list(metadata.get("mcp_servers", []) or []),
             tags=list(metadata.get("tags", []) or []),
+            source_path=source_path,
         )
 
     def parse_team(
@@ -573,7 +595,10 @@ class UnifiedMarkdownParser:
                 inline_idx += 1
 
                 # Resolve {{prompt_name}} or {{prompt_name(params)}} references
-                instructions = resolve_prompts(instructions, base_path)
+                # Inline instructions stay raw; prompts resolved later in prepare_team
+                source_path = (
+                    str(self._current_file_path) if self._current_file_path else None
+                )
 
                 agents.append(
                     AgentConfig(
@@ -585,6 +610,7 @@ class UnifiedMarkdownParser:
                         toolsets=list(agent_metadata.get("toolsets", []) or []),
                         mcp_servers=list(agent_metadata.get("mcp_servers", []) or []),
                         tags=list(agent_metadata.get("tags", []) or []),
+                        source_path=source_path,
                     )
                 )
             else:
@@ -709,9 +735,7 @@ class UnifiedMarkdownParser:
             if agent.instructions.strip():
                 body_sections.append(agent.instructions.strip())
 
-        body_text = "\n\n---\n\n".join(
-            section for section in body_sections if section
-        )
+        body_text = "\n\n---\n\n".join(section for section in body_sections if section)
 
         if body_text:
             return f"---\n{fm_text}---\n\n{body_text}\n"
@@ -935,9 +959,7 @@ class FileBasedTemplateManager:
         path = self.teams_dir / f"{team_id}.md"
 
         if not path.exists():
-            raise FileNotFoundError(
-                f"Team {team_id} not found in user directory"
-            )
+            raise FileNotFoundError(f"Team {team_id} not found in user directory")
 
         self._write_team_file(template, path, overwrite=True)
         logger.info(f"Updated team: {team_id}")
@@ -1038,7 +1060,7 @@ class FileBasedTemplateManager:
         Raises:
             FileNotFoundError: If agent file not found
         """
-        if ref_path.startswith('/'):
+        if ref_path.startswith("/"):
             # Absolute path
             full_path = Path(ref_path)
         else:
@@ -1148,9 +1170,7 @@ class FileBasedTemplateManager:
         content = self.parser.generate_agent(agent)
         self._atomic_write(path, content)
 
-    def _write_team_file(
-        self, template: TeamConfig, path: Path, *, overwrite: bool
-    ):
+    def _write_team_file(self, template: TeamConfig, path: Path, *, overwrite: bool):
         """Serialize a TeamConfig to disk."""
         if path.exists() and not overwrite:
             raise FileExistsError(f"Team {template.id} already exists")

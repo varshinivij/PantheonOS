@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.log import logger
-from .template_io import FileBasedTemplateManager
+from .template_io import FileBasedTemplateManager, resolve_prompts_for_team
 from .models import AgentConfig, TeamConfig
 
 
@@ -117,10 +117,10 @@ class TemplateManager:
             tags=template_dict.get("tags", []),
         )
 
-    def prepare_team(
-        self, team_config: TeamConfig
-    ) -> Tuple[dict, set[str], set[str]]:
+    def prepare_team(self, team_config: TeamConfig) -> Tuple[dict, set[str], set[str]]:
         """Resolve agents and required services for a team."""
+
+        resolve_prompts_for_team(team_config)
 
         agent_payloads: dict[str, dict] = {}
         required_toolsets: set[str] = set()
@@ -223,15 +223,27 @@ class TemplateManager:
             if file_type not in {"teams", "agents", "all"}:
                 return {"success": False, "error": f"Unknown file_type: {file_type}"}
 
-            team_files = [
-                {"id": tmpl.id, "name": tmpl.name, "path": f"teams/{tmpl.id}.md"}
-                for tmpl in self.list_templates()
-            ] if file_type in {"teams", "all"} else []
+            team_files = (
+                [
+                    {"id": tmpl.id, "name": tmpl.name, "path": f"teams/{tmpl.id}.md"}
+                    for tmpl in self.list_templates()
+                ]
+                if file_type in {"teams", "all"}
+                else []
+            )
 
-            agent_files = [
-                {"id": agent.id, "name": agent.name, "path": f"agents/{agent.id}.md"}
-                for agent in self.file_manager.list_agents()
-            ] if file_type in {"agents", "all"} else []
+            agent_files = (
+                [
+                    {
+                        "id": agent.id,
+                        "name": agent.name,
+                        "path": f"agents/{agent.id}.md",
+                    }
+                    for agent in self.file_manager.list_agents()
+                ]
+                if file_type in {"agents", "all"}
+                else []
+            )
 
             files = team_files + agent_files
 
