@@ -66,7 +66,8 @@ class ChatRoom(ToolSet):
         super().__init__(name=name, **kwargs)
 
         # ChatRoom specific initialization (before endpoint setup for workspace_path default)
-        self.memory_dir = Path(memory_dir)
+        # Convert to absolute path BEFORE Endpoint creation (Endpoint does os.chdir)
+        self.memory_dir = Path(memory_dir).resolve()
         self.memory_manager = MemoryManager(self.memory_dir)
 
         # Determine endpoint connection mode based on type

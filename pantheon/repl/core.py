@@ -330,11 +330,10 @@ class Repl(ReplUI):
         # Set up connection between UI and token tracking
         self._parent_repl = self
 
-        # Start the message printing task only if team has events_queue (legacy mode)
+        # NOTE: print_message() is disabled for ChatRoom-based REPL
         # In ChatRoom mode, streaming is handled via process_chunk/process_step_message callbacks
+        # The events_queue approach is only for legacy direct agent/team mode (not used here)
         print_task = None
-        if self._team and hasattr(self._team, 'events_queue') and self._team.events_queue:
-            print_task = asyncio.create_task(self.print_message())
 
         # Handle initial message if provided
         current_message = message
@@ -347,6 +346,7 @@ class Repl(ReplUI):
                 try:
                     current_message = self.ask_user_input()
                     if not current_message.strip():
+                        current_message = None  # Reset to request new input
                         continue
                     self._add_to_history(current_message)
                 except (KeyboardInterrupt, EOFError):
@@ -483,14 +483,55 @@ class Repl(ReplUI):
                 "".join(content_buffer + tool_calls_content_buffer)
             )
 
-        # Animation frames
-        animation_frames = ["▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩"]
+        # Animation frames - try fancy Unicode, fallback to ASCII on Windows
+        def get_animation_frames():
+            # Braille spinner (commonly supported)
+            fancy_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            ascii_frames = ["-", "\\", "|", "/"]
+
+            # Test if console can handle Unicode
+            try:
+                import sys
+                # Try to encode a test character
+                test_char = fancy_frames[0]
+                if sys.stdout.encoding:
+                    test_char.encode(sys.stdout.encoding)
+                return fancy_frames
+            except (UnicodeEncodeError, LookupError):
+                return ascii_frames
+
+        animation_frames = get_animation_frames()
         frame_index = 0
 
-        processing_live = Live(console=self.console, refresh_per_second=4)
+        # Separator - fancy or ASCII
+        def get_separator():
+            try:
+                import sys
+                sep = "•"
+                if sys.stdout.encoding:
+                    sep.encode(sys.stdout.encoding)
+                return sep
+            except (UnicodeEncodeError, LookupError):
+                return "|"
+
+        sep = get_separator()
+
+        processing_live = Live(console=self.console, refresh_per_second=8, transient=True)
         processing_live.start()
 
         try:
+            # Wave effect brightness levels (grey scale gradient)
+            wave_colors = ["grey30", "grey42", "grey54", "grey66", "grey78", "grey89", "white", "grey89", "grey78", "grey66", "grey54", "grey42"]
+
+            def create_wave_text(text: str, offset: int) -> str:
+                """Create text with wave brightness effect."""
+                result = []
+                for i, char in enumerate(text):
+                    # Calculate wave position for this character
+                    wave_pos = (i + offset) % len(wave_colors)
+                    color = wave_colors[wave_pos]
+                    result.append(f"[{color}]{char}[/{color}]")
+                return "".join(result)
 
             def update_processing_status():
                 nonlocal frame_index
@@ -499,13 +540,14 @@ class Repl(ReplUI):
                 current_frame = animation_frames[frame_index % len(animation_frames)]
 
                 if self._current_tool_name and self._tools_executing:
-                    status_text = f"[dim]{current_frame} Running [bold cyan]{self._current_tool_name}[/bold cyan]... • {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    wave_text = create_wave_text(f"Running {self._current_tool_name}...", frame_index)
+                    status_text = f"[dim]{current_frame}[/dim] {wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
                 else:
-                    status_text = f"[dim]{current_frame} Processing... • {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    wave_text = create_wave_text("Processing...", frame_index)
+                    status_text = f"[dim]{current_frame}[/dim] {wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
 
                 if elapsed > 1:
-                    status_text += f" • {elapsed:.1f}s"
-                status_text += "[/dim]"
+                    status_text += f"[dim] {sep} {elapsed:.1f}s[/dim]"
 
                 processing_live.update(Text.from_markup(status_text))
                 frame_index += 1

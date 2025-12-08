@@ -18,6 +18,20 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Enable UTF-8 mode on Windows for fancy Unicode characters
+if sys.platform == "win32":
+    try:
+        import os
+        # Set console to UTF-8 mode
+        os.system("chcp 65001 > nul 2>&1")
+        # Also set environment variable for Python
+        if sys.stdout:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass  # Silently ignore if it fails
+
 
 def start(
     template: str = None,
