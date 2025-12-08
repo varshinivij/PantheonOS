@@ -757,6 +757,7 @@ class ChatRoom(ToolSet):
         self,
         chat_id: str,
         message: list[dict],
+        context_variables: dict | None = None,
         process_chunk=None,
         process_step_message=None,
     ):
@@ -765,6 +766,9 @@ class ChatRoom(ToolSet):
         Args:
             chat_id: The ID of the chat.
             message: The messages to send to the chat.
+                Messages can include `_llm_content` field for LLM-specific content
+                (assembled by frontend) while `content` is used for display.
+            context_variables: Optional context variables to pass to the agent.
             process_chunk: The function to process the chunk.
             process_step_message: The function to process the step message.
         """
@@ -790,7 +794,9 @@ class ChatRoom(ToolSet):
             team_getter,  # Pass team getter
             memory,
             message,
+            context_variables=context_variables,
         )
+
         self.threads[chat_id] = thread
 
         # Add NATS streaming hooks if enabled

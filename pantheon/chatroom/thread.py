@@ -24,6 +24,7 @@ class Thread:
         team,  # team/team_getter
         memory: Memory,
         message: list[dict],
+        context_variables: dict | None = None,
         run_hook_timeout: float = 1.0,
         hook_retry_times: int = 5,
     ):
@@ -31,6 +32,7 @@ class Thread:
         self.team = team  # team/team_getter
         self.memory = memory
         self.message = message
+        self.context_variables = context_variables or {}
         self._process_chunk_hooks: list[Callable] = []
         self._process_step_message_hooks: list[Callable] = []
         self.response = None
@@ -126,6 +128,7 @@ class Thread:
             resp = await team.run(
                 self.message,
                 memory=self.memory,
+                context_variables=self.context_variables,
                 process_chunk=self.process_chunk,
                 process_step_message=self.process_step_message,
                 check_stop=self._check_stop,

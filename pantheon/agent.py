@@ -1069,7 +1069,6 @@ class Agent:
         """
         if not prompt or "${{" not in prompt:
             return prompt
-
         # Regex to find ${{ ... }} blocks
         pattern = re.compile(r"\$\{\{(.*?)\}\}")
         
@@ -1119,6 +1118,12 @@ class Agent:
     ) -> ResponseDetails | AgentTransfer:
         response_format = response_format or self.response_format
         history = copy.deepcopy(messages)
+
+        # Use _llm_content for LLM if present (assembled user messages)
+        for msg in history:
+            if "_llm_content" in msg:
+                msg["content"] = msg["_llm_content"]
+
         tool_timeout = tool_timeout or self.tool_timeout
 
 
@@ -1353,7 +1358,7 @@ class Agent:
             conversation_history = self._sanitize_messages(conversation_history)
 
         # preserve execution_context_id if tool need
-        context_variables = context_variables or {}
+        context_variables = (context_variables or {}).copy()
         if execution_context_id is not None:
             context_variables["execution_context_id"] = execution_context_id
         # preserve client_id from context_variables or memory
@@ -1427,7 +1432,6 @@ class Agent:
             memory=memory,
             use_memory=use_memory,
         )
-
         # Prepare response format
         response_format_to_use = response_format or self.response_format
 
