@@ -350,7 +350,12 @@ class ReplUI:
         self.console.print("[dim][bold purple]/new     [/bold purple][/dim] - Create new chat session")
         self.console.print("[dim][bold purple]/list    [/bold purple][/dim] - List all chat sessions")
         self.console.print("[dim][bold purple]/switch  [/bold purple][/dim] - Switch to another chat (by id or name)")
+        self.console.print()
+
+        self.console.print("[dim][bold blue]-- AGENT MANAGEMENT -------------------------------------------------[/bold blue][/dim]")
+        self.console.print()
         self.console.print("[dim][bold purple]/agents  [/bold purple][/dim] - Show agents in current team")
+        self.console.print("[dim][bold purple]/agent   [/bold purple][/dim] - Switch to agent (by name or number)")
         self.console.print()
 
         if READLINE_AVAILABLE:

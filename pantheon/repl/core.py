@@ -429,6 +429,13 @@ class Repl(ReplUI):
                 current_message = None
                 continue
 
+            # Agent switch command: /agent <name> or /agent <number>
+            elif cmd_lower.startswith("/agent "):
+                agent_arg = cmd[7:].strip()
+                await self._handle_switch_agent(agent_arg)
+                current_message = None
+                continue
+
             # Custom command handlers
             continue_flag = False
             for handler in self.handlers:
@@ -551,13 +558,18 @@ class Repl(ReplUI):
 
                 current_frame = animation_frames[animation_index]
 
+                # Build agent prefix for multi-agent mode
+                agent_prefix = ""
+                if self._is_multi_agent and self._current_agent_name:
+                    agent_prefix = f"[cyan]{self._current_agent_name}[/cyan] "
+
                 if self._current_tool_name and self._tools_executing:
                     display_name = format_tool_name_for_status(self._current_tool_name)
                     wave_text = create_wave_text(f"Running {display_name}...", wave_offset)
-                    status_text = f"[dim]{current_frame}[/dim] {wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
                 else:
                     wave_text = create_wave_text("Processing...", wave_offset)
-                    status_text = f"[dim]{current_frame}[/dim] {wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
 
                 if elapsed > 1:
                     status_text += f"[dim] {sep} {elapsed:.1f}s[/dim]"
@@ -578,6 +590,27 @@ class Repl(ReplUI):
 
                 def process_step_message(step: dict):
                     """Handle step messages (tool calls, tool results, assistant content)."""
+                    # Track agent changes for multi-agent display
+                    agent_name = step.get("agent_name")
+                    if agent_name and self._is_multi_agent:
+                        if agent_name != self._current_agent_name:
+                            # Agent switched - print indicator
+                            animation_pause_event.set()
+                            processing_live.stop()
+                            if self._current_agent_name:
+                                # Delegated or transferred from another agent
+                                self.console.print(
+                                    f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
+                                )
+                            else:
+                                # First agent in conversation
+                                self.console.print(
+                                    f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
+                                )
+                            processing_live.start()
+                            animation_pause_event.clear()
+                            self._current_agent_name = agent_name
+
                     # Handle assistant content FIRST (before tool calls)
                     # This prints intermediate thoughts before showing tool usage
                     if step.get("role") == "assistant" and step.get("content"):
@@ -718,11 +751,14 @@ class Repl(ReplUI):
             if "processing_live" in locals():
                 processing_live.stop()
 
-        # Print final content
+        # Print final content with agent label (multi-agent mode)
         self.console.print()
         if content_buffer:
             full_content = "".join(content_buffer)
             if full_content.strip():
+                # Show agent label before final response (multi-agent mode)
+                if self._is_multi_agent and self._current_agent_name:
+                    self.console.print(f"[dim]→[/dim] [bold cyan]{self._current_agent_name}[/bold cyan]")
                 if (
                     "```" in full_content
                     or "def " in full_content
@@ -827,7 +863,7 @@ class Repl(ReplUI):
         self.console.print()
 
     async def _handle_show_agents(self):
-        """Show agents in current team."""
+        """Show agents in current team with current agent indicator."""
         self.console.print()
         self.console.print(
             "[dim][bold blue]-- AGENTS -----------------------------------------------------------[/bold blue][/dim]"
@@ -835,19 +871,108 @@ class Repl(ReplUI):
         self.console.print()
 
         if self._team:
-            for agent in self._team.agents.values():
-                agent_info = f"  • [bright_blue]{agent.name}[/bright_blue]"
+            # Determine current active agent
+            current_agent_name = self._current_agent_name
+            if not current_agent_name:
+                # Default to first agent if not set
+                current_agent_name = list(self._team.agents.keys())[0] if self._team.agents else None
+
+            # Print header
+            self.console.print(
+                f"[dim]  #   {'Name':<20} {'Model':<25} Description[/dim]"
+            )
+            self.console.print(
+                "[dim]  ─────────────────────────────────────────────────────────────────[/dim]"
+            )
+
+            for idx, agent in enumerate(self._team.agents.values(), 1):
+                # Check if this is the current agent
+                is_current = agent.name == current_agent_name
+                marker = "→" if is_current else " "
+
+                # Get model info
                 if hasattr(agent, "models") and agent.models:
                     model = (
                         agent.models[0]
                         if isinstance(agent.models, list)
                         else agent.models
                     )
-                    agent_info += f" [dim]({model})[/dim]"
-                self.console.print(agent_info)
+                    # Truncate long model names
+                    if len(model) > 23:
+                        model = model[:20] + "..."
+                else:
+                    model = "-"
+
+                # Get description
+                description = ""
+                if hasattr(agent, "description") and agent.description:
+                    description = agent.description
+                    if len(description) > 30:
+                        description = description[:27] + "..."
+
+                # Format agent name
+                name = agent.name
+                if len(name) > 18:
+                    name = name[:15] + "..."
+
+                if is_current:
+                    self.console.print(
+                        f"[dim]{marker}[/dim] [cyan]{idx:<3}[/cyan] [bold cyan]{name:<20}[/bold cyan] [dim]{model:<25}[/dim] [dim]{description}[/dim]"
+                    )
+                else:
+                    self.console.print(
+                        f"[dim]{marker}[/dim] [cyan]{idx:<3}[/cyan] [bold]{name:<20}[/bold] [dim]{model:<25}[/dim] [dim]{description}[/dim]"
+                    )
         else:
             self.console.print("[dim]No team loaded[/dim]")
         self.console.print()
+
+    async def _handle_switch_agent(self, agent_arg: str):
+        """Switch to a different agent by name or number."""
+        if not self._team:
+            self.console.print("[red]No team loaded[/red]")
+            return
+
+        if not self._is_multi_agent:
+            self.console.print("[yellow]Single agent mode - no switching needed[/yellow]")
+            return
+
+        agent_names = list(self._team.agents.keys())
+
+        # Try to parse as number first
+        target_agent_name = None
+        try:
+            idx = int(agent_arg)
+            if 1 <= idx <= len(agent_names):
+                target_agent_name = agent_names[idx - 1]
+            else:
+                self.console.print(f"[red]Invalid agent number: {idx}. Valid range: 1-{len(agent_names)}[/red]")
+                return
+        except ValueError:
+            # Try to match by name (case-insensitive, partial match)
+            agent_arg_lower = agent_arg.lower()
+            for name in agent_names:
+                if name.lower() == agent_arg_lower or name.lower().startswith(agent_arg_lower):
+                    target_agent_name = name
+                    break
+
+            if not target_agent_name:
+                self.console.print(f"[red]Agent not found: {agent_arg}[/red]")
+                self.console.print(f"[dim]Available agents: {', '.join(agent_names)}[/dim]")
+                return
+
+        # Check if already on this agent
+        if target_agent_name == self._current_agent_name:
+            self.console.print(f"[dim]Already on agent: {target_agent_name}[/dim]")
+            return
+
+        # Switch agent via chatroom
+        result = await self._chatroom.set_active_agent(self._chat_id, target_agent_name)
+        if result.get("success"):
+            self._current_agent_name = target_agent_name
+            self.console.print(f"[green]✅ Switched to:[/green] [bold cyan]{target_agent_name}[/bold cyan]")
+        else:
+            self.console.print(f"[red]Failed to switch agent: {result.get('message', 'Unknown error')}[/red]")
 
     async def _handle_clear(self):
         """Clear current chat and create new one."""
