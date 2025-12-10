@@ -1,8 +1,8 @@
 """Prompt application for REPL with prompt_toolkit integration.
 
 This module provides a prompt_toolkit-based input session with:
-- Fixed input box at bottom with border (using Frame widget)
-- Dynamic status bar in frame title
+- Fixed input box at bottom with horizontal line borders (top/bottom only)
+- Dynamic status bar below input
 - Command completion
 - Async status bar refresh during processing
 - Concurrent input processing via Application.run_async()
@@ -15,8 +15,8 @@ import asyncio
 from typing import TYPE_CHECKING, Optional
 
 from prompt_toolkit import Application
-from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, DynamicContainer
-from prompt_toolkit.widgets import Frame, TextArea, SearchToolbar
+from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, DynamicContainer, ConditionalContainer
+from prompt_toolkit.widgets import TextArea
 from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -143,11 +143,40 @@ def create_key_bindings(app_instance: "PantheonInputApp") -> KeyBindings:
         if text.strip():
              app_instance.accept_input(buffer)
 
-    @kb.add('escape', 'enter')  # Alt+Enter
+    # Condition: check if processing
+    is_processing = Condition(lambda: getattr(app_instance, '_is_processing', False))
+
+    @kb.add('escape', 'enter')  # Alt+Enter to insert newline
+    @kb.add('c-j')  # Ctrl+J as reliable fallback
     def _(event):
         """Insert newline."""
         event.current_buffer.insert_text('\n')
-        
+
+    @kb.add('c-d')
+    def _(event):
+        """Ctrl+D to exit (EOF)."""
+        # Print session summary before exit
+        repl = app_instance.repl
+        if hasattr(repl, '_print_session_summary'):
+            repl._print_session_summary()
+        # Signal app to exit
+        event.app.exit(exception=EOFError())
+
+    @kb.add('escape', eager=True, filter=is_processing)
+    def _(event):
+        """Escape to cancel operation immediately (only when processing)."""
+        # Cancel any running agent task
+        repl = app_instance.repl
+        if hasattr(repl, '_current_agent_task') and repl._current_agent_task:
+            if not repl._current_agent_task.done():
+                repl._current_agent_task.cancel()
+                print("\n[Cancelled]")
+
+    @kb.add('escape', filter=~is_processing)
+    def _(event):
+        """Escape to clear input (when idle)."""
+        event.current_buffer.text = ""
+
     return kb
 
 
@@ -220,17 +249,35 @@ class PantheonInputApp:
         # So we attach our KB to the Layout or Application
         
         # Main Layout Structure
-        # 1. Input Area (TextArea) inside a Frame (Border)
-        # 2. Status Bar (Window with FormattedTextControl) below Input
-        # 3. All wrapped in FloatContainer to support CompletionsMenu (dropdown)
-        
+        # 1. Processing status line (above input, only visible when processing)
+        # 2. Input Area (TextArea) with top/bottom borders
+        # 3. Status Bar (model/agent info) below Input
+        # 4. All wrapped in FloatContainer to support CompletionsMenu (dropdown)
+
+        self.processing_control = FormattedTextControl(text=self.get_processing_formatted_text)
         self.status_control = FormattedTextControl(text=self.get_status_formatted_text)
-        
+
         self.root_container = HSplit([
-            # Dynamic Input Container (Frame only if multiline)
+            # Empty line for spacing (only when processing)
+            ConditionalContainer(
+                Window(height=1),
+                filter=Condition(lambda: self._is_processing)
+            ),
+
+            # Processing status line (above input)
+            ConditionalContainer(
+                Window(
+                    content=self.processing_control,
+                    height=1,
+                    style="class:processing-bar"
+                ),
+                filter=Condition(lambda: self._is_processing)
+            ),
+
+            # Dynamic Input Container
             DynamicContainer(self._get_input_container),
-            
-            # Status Bar below input
+
+            # Status Bar below input (model/agent info)
             Window(
                 content=self.status_control,
                 height=1,
@@ -245,7 +292,7 @@ class PantheonInputApp:
                     Float(
                         xcursor=True,
                         ycursor=False,
-                        bottom=3, # Anchor above input line (Status=1 + Border=1 + TextLine=1 => 3 from bottom)
+                        bottom=2,  # Anchor above input line (Status=1 + BottomLine=1 => 2 from bottom)
                         content=CompletionsMenu(max_height=16, scroll_offset=1),
                     ),
                 ],
@@ -262,16 +309,24 @@ class PantheonInputApp:
             refresh_interval=0.5,
         )
     
-    def _get_input_container(self):
-        """Return input container with Frame wrapper.
-        
-        Always uses Frame to avoid border artifacts when terminal is resized.
-        This is more stable than dynamically switching between Frame and HSplit.
-        """
-        return Frame(
-            self.text_area,
-            style="class:frame"
+    def _create_horizontal_line(self, char: str = '─', style: str = 'fg:ansiblue'):
+        """Create a horizontal line that spans terminal width."""
+        def get_line():
+            # Return a long line, prompt_toolkit will auto-truncate to terminal width
+            return [(style, char * 500)]
+
+        return Window(
+            content=FormattedTextControl(get_line),
+            height=1,
         )
+
+    def _get_input_container(self):
+        """Return input container with top/bottom horizontal lines (no side borders)."""
+        return HSplit([
+            self._create_horizontal_line('─', 'fg:ansiblue'),  # Top line
+            self.text_area,
+            self._create_horizontal_line('─', 'fg:ansiblue'),  # Bottom line
+        ])
 
     def accept_input(self, buffer: Buffer):
         """Handle input submission from TextArea."""
@@ -284,7 +339,13 @@ class PantheonInputApp:
         # Print to stdout so it appears in scrollback
         # We must use print WITHOUT redirecting to the app buffer, so use proper stdout
         # But we are likely inside patch_stdout, so standard print works well to put text 'above'
-        print(f"\nYou: {text}")
+        # Format: "> message" with light gray background (ANSI 256-color: 238)
+        bg_color = "\033[48;5;238m"  # Light gray background
+        reset = "\033[0m"
+        # Handle multiline: prefix each line with "> "
+        lines = text.split('\n')
+        formatted_lines = [f"{bg_color}> {line}{reset}" for line in lines]
+        print("\n" + "\n".join(formatted_lines))
         
         # Put into queue
         self.message_queue.put_nowait(text)
@@ -298,34 +359,36 @@ class PantheonInputApp:
         self.app.layout.focus(self.text_area)
         await self.app.run_async()
     
+    def get_processing_formatted_text(self) -> HTML:
+        """Generate processing status line content (above input) with wave animation."""
+        # Create wave text
+        wave_text_parts = []
+        clean_status = self._status_text
+
+        # Apply wave color to each character
+        for i, char in enumerate(clean_status):
+            if char.isspace():
+                wave_text_parts.append(char)
+                continue
+            color = get_wave_color(i, self._wave_offset)
+            wave_text_parts.append(f'<style fg="{color}">{char}</style>')
+
+        wave_html = "".join(wave_text_parts)
+
+        return HTML(
+            f"{self._current_spinner} {wave_html} {self._separator} "
+            f"{self._input_tokens} in, {self._output_tokens} out "
+            f"{self._separator} {self._current_elapsed:.1f}s "
+            f'{self._separator} <style fg="#888888">[Esc] cancel</style>'
+        )
+
     def get_status_formatted_text(self) -> HTML:
-        """Generate dynamic status bar content (HTML) with wave animation."""
-        if self._is_processing:
-            # Create wave text
-            wave_text_parts = []
-            clean_status = self._status_text
-            
-            # Apply wave color to each character
-            for i, char in enumerate(clean_status):
-                if char.isspace():
-                    wave_text_parts.append(char)
-                    continue
-                color = get_wave_color(i, self._wave_offset)
-                wave_text_parts.append(f'<style fg="{color}">{char}</style>')
-            
-            wave_html = "".join(wave_text_parts)
-            
-            return HTML(
-                f" {self._current_spinner} {wave_html} {self._separator} "
-                f"{self._input_tokens} in, {self._output_tokens} out "
-                f"{self._separator} {self._current_elapsed:.1f}s "
-            )
-        else:
-            # Idle: show model and agent info + token usage
-            usage_display = f"ctx: {self._token_usage_pct:.0f}%" if self._token_usage_pct > 0 else "ctx: 0%"
-            return HTML(
-                f" ⏺ {self._model_name} │ agent: {self._current_agent} │ {usage_display} │ {self._status_text} "
-            )
+        """Generate bottom status bar content (model/agent info)."""
+        usage_display = f"ctx: {self._token_usage_pct:.0f}%" if self._token_usage_pct > 0 else "ctx: 0%"
+        status = "Processing..." if self._is_processing else "Ready"
+        return HTML(
+            f" ⏺ {self._model_name} │ agent: {self._current_agent} │ {usage_display} │ {status} "
+        )
 
     def start_processing(self, input_tokens: int = 0):
         """Mark processing start."""

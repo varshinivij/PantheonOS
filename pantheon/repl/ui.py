@@ -40,9 +40,6 @@ def print_banner(console: Console, text: str = "PANTHEON"):
         horizontal=True,
     )
     console.print(rich_fig)
-    
-    # Add a thin separator line under the banner for style
-    console.print(Text("─" * 60, style="dim"))
 
 
 def print_agent_message_modern_style(
@@ -341,34 +338,32 @@ class ReplUI:
         
         session_text = "\n".join(session_lines)
 
-        # 3. Token Info
-        total_tokens = self.total_input_tokens + self.total_output_tokens
-        # Vertical stack: Usage -> Total -> (Input/Output could be added if needed, but keeping simple for now)
-        token_text = f"[bold]Usage[/bold]\n[dim]{self._format_token_count(total_tokens)} tokens\n(Total)[/dim]"
-        
-        # 4. Help Info
-        # Vertical stack: Controls -> /help -> exit
-        help_text = "[bold]Controls[/bold]\n[dim]/help\nCtrl+C to exit[/dim]"
+        # 3. Quick Start - Commands and shortcuts (merged row)
+        quick_start_text = (
+            "[bold]Quick Start[/bold]\n"
+            "[dim]/help[/dim] commands   [dim]/agents[/dim] team   [dim]/exit[/dim] quit\n"
+            "[dim]Esc[/dim] cancel   [dim]Ctrl+D[/dim] exit   [dim]Alt+Enter[/dim] newline"
+        )
 
-        # Create Table (2x2 grid)
-        # Create table with Claude style (border separated from content lines)
+        # Create Table (2 rows: top split, bottom merged)
         table = Table(
             show_header=False,
             box=CLAUDE_BOX,
             border_style="blue",
             expand=True,
-            show_lines=True, # Show internal lines (horizontal separators)
+            show_lines=True,
             padding=(0, 2),
             collapse_padding=True,
         )
 
-        # define columns with equal ratio
+        # Define columns
         table.add_column(ratio=1)
         table.add_column(ratio=1)
 
-        # Add rows (2x2)
+        # Row 1: Team | Sessions
         table.add_row(team_text, session_text)
-        table.add_row(token_text, help_text)
+        # Row 2: Quick Start (spans visually by leaving right cell empty)
+        table.add_row(quick_start_text, "")
         
         self.console.print(table)
 
@@ -376,7 +371,14 @@ class ReplUI:
         self.console.print("[purple]Aristotle © 2025[/purple]")
         print_banner(self.console)
         self.console.print()
-        
+        self.console.print(
+            "[bold italic]Multi-agent system for scientific research[/bold italic]"
+        )
+        self.console.print(
+            "[bold italic dim]Pantheon is a research project, use with caution.[/bold italic dim]"
+        )
+        self.console.print()
+
         # Fetch recent chats if available (via Repl mixin)
         recent_chats = []
         chatroom = getattr(self, '_chatroom', None)
@@ -439,8 +441,15 @@ class ReplUI:
         self.console.print("[dim][bold purple]/clear   [/bold purple][/dim] - Clear screen")
         self.console.print("[dim][bold purple]!<cmd>   [/bold purple][/dim] - Execute bash command directly (no LLM)")
         self.console.print("[dim][bold purple]/exit    [/bold purple][/dim] - Exit cleanly")
-        self.console.print("[dim]Ctrl+C   [/dim] - Cancel current operation")
-        self.console.print("[dim]Ctrl+C x2[/dim] - Force exit (within 2 seconds)")
+        self.console.print()
+
+        self.console.print("[dim][bold blue]-- SHORTCUTS --------------------------------------------------------[/bold blue][/dim]")
+        self.console.print()
+        self.console.print("[dim]Esc      [/dim] - Cancel operation / clear input")
+        self.console.print("[dim]Ctrl+C   [/dim] - Cancel, press twice to exit")
+        self.console.print("[dim]Ctrl+D   [/dim] - Exit immediately")
+        self.console.print("[dim]Alt+Enter[/dim] - Insert newline (multiline input)")
+        self.console.print("[dim]Ctrl+J   [/dim] - Insert newline (alternative)")
         self.console.print()
 
         self.console.print("[dim][bold blue]-- CHAT MANAGEMENT --------------------------------------------------[/bold blue][/dim]")

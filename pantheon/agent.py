@@ -1248,6 +1248,7 @@ class Agent:
 
             if process_step_message:
                 for msg in process_messages_for_hook_func(non_transfer_messages):
+                    msg["agent_name"] = self.name  # Add agent_name to tool messages
                     await run_func(process_step_message, msg)
 
             if transfer_message:

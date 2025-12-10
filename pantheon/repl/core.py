@@ -349,10 +349,44 @@ class Repl(ReplUI):
             raise
 
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count using rough approximation."""
+        """Estimate token count with language-aware approximation.
+
+        Different character types have different token ratios:
+        - CJK characters (Chinese/Japanese/Korean): ~1.5 tokens per character
+        - ASCII (English, code, punctuation): ~0.25 tokens per character (4 chars/token)
+        - Other Unicode: ~0.5 tokens per character (2 chars/token)
+        """
         if not text:
             return 0
-        return max(1, len(text) // 4)
+
+        cjk_chars = 0
+        ascii_chars = 0
+        other_chars = 0
+
+        for char in text:
+            code = ord(char)
+            # CJK Unified Ideographs and common CJK ranges
+            if (0x4E00 <= code <= 0x9FFF or      # CJK Unified Ideographs
+                0x3400 <= code <= 0x4DBF or      # CJK Extension A
+                0x3000 <= code <= 0x303F or      # CJK Punctuation
+                0xFF00 <= code <= 0xFFEF or      # Fullwidth Forms
+                0xAC00 <= code <= 0xD7AF or      # Korean Hangul
+                0x3040 <= code <= 0x309F or      # Japanese Hiragana
+                0x30A0 <= code <= 0x30FF):       # Japanese Katakana
+                cjk_chars += 1
+            elif code < 128:  # ASCII
+                ascii_chars += 1
+            else:  # Other Unicode (emojis, symbols, etc.)
+                other_chars += 1
+
+        # Calculate estimated tokens
+        tokens = (
+            cjk_chars * 1.5 +       # CJK: ~1.5 tokens per char
+            ascii_chars * 0.25 +    # ASCII: ~4 chars per token
+            other_chars * 0.5       # Other: ~2 chars per token
+        )
+
+        return max(1, int(tokens))
 
     def _format_token_count(self, count: int) -> str:
         """Format token count with appropriate units."""
@@ -725,28 +759,14 @@ class Repl(ReplUI):
 
                 def process_step_message(step: dict):
                     """Handle step messages (tool calls, tool results, assistant content)."""
-                    # Track agent changes for multi-agent display
+                    # Track agent for status bar updates
                     agent_name = step.get("agent_name")
-                    if agent_name and self._is_multi_agent:
+                    if agent_name:
+                        # Update current agent name and status bar
                         if agent_name != self._current_agent_name:
-                            # Agent switched - print indicator
-                            animation_pause_event.set()
-                            if not self.prompt_app:
-                                processing_live.stop()
-                            if self._current_agent_name:
-                                # Delegated or transferred from another agent
-                                self.console.print(
-                                    f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
-                                )
-                            else:
-                                # First agent in conversation
-                                self.console.print(
-                                    f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
-                                )
-                            if not self.prompt_app:
-                                processing_live.start()
-                            animation_pause_event.clear()
                             self._current_agent_name = agent_name
+                            if self.prompt_app:
+                                self.prompt_app.update_agent(agent_name)
 
                     # Handle assistant content FIRST (before tool calls)
                     # This prints intermediate thoughts before showing tool usage
@@ -757,6 +777,11 @@ class Repl(ReplUI):
                             animation_pause_event.set()
                             if not self.prompt_app:
                                 processing_live.stop()
+                            # Print agent name before each response (multi-agent mode)
+                            if agent_name and self._is_multi_agent:
+                                self.console.print(
+                                    f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
+                                )
                             self.console.print()
                             if "```" in assistant_content or "def " in assistant_content or "import " in assistant_content:
                                 self.console.print(assistant_content)
@@ -1114,6 +1139,9 @@ class Repl(ReplUI):
         result = await self._chatroom.set_active_agent(self._chat_id, target_agent_name)
         if result.get("success"):
             self._current_agent_name = target_agent_name
+            # Update status bar agent display
+            if self.prompt_app:
+                self.prompt_app.update_agent(target_agent_name)
             self.console.print(f"[green]✅ Switched to:[/green] [bold cyan]{target_agent_name}[/bold cyan]")
         else:
             self.console.print(f"[red]Failed to switch agent: {result.get('message', 'Unknown error')}[/red]")
@@ -1128,6 +1156,10 @@ class Repl(ReplUI):
         self._chat_id = result["chat_id"]
         self._current_agent_name = None
         self._last_printed_agent = None
+        # Reset status bar to first agent
+        if self.prompt_app and self._team and self._team.agents:
+            first_agent_name = list(self._team.agents.keys())[0]
+            self.prompt_app.update_agent(first_agent_name)
         await self.print_greeting()
 
     def _handle_save_command(self, command: str):
