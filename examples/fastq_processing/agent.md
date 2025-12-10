@@ -2,6 +2,7 @@
 icon: 🧬
 id: fastq_processor
 name: FASTQ Processor
+description: A agent that helps users perform upstream bioinformatics analysis tasks.
 model: openai/gpt-5
 toolsets:
   - python_interpreter

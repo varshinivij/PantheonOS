@@ -118,6 +118,41 @@ class TemplateManager:
 
     # ===== Helper Methods =====
 
+    def parse_template_content(self, content: str, file_path: Path = None) -> TeamConfig:
+        """
+        Parse template markdown content into TeamConfig.
+
+        Supports both team templates and agent templates.
+        If an agent template is provided, it will be wrapped in a TeamConfig.
+
+        Args:
+            content: Markdown string with YAML frontmatter
+            file_path: Optional file path for resolving relative paths in prompts
+
+        Returns:
+            TeamConfig object
+        """
+        import frontmatter
+
+        post = frontmatter.loads(content)
+        entry_type = str(post.metadata.get("type", "")).lower()
+
+        # Set file path for prompt resolution
+        if file_path:
+            self.file_manager.parser._current_file_path = file_path
+
+        if entry_type in ("chatroom", "team"):
+            return self.file_manager.parser.parse_team(post)
+
+        # Agent template - wrap in TeamConfig
+        agent_config = self.file_manager.parser.parse_agent(post)
+        return TeamConfig(
+            id=agent_config.id,
+            name=agent_config.name or agent_config.id,
+            description=f"Single agent: {agent_config.name}",
+            agents=[agent_config],
+        )
+
     def dict_to_team_config(self, template_dict: dict) -> TeamConfig:
         """Convert frontend template dict to TeamConfig object."""
         agents = [

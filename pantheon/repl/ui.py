@@ -241,32 +241,20 @@ class ReplUI:
         self.console.print(f"\n[bold cyan]┌ {title} {'─' * max(padding, 3)}[/bold cyan]")
 
     def _print_greeting_team(self, team):
-        """Print team/agent info in greeting. Handles both single and multi-agent."""
-        if len(team.agents) == 1:
-            # Single agent mode - simplified display
-            agent = list(team.agents.values())[0]
-            self.console.print("[dim][bold blue]-- MODEL ------------------------------------------------------------[/bold blue][/dim]")
-            self.console.print()
+        """Print team/agent info in greeting. Unified format for single and multi-agent."""
+        # Unified display format for all cases
+        self.console.print("[dim][bold blue]-- TEAM -------------------------------------------------------------[/bold blue][/dim]")
+        self.console.print()
+        for agent in team.agents.values():
+            agent_info = f"  - [bright_blue]{agent.name}[/bright_blue]"
+            # Show description first (more important)
+            if hasattr(agent, 'description') and agent.description:
+                agent_info += f"\n    [dim]{agent.description}[/dim]"
+            # Show model as secondary info
             if hasattr(agent, 'models') and agent.models:
                 model = agent.models[0] if isinstance(agent.models, list) else agent.models
-                self.console.print(f"[dim]  • [bold]{model}[/bold][/dim]")
-            # Also show description for single agent
-            if hasattr(agent, 'description') and agent.description:
-                self.console.print(f"[dim]  • {agent.description}[/dim]")
-        else:
-            # Multi-agent mode - show full team
-            self.console.print("[dim][bold blue]-- TEAM -------------------------------------------------------------[/bold blue][/dim]")
-            self.console.print()
-            for agent in team.agents.values():
-                agent_info = f"  - [bright_blue]{agent.name}[/bright_blue]"
-                # Show description first (more important)
-                if hasattr(agent, 'description') and agent.description:
-                    agent_info += f"\n    [dim]{agent.description}[/dim]"
-                # Show model as secondary info
-                if hasattr(agent, 'models') and agent.models:
-                    model = agent.models[0] if isinstance(agent.models, list) else agent.models
-                    agent_info += f"\n    [dim]({model})[/dim]"
-                self.console.print(agent_info)
+                agent_info += f"\n    [dim]({model})[/dim]"
+            self.console.print(agent_info)
         self.console.print()
 
     async def print_greeting(self):

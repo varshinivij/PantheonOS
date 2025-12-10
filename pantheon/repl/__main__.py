@@ -119,12 +119,14 @@ async def _start_async(
 
         template_manager = get_template_manager()
         template_content = template_path.read_text(encoding="utf-8")
-        team_config = template_manager.parse_template_content(template_content)
+        team_config = template_manager.parse_template_content(
+            template_content, file_path=template_path.resolve()
+        )
 
         # Create chat with template
         result = await chatroom.create_chat("repl-session")
         chat_id = result["chat_id"]
-        await chatroom.setup_team_for_chat(chat_id, team_config)
+        await chatroom.setup_team_for_chat(chat_id, team_config.to_dict())
 
         repl = Repl(
             chatroom=chatroom,

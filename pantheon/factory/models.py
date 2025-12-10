@@ -18,6 +18,7 @@ class AgentConfig:
     id: str
     name: str
     model: str
+    description: str = ""
     icon: str = "🤖"
     instructions: str = ""
     toolsets: List[str] = field(default_factory=list)
@@ -31,6 +32,7 @@ class AgentConfig:
             "id": self.id,
             "name": self.name,
             "model": self.model,
+            "description": self.description,
             "icon": self.icon,
             "instructions": self.instructions,
             "toolsets": self.toolsets,
@@ -46,6 +48,7 @@ class AgentConfig:
             id=data.get("id", ""),
             name=data.get("name", ""),
             model=data.get("model", ""),
+            description=data.get("description", ""),
             icon=data.get("icon", "🤖"),
             instructions=data.get("instructions", ""),
             toolsets=data.get("toolsets", []),
@@ -58,6 +61,7 @@ class AgentConfig:
         """Payload dict for create_agent helper."""
         return {
             "name": self.name,
+            "description": self.description,
             "instructions": self.instructions,
             "model": self.model,
             "icon": self.icon,

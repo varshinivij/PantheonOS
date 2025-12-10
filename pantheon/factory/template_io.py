@@ -524,6 +524,7 @@ class UnifiedMarkdownParser:
         return AgentConfig(
             id=agent_id,
             name=str(metadata.get("name", "")),
+            description=str(metadata.get("description", "")),
             model=str(metadata.get("model", "")),
             icon=str(metadata.get("icon", "🤖")),
             instructions=instructions,
