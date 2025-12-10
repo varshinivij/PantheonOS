@@ -45,8 +45,21 @@ async def create_agent(
     # ===== Add ToolSet providers from config =====
 
     for toolset_name in toolsets:
+        # Special handling: "task" toolset is local-only (not via Endpoint)
+        if toolset_name == "task":
+            try:
+                from ..toolsets.task import TaskToolSet
+                task_toolset = TaskToolSet()
+                await agent.toolset(task_toolset)
+                toolsets_added.append(toolset_name)
+                logger.debug(f"Agent '{name}': Added local TaskToolSet")
+            except Exception as e:
+                logger.error(f"Agent '{name}': Failed to add local TaskToolSet: {e}")
+                agent.not_loaded_toolsets.append(toolset_name)
+            continue
+        
         try:
-            # Create ToolsetProxy
+            # Create ToolsetProxy for remote toolsets
             proxy = ToolsetProxy.from_endpoint(endpoint_service, toolset_name)
 
             toolset_provider = ToolSetProvider(proxy)

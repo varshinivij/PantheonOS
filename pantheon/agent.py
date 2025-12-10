@@ -757,7 +757,7 @@ class Agent:
         functions = []
 
         for func in self.functions.values():
-            desc = parse_func(func)
+            desc = parse_func(func, update_by_docstring=False)
 
             assert isinstance(desc.name, str), "Function name must be a string"
 
@@ -1161,6 +1161,14 @@ class Agent:
         else:
             Response = None
 
+        # Find TaskToolSet for EU injection (special handling for modal workflow)
+        # TaskToolSet is wrapped in LocalProvider, check by toolset_name
+        task_toolset = None
+        for provider in self.providers.values():
+            if hasattr(provider, 'toolset') and provider.toolset_name == 'task':
+                task_toolset = provider.toolset
+                break
+
         async def _process_chunk(chunk: dict):
             if process_chunk is not None:
                 await run_func(process_chunk, chunk)
@@ -1168,8 +1176,15 @@ class Agent:
                 raise StopRunning()
 
         while len(history) - init_len < max_turns:
+            # Build history for LLM (with ephemeral message if TaskToolSet present)
+            if task_toolset:
+                eu_msg = task_toolset.get_ephemeral_prompt(context_variables)
+                history_for_llm = history + [eu_msg]  # Temporary, EU not persisted
+            else:
+                history_for_llm = history
+            
             message = await self._acompletion_with_models(
-                history,
+                history_for_llm,
                 tool_use,
                 Response,
                 _process_chunk,
@@ -1201,16 +1216,29 @@ class Agent:
                 check_stop=check_stop,
             )
 
+            # Process tool messages for artifact tracking
+            if task_toolset:
+                task_toolset.process_tool_messages(
+                    tool_calls=message["tool_calls"],
+                    tool_messages=tool_messages,
+                    context_variables=context_variables
+                )
+
             # Filter out all transfer messages - they will be handled in _prepare_execution_context()
             # Both call_agent and transfer_to_* transfers should skip history addition here
             non_transfer_messages = []
             transfer_message = None
+            interrupt_message = None
 
             for msg in tool_messages:
                 if msg.get("transfer"):
                     # Skip all transfer messages
                     transfer_message = msg
                 else:
+                    # Check for notify_user interrupt
+                    raw_content = msg.get("raw_content", {})
+                    if isinstance(raw_content, dict) and raw_content.get("interrupt"):
+                        interrupt_message = msg
                     # Keep regular tool messages
                     non_transfer_messages.append(msg)
 
@@ -1232,6 +1260,10 @@ class Agent:
                     tool_call_id=transfer_message.get("tool_call_id"),
                 )
                 return transfer
+
+            # Handle notify_user interrupt - break loop to return control to user
+            if interrupt_message:
+                break
 
         return ResponseDetails(
             messages=history[init_len:],

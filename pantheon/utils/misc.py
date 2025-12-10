@@ -70,6 +70,78 @@ async def run_func(func: Callable, *args, **kwargs):
         return func(*args, **kwargs)
 
 
+def _parse_docstring_args(docstring: str | None) -> dict[str, str]:
+    """Parse docstring Args section into a dict using docstring_parser library.
+    
+    We use docstring_parser directly instead of funcdesc's update_by_docstring=True because:
+    1. Unstable: funcdesc requires exact match between docstring params and function signature,
+       raising IndexError if they differ (e.g., missing Args section).
+    2. Redundancy: update_by_docstring keeps Args in desc.doc while also parsing to arg.doc,
+       resulting in duplicate information sent to LLM.
+    
+    Args:
+        docstring: The function docstring.
+        
+    Returns:
+        dict mapping parameter names to their descriptions.
+    """
+    if not docstring:
+        return {}
+    
+    try:
+        import docstring_parser
+        doc = docstring_parser.parse(docstring)
+        return {p.arg_name: p.description or "" for p in doc.params}
+    except Exception:
+        # Fallback to empty dict if parsing fails
+        return {}
+
+
+def _strip_docstring_args(docstring: str | None) -> str:
+    """Strip only Args section from docstring, keeping Returns/Raises/Examples/Note.
+    
+    Args section is removed since parameters are parsed separately into schema.
+    Other sections (Returns, Raises, Examples, Note) are kept as they provide
+    useful context for LLM to understand tool behavior.
+    """
+    if not docstring:
+        return ""
+    
+    try:
+        import docstring_parser
+        from docstring_parser import DocstringStyle
+        
+        doc = docstring_parser.parse(docstring)
+        parts = []
+        
+        # Add short and long descriptions
+        if doc.short_description:
+            parts.append(doc.short_description)
+        if doc.long_description:
+            parts.append(doc.long_description)
+        
+        # Reconstruct other sections (skip params/args)
+        if doc.returns:
+            parts.append(f"Returns:\n    {doc.returns.description}")
+        if doc.raises:
+            raises_text = "\n".join(f"    {r.type_name}: {r.description}" for r in doc.raises)
+            parts.append(f"Raises:\n{raises_text}")
+        if doc.examples:
+            examples_text = "\n".join(e.description for e in doc.examples if e.description)
+            if examples_text:
+                parts.append(f"Examples:\n{examples_text}")
+        
+        # Check for Note in meta
+        for meta in doc.meta:
+            if hasattr(meta, 'key') and meta.key and meta.key.lower() == 'note':
+                parts.append(f"Note:\n    {meta.description}")
+        
+        return "\n\n".join(parts) if parts else ""
+    except Exception:
+        # Fallback: return original if parsing fails
+        return docstring.strip()
+
+
 def desc_to_openai_dict(
     desc: Description,
     skip_params: List[str] = [],
@@ -82,12 +154,21 @@ def desc_to_openai_dict(
     oai_func_dict = pydantic_function_tool(pydantic_model)
     oai_params = oai_func_dict["function"]["parameters"]["properties"]
 
+    # Parse docstring Args section to fill in missing arg.doc
+    docstring_args = _parse_docstring_args(desc.doc)
+    
+    # Strip redundant sections from tool description
+    tool_description = _strip_docstring_args(desc.doc)
+
     parameters = {}
     required = []
 
     for arg in filtered_inputs:
+        # Use arg.doc if available, otherwise try parsed docstring
+        arg_description = arg.doc or docstring_args.get(arg.name, "")
+        
         pdict = {
-            "description": arg.doc or "",
+            "description": arg_description,
         }
         oai_pdict = oai_params[arg.name]
         if "type" in oai_pdict:
@@ -109,7 +190,7 @@ def desc_to_openai_dict(
         "type": "function",
         "function": {
             "name": desc.name,
-            "description": desc.doc or "",
+            "description": tool_description,
             "strict": not litellm_mode,
         },
     }

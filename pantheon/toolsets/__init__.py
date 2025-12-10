@@ -10,7 +10,7 @@ from .scraper import ScraperToolSet
 from .rag import VectorRAGToolSet
 from .package import PackageToolSet
 from .database_api import DatabaseAPIQueryToolSet
-
+from .task import TaskToolSet
 
 __all__ = [
     # Interpreters
@@ -31,4 +31,6 @@ __all__ = [
     # RAG
     "VectorRAGToolSet",
     "DatabaseAPIQueryToolSet",
+    # TASK
+    "TaskToolSet",
 ]

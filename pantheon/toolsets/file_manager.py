@@ -14,6 +14,83 @@ from ..toolset import ToolSet, tool
 from ..utils.log import logger
 
 
+def _replace_in_content(
+    content: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> tuple[str | None, int, str | None]:
+    """Perform string replacement in content with optional line range.
+    
+    Args:
+        content: The full file content.
+        old_string: The exact string to find.
+        new_string: The replacement string.
+        replace_all: If True, replace all occurrences.
+        start_line: Optional start line (1-indexed, inclusive).
+        end_line: Optional end line (1-indexed, inclusive).
+    
+    Returns:
+        Tuple of (new_content, replacement_count, error_message).
+        On success: (new_content, count, None)
+        On failure: (None, 0, error_message)
+    """
+    def do_replace(text: str, old: str, new: str, count: int) -> tuple[str, int]:
+        """Perform replacement, returns (new_text, actual_count)."""
+        if count == 0:  # replace all
+            n = text.count(old)
+            return text.replace(old, new), n
+        else:
+            return text.replace(old, new, count), min(count, text.count(old))
+    
+    # Handle line range restriction
+    if start_line is not None or end_line is not None:
+        lines = content.splitlines(keepends=True)
+        start_idx = (start_line - 1) if start_line else 0
+        end_idx = end_line if end_line else len(lines)
+        
+        # Validate bounds
+        if start_idx < 0 or start_idx >= len(lines):
+            return None, 0, f"start_line {start_line} is out of range (file has {len(lines)} lines)"
+        if end_idx > len(lines):
+            return None, 0, f"end_line {end_line} is out of range (file has {len(lines)} lines)"
+        if start_idx >= end_idx:
+            return None, 0, "start_line must be less than end_line"
+        
+        before = "".join(lines[:start_idx])
+        section = "".join(lines[start_idx:end_idx])
+        after = "".join(lines[end_idx:])
+        
+        match_count = section.count(old_string)
+        
+        if match_count == 0:
+            return None, 0, f"old_string not found in lines {start_line}-{end_line}"
+        
+        if match_count > 1 and not replace_all:
+            return None, 0, f"old_string found {match_count} times in lines {start_line}-{end_line}. Set replace_all=True or narrow the line range."
+        
+        new_section, replaced = do_replace(
+            section, old_string, new_string, 0 if replace_all else 1
+        )
+        return before + new_section + after, replaced, None
+    else:
+        # Full content replacement
+        match_count = content.count(old_string)
+        
+        if match_count == 0:
+            return None, 0, "old_string not found in file"
+        
+        if match_count > 1 and not replace_all:
+            return None, 0, f"old_string found {match_count} times. Set replace_all=True or use start_line/end_line to target specific occurrence."
+        
+        new_content, replaced = do_replace(
+            content, old_string, new_string, 0 if replace_all else 1
+        )
+        return new_content, replaced, None
+
+
 class FileManagerToolSetBase(ToolSet):
     """Base class for file manager toolsets.
     Supplies fundamental workspace operations such as:
@@ -49,12 +126,19 @@ class FileManagerToolSetBase(ToolSet):
 
     @tool
     async def list_files(self, sub_dir: str | None = None, recursive: bool = False) -> dict:
-        """List all files in the directory.
-        
+        """List files and directories in the workspace.
+
+        Use this tool to browse directory contents. For searching, use shell:
+        - Find files by name: `fd` or `find`
+        - Find text in files: `rg` or `grep`
+
         Args:
-            sub_dir: The sub directory to list. If not provided, the entire directory will be listed.
-                Note that the sub_dir is relative to the current working directory.
-            recursive: When True, the entire directory will be listed recursively.
+            sub_dir: Subdirectory to list (relative to workspace root).
+                     If not provided, lists the workspace root.
+            recursive: If True, list all files recursively as a tree structure.
+
+        Returns:
+            dict: {success: bool, files: list} with name, type, size, last_modified.
         """
         if not self.path.exists():
             return {"success": False, "error": "Directory does not exist"}
@@ -172,7 +256,15 @@ class FileManagerToolSetBase(ToolSet):
 
     @tool
     async def move_file(self, old_path: str, new_path: str):
-        """Move a file."""
+        """Move or rename a file.
+
+        Args:
+            old_path: Current path of the file (relative to workspace root).
+            new_path: New path for the file (relative to workspace root).
+
+        Returns:
+            dict: {success: bool} or {success: False, error: str}
+        """
         old_path = self.path / old_path
         if not old_path.exists():
             return {"success": False, "error": "Old path does not exist"}
@@ -205,33 +297,68 @@ class FileManagerToolSet(FileManagerToolSetBase):
     """
 
     @tool
-    async def read_file(self, file_path: str, limit: int | None = None, offset: int = 0) -> dict:
-        """Read a text file with optional line limits and offset.
+    async def read_file(
+        self,
+        file_path: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+    ) -> dict:
+        """Read the contents of a text file.
+
+        Usage:
+        - Lines are 1-indexed (first line is line 1).
+        - start_line and end_line are inclusive.
+        - To read the entire file, do not pass start_line or end_line.
+        - To read a specific range, pass both start_line and end_line.
 
         Args:
-            file_path: The path to the file to read.
-            limit: The maximum number of lines to read. If not provided, reads to the end of the file from the offset.
-            offset: The line number to start reading from (0-indexed).
+            file_path: Path to the file to read (relative to workspace root).
+            start_line: Optional. First line to read (1-indexed, inclusive).
+            end_line: Optional. Last line to read (1-indexed, inclusive).
+
+        Returns:
+            dict: {success: bool, content: str, total_lines: int, format: str}
         """
-        file_path = self.path / file_path
-        if not file_path.exists():
+        target_path = self.path / file_path
+        if not target_path.exists():
             return {"success": False, "error": "File does not exist"}
+        if not target_path.is_file():
+            return {"success": False, "error": "Path is not a file"}
         
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                if limit is not None or offset > 0:
-                    # Efficiently slice the file iterator without reading the whole file
-                    sliced_lines = itertools.islice(f, offset, offset + limit if limit is not None else None)
-                    content = "".join(list(sliced_lines))
-                else:
-                    # Default behavior: read the entire file
-                    content = f.read()
+            with open(target_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            
+            total_lines = len(lines)
+            
+            # Handle line range
+            if start_line is not None or end_line is not None:
+                # Convert to 0-indexed
+                start_idx = (start_line - 1) if start_line else 0
+                end_idx = end_line if end_line else total_lines
                 
-                return {
-                    "success": True,
-                    "content": content,
-                    "format": file_path.suffix.lower(),
-                }
+                # Validate bounds
+                if start_idx < 0:
+                    return {"success": False, "error": "start_line must be >= 1"}
+                if start_idx >= total_lines:
+                    return {"success": False, "error": f"start_line {start_line} is out of range (file has {total_lines} lines)"}
+                if end_idx > total_lines:
+                    end_idx = total_lines  # Clamp to file end
+                if start_idx >= end_idx:
+                    return {"success": False, "error": "start_line must be less than or equal to end_line"}
+                
+                content = "".join(lines[start_idx:end_idx])
+            else:
+                content = "".join(lines)
+            
+            return {
+                "success": True,
+                "content": content,
+                "total_lines": total_lines,
+                "format": target_path.suffix.lower(),
+            }
+        except UnicodeDecodeError:
+            return {"success": False, "error": "File is not a valid text file (binary or encoding issue)"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -242,14 +369,29 @@ class FileManagerToolSet(FileManagerToolSetBase):
         content: str = "",
         overwrite: bool = True,
     ) -> dict:
-        """Write text to a file with optional overwrite control.
+        """Use this tool to CREATE NEW files.
 
-        Automatically creates parent directories if they do not exist.
+        This tool writes content to a file, automatically creating parent
+        directories if they do not exist.
+
+        IMPORTANT: For EDITING existing files, use `update_file` instead.
+        Using write_file to rewrite entire files when only small changes
+        are needed is wasteful and error-prone.
+
+        Use this tool when:
+        - Creating a brand new file
+        - Completely rewriting a file from scratch (rare)
+
+        DO NOT use this tool when:
+        - Making partial modifications to an existing file
+        - Changing a few lines in a large file
+        - For these cases, use `update_file` instead
 
         Args:
             file_path: The path to the file to write.
             content: The content to write to the file.
             overwrite: When False, abort if the target file already exists.
+                       Default is True, but consider using update_file for edits.
 
         Returns:
             dict: Success status or error message.
@@ -279,21 +421,30 @@ class FileManagerToolSet(FileManagerToolSetBase):
         old_string: str,
         new_string: str,
         replace_all: bool = False,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> dict:
-        """Update a text file by replacing specific content.
+        """Use this tool to edit an existing file. Follow these rules:
 
-        This tool performs precise string replacement within a file.
-        The old_string must match exactly (including whitespace and indentation).
+        1. Use this tool ONLY when making a SINGLE edit to a file. If you need to make
+           MULTIPLE different edits to the same file, use `batch_update_file` instead.
+        2. The old_string must EXACTLY MATCH the text in the file, including whitespace
+           and indentation. Copy the exact text you want to replace.
+        3. When old_string appears multiple times in the file, use start_line and end_line
+           to limit the search scope, OR set replace_all=True to replace all occurrences.
+        4. DO NOT use `write_file` to rewrite entire files when you only need small changes.
+           This tool is more efficient and safer.
 
         Args:
-            file_path: The path to the file to update.
+            file_path: Path to the file to update (relative to workspace root).
             old_string: The exact string to find and replace.
             new_string: The string to replace old_string with.
-            replace_all: If True, replace all occurrences. If False (default),
-                         only replace if there's exactly one match.
+            replace_all: If True, replace all occurrences. Default False (safer).
+            start_line: Optional. Limit search from this line (1-indexed, inclusive).
+            end_line: Optional. Limit search to this line (1-indexed, inclusive).
 
         Returns:
-            dict: Success status, number of replacements made, or error message.
+            dict: {success: bool, replacements: int} or {success: False, error: str}
         """
         target_path = self.path / file_path
         if not target_path.exists():
@@ -304,43 +455,135 @@ class FileManagerToolSet(FileManagerToolSetBase):
         try:
             with open(target_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            
+            new_content, replacements, error = _replace_in_content(
+                content, old_string, new_string,
+                replace_all=replace_all,
+                start_line=start_line,
+                end_line=end_line,
+            )
+            
+            if error:
+                return {"success": False, "error": error}
 
-            # Count occurrences
-            count = content.count(old_string)
-
-            if count == 0:
-                return {
-                    "success": False,
-                    "error": "old_string not found in file",
-                }
-
-            if count > 1 and not replace_all:
-                return {
-                    "success": False,
-                    "error": f"old_string found {count} times. Set replace_all=True to replace all, or provide more context to make it unique.",
-                }
-
-            # Perform replacement
-            if replace_all:
-                new_content = content.replace(old_string, new_string)
-                replacements = count
-            else:
-                new_content = content.replace(old_string, new_string, 1)
-                replacements = 1
-
-            # Write back
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
-            return {
-                "success": True,
-                "replacements": replacements,
-            }
+            return {"success": True, "replacements": replacements}
 
         except UnicodeDecodeError:
             return {"success": False, "error": "File is not a valid text file"}
         except Exception as e:
             logger.error(f"update_file failed for {file_path}: {e}")
+            return {"success": False, "error": str(e)}
+
+    @tool
+    async def batch_update_file(
+        self,
+        file_path: str,
+        replacements: list[dict],
+    ) -> dict:
+        """Use this tool to make multiple edits to an existing file. Follow these rules:
+
+        1. Use this tool ONLY when making MULTIPLE, NON-CONTIGUOUS edits to the same file.
+           If you are making a single edit, use `update_file` instead.
+        2. Do NOT make multiple parallel calls to `update_file` for the same file.
+           Use this tool to batch all edits into one call.
+        3. Each replacement in the list is applied sequentially. Later replacements
+           operate on the result of earlier ones.
+        4. For each replacement, old_string must EXACTLY MATCH the text in the file.
+
+        Args:
+            file_path: Path to the file to update (relative to workspace root).
+            replacements: List of replacement dicts, each containing:
+                - old_string (required): Exact string to find
+                - new_string (required): Replacement string
+                - start_line (optional): Limit search from this line (1-indexed)
+                - end_line (optional): Limit search to this line (1-indexed)
+                - replace_all (optional): Replace all occurrences (default: False)
+
+        Returns:
+            dict: {success: bool, results: list, total_replacements: int}
+
+        Example:
+            replacements = [
+                {"old_string": "import foo", "new_string": "import bar"},
+                {"old_string": "foo()", "new_string": "bar()", "replace_all": True},
+            ]
+        """
+        target_path = self.path / file_path
+        if not target_path.exists():
+            return {"success": False, "error": "File does not exist"}
+        if not target_path.is_file():
+            return {"success": False, "error": "Path is not a file"}
+        
+        if not replacements:
+            return {"success": False, "error": "replacements list is empty"}
+
+        try:
+            with open(target_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            results = []
+            current_content = content
+            
+            for i, repl in enumerate(replacements):
+                old_string = repl.get("old_string")
+                new_string = repl.get("new_string")
+                
+                if not old_string or new_string is None:
+                    results.append({
+                        "index": i,
+                        "success": False,
+                        "error": "old_string and new_string are required",
+                    })
+                    continue
+                
+                try:
+                    new_content, replaced_count, error = _replace_in_content(
+                        current_content,
+                        old_string,
+                        new_string,
+                        replace_all=repl.get("replace_all", False),
+                        start_line=repl.get("start_line"),
+                        end_line=repl.get("end_line"),
+                    )
+                    
+                    if error:
+                        results.append({"index": i, "success": False, "error": error})
+                    else:
+                        current_content = new_content
+                        results.append({
+                            "index": i,
+                            "success": True,
+                            "replacements": replaced_count,
+                        })
+                except Exception as e:
+                    results.append({
+                        "index": i,
+                        "success": False,
+                        "error": str(e),
+                    })
+            
+            # Check if any replacement succeeded
+            any_success = any(r["success"] for r in results)
+            
+            if any_success:
+                with open(target_path, "w", encoding="utf-8") as f:
+                    f.write(current_content)
+            
+            all_success = all(r["success"] for r in results)
+            return {
+                "success": all_success,
+                "partial_success": any_success and not all_success,
+                "results": results,
+                "total_replacements": sum(r.get("replacements", 0) for r in results),
+            }
+
+        except UnicodeDecodeError:
+            return {"success": False, "error": "File is not a valid text file"}
+        except Exception as e:
+            logger.error(f"batch_update_file failed for {file_path}: {e}")
             return {"success": False, "error": str(e)}
 
     @tool
