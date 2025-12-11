@@ -148,13 +148,19 @@ class FileManagerToolSetBase(ToolSet):
         Returns:
             dict: {success: bool, files: list} with name, type, size, last_modified.
         """
-        if not self.path.exists():
+        # Determine target directory - support absolute paths
+        if sub_dir is not None and os.path.isabs(sub_dir):
+            target_path = Path(sub_dir)
+        elif sub_dir:
+            target_path = self.path / sub_dir
+        else:
+            target_path = self.path
+
+        if not target_path.exists():
             return {"success": False, "error": "Directory does not exist"}
+
         if not recursive:
-            if sub_dir is None or sub_dir == "":
-                files = list(self.path.glob("*"))
-            else:
-                files = list(self.path.glob(f"{sub_dir}/*"))
+            files = list(target_path.glob("*"))
             return {
                 "success": True,
                 "files": [
@@ -188,7 +194,6 @@ class FileManagerToolSetBase(ToolSet):
                             result["children"].append(_list_tree(item, current_depth + 1))
                 return result
 
-            target_path = self.path / sub_dir if sub_dir else self.path
             if not target_path.exists():
                 return {"success": False, "error": "Target directory does not exist"}
 
@@ -331,7 +336,11 @@ class FileManagerToolSet(FileManagerToolSetBase):
         Returns:
             dict: {success: bool, content: str, total_lines: int, format: str}
         """
-        target_path = self.path / file_path
+        # Support both absolute and relative paths
+        if os.path.isabs(file_path):
+            target_path = Path(file_path)
+        else:
+            target_path = self.path / file_path
         if not target_path.exists():
             return {"success": False, "error": "File does not exist"}
         if not target_path.is_file():

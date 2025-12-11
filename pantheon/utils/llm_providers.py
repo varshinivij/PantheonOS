@@ -78,16 +78,17 @@ def detect_provider(model: str, force_litellm: bool) -> ProviderConfig:
 
 
 def get_base_url(provider: ProviderType) -> Optional[str]:
-    """Get base URL from environment variables.
+    """Get base URL from environment variables or settings.
 
     Args:
         provider: Provider type
 
     Returns:
-        Base URL if set in environment, None otherwise
+        Base URL if set, None otherwise
     """
+    from ..settings import get_settings
     env_var = f"{provider.value.upper()}_API_BASE"
-    return os.environ.get(env_var)
+    return get_settings().get_api_key(env_var)
 
 
 # ============ Response Extraction ============

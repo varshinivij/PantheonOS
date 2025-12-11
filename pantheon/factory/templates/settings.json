@@ -1,0 +1,105 @@
+{
+    "$schema": "https://pantheon.dev/schemas/settings.json",
+    "version": "1.0.0",
+    // ===== 环境文件配置 =====
+    // 指定环境变量文件路径，相对于项目目录
+    "env_file": ".env",
+    // ===== Endpoint 服务配置 =====
+    "endpoint": {
+        "service_name": "pantheon-chatroom-endpoint",
+        // 工作目录：Endpoint 的工作目录
+        "workspace_path": "./.pantheon",
+        "log_level": "INFO",
+        // 是否允许通过 Endpoint 传输文件
+        "allow_file_transfer": true,
+        // 本地 ToolSet 调用超时（秒）
+        "local_toolset_timeout": 600,
+        // 本地 ToolSet 执行模式：
+        // - "direct": 直接在当前线程执行（快，适合轻量任务）
+        // - "thread": 在独立线程执行（隔离，适合重任务）
+        "local_toolset_execution_mode": "direct"
+    },
+    // ===== 内置服务配置 =====
+    // Service modes: 指定服务运行模式
+    // - "local": 在 Endpoint 同进程运行（快，使用 ThreadJob 隔离）
+    // - "remote": 在独立进程运行（慢，更好隔离）
+    "services": {
+        "builtin": [
+            // === Tier 1: 基础服务（推荐所有部署启用）===
+            "file_manager", // 文件操作（读、写、列表、删除等）
+            "package", // 只读查看可用包
+            // === Tier 2: 常用开发工具 ===
+            "web", // 网页搜索（使用 DDGS）
+            "python_interpreter", // Python 代码执行
+            "shell", // Shell 命令执行（谨慎使用）
+            "knowledge", // 知识库/RAG
+            // === Tier 3: 高级工具（按需启用）===
+            "integrated_notebook" // 集成 Notebook（支持文件操作）
+            // === 更多可用服务（注释，按需启用）===
+            // "file_editor",     // 高级文件编辑（Claude Code 风格）
+            // "jupyter_kernel",  // 标准 Jupyter Kernel
+            // "r_interpreter",   // R 代码执行
+            // "julia_interpreter", // Julia 代码执行
+            // "scraper",         // ScraperAPI 搜索爬取（需要 API Key）
+            // "latex"            // LaTeX 编译为 PDF
+        ],
+        // 服务运行模式配置
+        // "default" 为未明确指定的服务的默认模式
+        "modes": {
+            "default": "local"
+            // "python_interpreter": "local",  // 轻量服务适合 local
+            // "julia_interpreter": "remote"   // 重计算可能需要隔离
+        }
+    },
+    // ===== 远程后端配置 =====
+    "remote": {
+        // 远程后端类型，目前仅支持 "nats"
+        "backend": "nats",
+        // NATS 服务器地址列表
+        "nats_servers": [
+            "nats://localhost:4222"
+        ],
+        // MCP 服务器暴露的主机名（开发环境用 localhost）
+        "server_host": "localhost"
+    },
+    // ===== ChatRoom 配置 =====
+    "chatroom": {
+        // 聊天记录存储目录
+        "memory_dir": "./.pantheon/memory",
+        // 是否启用 NATS 流式传输（远程服务需要）
+        "enable_nats_streaming": false,
+        // 语音转文字模型
+        "speech_to_text_model": "gpt-4o-mini-transcribe"
+    },
+    // ===== REPL 配置 =====
+    "repl": {
+        // 是否禁用日志输出
+        "quiet": true,
+        // 默认团队模板路径
+        "default_template": null
+    },
+    // ===== API Keys 配置 =====
+    // 所有 API Key 都支持环境变量覆盖
+    // 优先级：环境变量 > env_file > settings.json
+    "api_keys": {
+        "OPENAI_API_KEY": null,
+        "OPENAI_API_BASE": null, // 自定义 OpenAI endpoint
+        "ANTHROPIC_API_KEY": null,
+        "GOOGLE_API_KEY": null,
+        "ZAI_API_KEY": null,
+        "SCRAPER_API_KEY": null, // ScraperAPI 密钥
+        "HUGGINGFACE_TOKEN": null
+    },
+    // ===== Knowledge/RAG 配置 =====
+    "knowledge": {
+        // 知识库存储路径
+        "storage_path": "~/.pantheon-knowledge",
+        // Qdrant 向量数据库配置
+        "qdrant": {
+            "location": null, // 远程 Qdrant URL
+            "path": null, // 本地存储路径
+            "api_key": null, // Qdrant Cloud API Key
+            "prefer_grpc": false // 是否优先使用 gRPC
+        }
+    }
+}

@@ -97,12 +97,16 @@ class VectorStoreBackend:
                 logger.info(f"Qdrant client initialized (local mode) at: {location}")
 
             # 2. 初始化 Embedding 模型
+            from ...settings import get_settings
+            settings = get_settings()
+            
             embed_kwargs = {
                 "model": self.embedding_config["model"],
-                "api_key": os.getenv("OPENAI_API_KEY"),
+                "api_key": settings.get_api_key("OPENAI_API_KEY"),
             }
-            if os.getenv("OPENAI_API_BASE"):
-                embed_kwargs["api_base"] = os.getenv("OPENAI_API_BASE")
+            api_base = settings.get_api_key("OPENAI_API_BASE")
+            if api_base:
+                embed_kwargs["api_base"] = api_base
 
             self._embed_model = OpenAIEmbedding(**embed_kwargs)
             logger.info(

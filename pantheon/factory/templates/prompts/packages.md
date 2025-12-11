@@ -6,11 +6,11 @@ description: Pantheon packages usage guide
 
 # Pantheon Packages Usage Guide
 
-Pantheon packages collect reusable packages under `.pantheon/packages/`. Use them whenever you need to run domain logic (analytics, workflows, notifications, etc.) inside Python code without requesting extra tools. Packages run the same way inside `shell`, `python_interpreter`, and `integrated_notebook` sessions.
+Pantheon packages collect reusable packages under `${{pantheon_dir}}/packages/`. Use them whenever you need to run domain logic (analytics, workflows, notifications, etc.) inside Python code without requesting extra tools. Packages run the same way inside `shell`, `python_interpreter`, and `integrated_notebook` sessions.
 
 
 ## What Packages Are & When to Reach for Them
-- Each folder inside `.pantheon/packages/` defines one package (e.g. `sales_report`).
+- Each folder inside `${{pantheon_dir}}/packages/` defines one package (e.g. `sales_report`).
 - Use packages to group related functions or ToolSets so that one import unlocks an entire capability set.
 - Prefer packages for multi-step logic: synthesize data, call APIs, write files, and coordinate results within one script.
 
@@ -55,7 +55,7 @@ notification = await pp.packages.ops_center.notify(payload={"event": "ready"})
 - **Force sync execution**: Use `.sync_call(...)` to run an async method synchronously (handles nested event loops automatically).
 
 ## Authoring or Updating Packages
-1. Create/modify files under `.pantheon/packages/<package_name>/` via `file_manager`, `shell`, or `python_interpreter`. No `__init__.py` is required.
+1. Create/modify files under `${{pantheon_dir}}/packages/<package_name>/` via `file_manager`, `shell`, or `python_interpreter`. No `__init__.py` is required.
 2. Define a normal class whose public methods encapsulate your capability.
 3. Any public method (name not starting with `_`) that has a docstring becomes callable through `pp.packages.<package>.<method>`.
 
@@ -81,7 +81,7 @@ Save the file—future imports automatically pick up the latest code.
 - If you *must* bypass the shim (for example, a class expects custom constructor args), first import `pantheon.packages` somewhere in the same process (that import ensures the package path is on `sys.path`). Afterwards you can import the module/class directly and instantiate it yourself:
   ```python
   import pantheon.packages  # sets up sys.path and package manager
-  from sales_report.specialized import SpecializedPackage  # maps to .pantheon/packages/sales_report/specialized.py
+  from sales_report.specialized import SpecializedPackage  # maps to ${{pantheon_dir}}/packages/sales_report/specialized.py
 
   pkg = SpecializedPackage(config_path="/tmp/custom.yaml")
   pkg.generate(...)
@@ -90,7 +90,7 @@ Save the file—future imports automatically pick up the latest code.
 
 ## Quick Checklist
 - Need to understand what exists? `list_packages()` → `describe()` → `search()`.
-- Need new behavior? Add files under `.pantheon/packages/<name>/`, ensure methods have docstrings, then import again.
+- Need new behavior? Add files under `${{pantheon_dir}}/packages/<name>/`, ensure methods have docstrings, then import again.
 - Need async work? Just `await` the method. Need sync execution? Use `.sync_call(...)`.
 
 Stick to this workflow and you can discover, modify, and invoke every package capability directly from your Python code without learning any extra tools or internal details.

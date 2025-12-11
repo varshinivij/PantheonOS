@@ -34,7 +34,8 @@ class ScraperToolSet(ToolSet):
         Returns:
             Search results from ScraperAPI.
         """
-        api_key = os.getenv("SCRAPER_API_KEY")
+        from ..settings import get_settings
+        api_key = get_settings().get_api_key("SCRAPER_API_KEY")
         if not api_key:
             raise ValueError("SCRAPER_API_KEY environment variable is not set")
 
@@ -77,7 +78,8 @@ class ScraperToolSet(ToolSet):
         Returns:
             List of contents from the web pages.
         """
-        api_key = os.getenv("SCRAPER_API_KEY")
+        from ..settings import get_settings
+        api_key = get_settings().get_api_key("SCRAPER_API_KEY")
         if not api_key:
             raise ValueError("SCRAPER_API_KEY environment variable is not set")
 

@@ -61,9 +61,12 @@ class Repl(ReplUI):
         agent: Agent | Team | None = None,
         chatroom: ChatRoom | None = None,
         endpoint: "Endpoint | None" = None,
-        memory_dir: str = ".pantheon",
+        memory_dir: str | None = None,
         chat_id: str | None = None,
     ):
+        if memory_dir is None:
+            from ..settings import get_settings
+            memory_dir = str(get_settings().memory_dir)
         super().__init__()  # init UI
 
         # Determine ChatRoom source

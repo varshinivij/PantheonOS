@@ -9,21 +9,29 @@ from dataclasses import dataclass, field
 def resolve_backend_config(
     backend: str | None = None, explicit_config: Dict[str, Any] | None = None
 ):
-    """Resolve backend configuration with clear precedence: explicit > env > defaults"""
+    """Resolve backend configuration with clear precedence: explicit > env > settings > defaults"""
+    # Try to get config from Settings (lazy import to avoid circular imports)
+    try:
+        from ..settings import get_settings
+        settings = get_settings()
+        remote_config = settings.get_remote_config()
+    except Exception:
+        remote_config = {}
+    
+    # Backend: explicit > env > settings > default
     if backend is None:
-        backend = os.getenv("PANTHEON_REMOTE_BACKEND", "nats")
+        backend = os.getenv("PANTHEON_REMOTE_BACKEND") or remote_config.get("backend", "nats")
 
-    # default and env
-    servers_env = ""
     if backend == "nats":
-        # Default config
-        config = {"server_urls": ["nats://localhost:4222"]}
+        # Default config from settings
+        config = {"server_urls": remote_config.get("server_urls", ["nats://localhost:4222"])}
+        
+        # Environment variable override
         servers_env = os.getenv("NATS_SERVERS", "")
+        if servers_env:
+            config["server_urls"] = [s.strip() for s in servers_env.split("|") if s.strip()]
     else:
         raise ValueError(f"Unknown backend: {backend}")
-
-    if servers_env:
-        config["server_urls"] = [s.strip() for s in servers_env.split("|") if s.strip()]
 
     # Explicit config override (highest priority)
     if explicit_config:

@@ -808,11 +808,15 @@ class FileBasedTemplateManager:
         Initialize template manager.
 
         Args:
-            work_dir: Working directory for user templates. Defaults to cwd.
+            work_dir: Working directory for user templates. 
+                      Defaults to PROJECT_ROOT (captured at module load, before any chdir).
         """
-        self.work_dir = work_dir or Path.cwd()
-        self.agents_dir = self.work_dir / ".pantheon" / "agents"
-        self.teams_dir = self.work_dir / ".pantheon" / "teams"
+
+        from ..settings import get_settings
+        settings = get_settings(work_dir)
+        self.work_dir = settings.work_dir
+        self.agents_dir = settings.agents_dir
+        self.teams_dir = settings.teams_dir
 
         # System templates location (in package)
         self.system_templates_dir = Path(__file__).parent / "templates"

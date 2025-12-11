@@ -38,22 +38,30 @@ if sys.platform == "win32":
 
 def start(
     template: str = None,
-    memory_dir: str = ".pantheon",
+    memory_dir: str = None,
     workspace: str = None,
     chat_id: str = None,
     log_level: str = None,
-    quiet: bool = True,
+    quiet: bool = None,
 ):
     """Start Pantheon REPL.
 
     Args:
         template: Path to team template markdown file.
-        memory_dir: Directory for chat persistence (default: .pantheon).
+        memory_dir: Directory for chat persistence. (default from settings: .pantheon)
         workspace: Workspace directory for Endpoint.
         chat_id: Resume specific chat by ID.
         log_level: Log level (DEBUG, INFO, WARNING, ERROR). Overrides --quiet.
-        quiet: Disable all logging (default: True). Use --no-quiet to enable.
+        quiet: Disable all logging. Use --no-quiet to enable. (default from settings: True)
     """
+    # Load settings for defaults (CLI > Settings > code defaults)
+    from ..settings import get_settings
+    settings = get_settings()
+    
+    # Apply defaults: CLI > Settings > code defaults
+    memory_dir = memory_dir or settings.get("chatroom.memory_dir", str(settings.memory_dir))
+    quiet = quiet if quiet is not None else settings.get("repl.quiet", True)
+    
     asyncio.run(
         _start_async(
             template=template,
@@ -68,13 +76,17 @@ def start(
 
 async def _start_async(
     template: str = None,
-    memory_dir: str = ".pantheon",
+    memory_dir: str = None,
     workspace: str = None,
     chat_id: str = None,
     log_level: str = None,
     quiet: bool = True,
 ):
     """Async implementation of start."""
+    # Ensure memory_dir has a default
+    if memory_dir is None:
+        from ..settings import get_settings
+        memory_dir = str(get_settings().memory_dir)
     # Import modules first (this triggers utils/log.py which sets up default logging)
     from .core import Repl
     from ..chatroom import ChatRoom

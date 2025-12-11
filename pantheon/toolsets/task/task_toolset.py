@@ -1,14 +1,14 @@
 """TaskToolSet for Modal Workflow System.
 
 Provides task_boundary and notify_user tools for managing
-PLANNING/EXECUTION/VERIFICATION workflow modes.
+workflow modes (PLANNING/EXECUTION/VERIFICATION or RESEARCH/ANALYSIS/INTERPRETATION).
 """
 import json
 from typing import Optional
 
 from ...toolset import ToolSet, tool
 from ...utils.log import logger
-from .task_state import ConversationState
+from .task_state import ConversationState, ModeSemantics
 from .ephemeral import generate_ephemeral_message
 
 
@@ -43,7 +43,7 @@ class TaskToolSet(ToolSet):
         
         Args:
             TaskName: Name of the task boundary. This is the identifier that groups steps together, should be human readable like 'Researching Existing Server Implementation'. This should correspond to a top-level item in task.md.
-            Mode: The agent focus to switch to: PLANNING, EXECUTION, or VERIFICATION.
+            Mode: The agent focus to switch to. Common modes: PLANNING/EXECUTION/VERIFICATION (coding) or RESEARCH/ANALYSIS/INTERPRETATION (research).
             TaskSummary: Concise summary of what has been accomplished throughout the entire task so far. Should be at most 1-2 lines, past tense. Cite important files between backticks.
             TaskStatus: Active status of the current action, e.g 'Looking for files'. Should describe what you are GOING TO DO NEXT, not what you have done.
             PredictedTaskSize: Your best estimation on how many tool calls are needed to fulfill this task.
@@ -55,17 +55,22 @@ class TaskToolSet(ToolSet):
         task_summary = self._last_task_summary if TaskSummary == "%SAME%" else TaskSummary
         task_status = self._last_task_status if TaskStatus == "%SAME%" else TaskStatus
         
-        if mode not in ("PLANNING", "EXECUTION", "VERIFICATION"):
-            return {"success": False, "error": f"Invalid mode: {mode}"}
+        # Validate mode: accept known modes, warn for unknown but allow
+        if not mode or not mode.strip():
+            return {"success": False, "error": "Mode cannot be empty"}
+        
+        mode_upper = mode.upper()
+        if not ModeSemantics.is_known_mode(mode_upper):
+            logger.warning(f"Unknown mode '{mode}', proceeding anyway. Known modes: {ModeSemantics.ALL_KNOWN_MODES}")
         
         # Store for next %SAME% reference
         self._last_task_name = task_name
-        self._last_mode = mode
+        self._last_mode = mode_upper  # Normalize to uppercase
         self._last_task_summary = task_summary
         self._last_task_status = task_status
         
-        self.state.on_task_boundary(task_name, mode, task_status, task_summary)
-        return {"success": True, "mode": mode, "task": task_name}
+        self.state.on_task_boundary(task_name, mode_upper, task_status, task_summary)
+        return {"success": True, "mode": mode_upper, "task": task_name}
     
     @tool
     async def notify_user(
@@ -93,7 +98,7 @@ class TaskToolSet(ToolSet):
         IMPORTANT: This tool should NEVER be called in parallel with other tools. Execution control will be returned to the user once this tool is called.
         
         Args:
-            PathsToReview: List of RELATIVE paths to files that the user should be notified about. MUST populate this if requesting review.
+            PathsToReview: List of ABSOLUTE paths to files that the user should be notified about. MUST populate this if requesting review.
             BlockedOnUser: Set to true if you are blocked on user approval to proceed. Set false if just notifying about completion.
             Message: Required message to notify the user with, e.g to provide context or ask questions. Use GitHub Flavored Markdown (GFM) format.
             ConfidenceJustification: Justification for the confidence score. MUST answer the 6 assessment questions with Yes/No.
@@ -118,11 +123,18 @@ class TaskToolSet(ToolSet):
         - content: The EU message content
         - role: "user"
         """
-        # Get brain_dir from context_variables (same as prompt template)
         client_id = context_variables.get("client_id", "default")
-        brain_dir = f".pantheon/brain/{client_id}"
         
-        eu_content = generate_ephemeral_message(self.state, brain_dir)
+        # Get brain_dir from settings
+        from ...settings import get_settings
+        settings = get_settings()
+        brain_dir = settings.brain_dir / client_id
+        
+        # Convert to relative path from workspace (which is pantheon_dir) if possible 
+        # or just use absolute path string if that's what generate_ephemeral_message expects
+        # generate_ephemeral_message likely needs a string path
+        
+        eu_content = generate_ephemeral_message(self.state, str(brain_dir))
         
         # Debug logging
         logger.info(f"[TaskToolSet] Generating EU for client_id={client_id}")
@@ -155,7 +167,11 @@ class TaskToolSet(ToolSet):
             context_variables: Agent context variables
         """
         client_id = context_variables.get("client_id", "default")
-        brain_dir = f".pantheon/brain/{client_id}"
+        
+        # Get brain_dir from settings
+        from ...settings import get_settings
+        settings = get_settings()
+        brain_dir = str(settings.brain_dir / client_id)
         
         # Update tool counter
         self.state.on_tool_call(len(tool_calls))
@@ -186,7 +202,7 @@ class TaskToolSet(ToolSet):
                 
                 # Check if path is in brain_dir (artifact file)
                 if brain_dir in file_path:
-                    self.state.on_artifact_modified(file_path)
+                    self.state.on_artifact_modified(file_path, brain_dir)
                     
                     # Also register as created if new
                     if file_path not in self.state.created_artifacts:

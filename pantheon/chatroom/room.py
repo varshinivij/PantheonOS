@@ -52,7 +52,7 @@ class ChatRoom(ToolSet):
     def __init__(
         self,
         endpoint: "Endpoint | str | None" = None,
-        memory_dir: str = "./.pantheon-chatroom",
+        memory_dir: str = "./.pantheon/memory",
         workspace_path: str | None = None,
         name: str = "pantheon-chatroom",
         description: str = "Chatroom for Pantheon agents",
@@ -81,9 +81,16 @@ class ChatRoom(ToolSet):
             # Auto-create mode: create Endpoint instance automatically
             from ..endpoint import Endpoint
 
-            # Use workspace_path or default to memory_dir/.workspace
+            # Use workspace_path or default to .pantheon dir (where settings.json lives)
             if workspace_path is None:
-                workspace_path = str(self.memory_dir / ".workspace")
+                # settings is already loaded in __init__ via get_settings() call if needed,
+                # but better to get it fresh or via kwargs if possible.
+                # Actually, ChatRoom doesn't hold settings instance directly in __init__ args,
+                # but we can get it from the factory or create a new one.
+                # Since we want consistency, let's use the global settings instance.
+                from ..settings import get_settings
+                settings = get_settings()
+                workspace_path = str(settings.project_dir)
 
             self._endpoint = Endpoint(
                 config=None,

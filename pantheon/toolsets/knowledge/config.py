@@ -36,9 +36,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     加载配置文件
 
     配置加载顺序：
-    1. 加载 knowledge/config.yaml 作为默认配置
-    2. 如果提供 config_path，深度合并用户配置
-    3. 使用环境变量覆盖特定字段
+    1. 尝试从 Settings 模块加载（.pantheon/settings.json）
+    2. 加载 knowledge/config.yaml 作为默认配置
+    3. 如果提供 config_path，深度合并用户配置
+    4. 使用环境变量覆盖特定字段
 
     Args:
         config_path: 用户配置文件路径（可选）
@@ -54,12 +55,32 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     import copy
 
-    # 1. 加载默认配置文件 (knowledge/config.yaml)
+    # 1. 尝试从 Settings 模块加载
+    settings_knowledge_config = None
+    try:
+        from ...settings import get_settings
+        settings = get_settings()
+        settings_knowledge_config = settings.get_knowledge_config()
+    except Exception:
+        pass
+
+    # 2. 加载默认配置文件 (knowledge/config.yaml)
     default_config_path = Path(__file__).parent / "config.yaml"
     with open(default_config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
-    # 2. 如果提供了用户配置文件，深度合并
+    # 3. 如果 Settings 模块加载成功，合并配置
+    if settings_knowledge_config:
+        # 合并 storage_path
+        if settings_knowledge_config.get("storage_path"):
+            config["knowledge"]["storage_path"] = settings_knowledge_config["storage_path"]
+        # 合并 qdrant 配置
+        qdrant_settings = settings_knowledge_config.get("qdrant", {})
+        for key, value in qdrant_settings.items():
+            if value is not None:
+                config["knowledge"]["qdrant"][key] = value
+
+    # 4. 如果提供了用户配置文件，深度合并
     if config_path and os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
             user_config = yaml.safe_load(f)
@@ -68,7 +89,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     knowledge_config = config["knowledge"]
 
-    # 3. 环境变量覆盖（优先级最高）
+    # 5. 环境变量覆盖（优先级最高）
     # 注意：此时还未展开路径变量，环境变量可以包含变量
     if os.getenv("QDRANT_LOCATION"):
         knowledge_config["qdrant"]["location"] = os.getenv("QDRANT_LOCATION")

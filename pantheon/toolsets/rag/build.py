@@ -267,9 +267,10 @@ async def upload_to_huggingface(output_dir: str, repo_id: str = "NaNg/pantheon_r
     logger.info(f"Starting upload process for {output_dir} to {repo_id}")
     
     from huggingface_hub import login
-    TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+    from ...settings import get_settings
+    TOKEN = get_settings().get_api_key("HUGGINGFACE_TOKEN")
     if not TOKEN:
-        raise ValueError("HUGGINGFACE_TOKEN is not set")
+        raise ValueError("HUGGINGFACE_TOKEN is not set in settings or environment")
     
     logger.info("Authenticating with Hugging Face...")
     login(TOKEN)

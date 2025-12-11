@@ -7,18 +7,18 @@ dependencies = [
     "executor-engine>=0.3.3",
     "fire>=0.7.0",
     "funcdesc>=0.1.8",
-    "litellm>=1.56.4",
+    "litellm>=1.80",
     "loguru>=0.7.3",
-    "openai>=1.58.1",
+    "openai>=2.0.0",
     "pillow>=10.4.0",
-    "rich>=13.9.4",
+    "rich>=14.0.0",
     "rich-pyfiglet",
     "fastmcp>=2.11.0",
-    "nats-py>=2.6.0",
+    "nats-py>=2.10.0",
     "httpx>=0.28.1",
     "diskcache",
     "python-frontmatter>=1.1.0",
-    "prompt-toolkit>=3.0.0",
+    "prompt-toolkit>=3.0.50",
 ]
 dynamic = ["version"]
 

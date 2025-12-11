@@ -143,15 +143,14 @@ async def acompletion_zhipu(
     Zhipu AI provides OpenAI-compatible endpoints, so we can use the OpenAI client
     with their custom base_url and API format.
     """
-    import os
-
     from openai import NOT_GIVEN, APIConnectionError, AsyncOpenAI
+    from ..settings import get_settings
 
-    # Get API key from environment (ZAI_API_KEY for Zhipu AI)
-    api_key = os.environ.get("ZAI_API_KEY")
+    # Get API key from Settings (supports env var override)
+    api_key = get_settings().get_api_key("ZAI_API_KEY")
     if not api_key:
         raise ValueError(
-            "ZAI_API_KEY environment variable not set (required for Zhipu AI)"
+            "ZAI_API_KEY not found in settings or environment (required for Zhipu AI)"
         )
 
     # Create client pointing to Zhipu AI endpoint
@@ -533,12 +532,12 @@ def process_messages_for_hook_func(messages: list[dict]) -> list[dict]:
 async def openai_embedding(
     texts: list[str], model: str = "text-embedding-3-large"
 ) -> list[list[float]]:
-    import os
-
     import openai
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_API_BASE")
+    from ..settings import get_settings
+    
+    settings = get_settings()
+    api_key = settings.get_api_key("OPENAI_API_KEY")
+    base_url = settings.get_api_key("OPENAI_API_BASE")
 
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
     resp = await client.embeddings.create(input=texts, model=model)

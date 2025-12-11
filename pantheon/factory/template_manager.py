@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..constant import PROJECT_ROOT
 from ..utils.log import logger
 from .template_io import FileBasedTemplateManager, resolve_prompts_for_team, init_prompt_resolver
 from .models import AgentConfig, TeamConfig
@@ -24,15 +25,21 @@ class TemplateManager:
         Initialize template manager.
 
         Args:
-            work_dir: Working directory for user templates. Defaults to cwd.
+            work_dir: Working directory for user templates. 
+                      Defaults to PROJECT_ROOT (captured at module load, before any chdir).
         """
-        self.work_dir = work_dir or Path.cwd()
-        self.agents_dir = self.work_dir / ".pantheon" / "agents"
-        self.teams_dir = self.work_dir / ".pantheon" / "teams"
-        self.prompts_dir = self.work_dir / ".pantheon" / "prompts"
+
+        # Get settings instance
+        from ..settings import get_settings
+        self.settings = get_settings(work_dir)
+        
+        self.work_dir = self.settings.work_dir
+        self.agents_dir = self.settings.agents_dir
+        self.teams_dir = self.settings.teams_dir
+        self.prompts_dir = self.settings.prompts_dir
         self.system_templates_dir = Path(__file__).parent / "templates"
 
-        self.file_manager = FileBasedTemplateManager(work_dir)
+        self.file_manager = FileBasedTemplateManager(self.work_dir)
 
         # Auto-bootstrap template system on initialization
         self.bootstrap()
@@ -50,71 +57,90 @@ class TemplateManager:
         Bootstrap the template system.
 
         Creates necessary user directories and copies system templates on first run.
+        Also copies settings.json and mcp.json if they don't exist.
         """
         logger.info("Bootstrapping template system...")
 
         # Ensure user directories exist
         self._ensure_directories()
 
+        # Ensure config files exist (copy from templates if missing)
+        self._ensure_settings()
+        self._ensure_mcp_config()
+
         # Ensure packaged templates exist locally (copy missing ones)
-        self._ensure_default_agents()
-        self._ensure_default_teams()
-        self._ensure_default_prompts()
+        self._ensure_default_templates()
 
         logger.info("Template system bootstrap complete")
+
 
     def _ensure_directories(self):
         """Ensure user template directories exist"""
         try:
-            self.agents_dir.mkdir(parents=True, exist_ok=True)
-            self.teams_dir.mkdir(parents=True, exist_ok=True)
-            self.prompts_dir.mkdir(parents=True, exist_ok=True)
+            for dest_dir in [self.agents_dir, self.teams_dir, self.prompts_dir, self.settings.skills_dir]:
+                dest_dir.mkdir(parents=True, exist_ok=True)
             logger.debug(f"Ensured template directories exist at {self.work_dir}")
         except Exception as e:
             logger.error(f"Failed to create template directories: {e}")
             raise
 
     def _copy_missing_templates(self, src_dir: Path, dest_dir: Path, label: str):
+        """Copy missing templates from src to dest (files and subdirectories)."""
         if not src_dir.exists():
             return 0
         copied = 0
-        for item in src_dir.glob("*.md"):
-            dest = dest_dir / item.name
-            if dest.exists():
+        for item in src_dir.iterdir():
+            dest_item = dest_dir / item.name
+            if dest_item.exists():
                 continue
-            shutil.copy(item, dest)
+            if item.is_dir():
+                shutil.copytree(item, dest_item)
+            else:
+                shutil.copy(item, dest_item)
             copied += 1
         if copied:
             logger.info(f"Copied {copied} {label} from system templates")
         return copied
 
-    def _ensure_default_agents(self):
-        try:
-            self._copy_missing_templates(
-                self.system_templates_dir / "agents", self.agents_dir, "agent(s)"
-            )
-        except Exception as e:
-            logger.error(f"Failed to copy default agents: {e}")
+    def _ensure_default_templates(self):
+        """Copy all default templates (agents, teams, prompts, skills)."""
+        template_dirs = [
+            ("agents", self.agents_dir, "agent(s)"),
+            ("teams", self.teams_dir, "team(s)"),
+            ("prompts", self.prompts_dir, "prompt(s)"),
+            ("skills", self.settings.skills_dir, "skill(s)"),
+        ]
+        for subdir, dest_dir, label in template_dirs:
+            try:
+                self._copy_missing_templates(
+                    self.system_templates_dir / subdir, dest_dir, label
+                )
+            except Exception as e:
+                logger.error(f"Failed to copy default {label}: {e}")
 
-    def _ensure_default_teams(self):
+    def _ensure_settings(self):
+        """Copy settings.json from templates if it doesn't exist in .pantheon/"""
         try:
-            self._copy_missing_templates(
-                self.system_templates_dir / "teams",
-                self.teams_dir,
-                "team(s)",
-            )
+            dest = self.settings.pantheon_dir / "settings.json"
+            if not dest.exists():
+                src = self.system_templates_dir / "settings.json"
+                if src.exists():
+                    shutil.copy(src, dest)
+                    logger.info("Copied settings.json from system templates")
         except Exception as e:
-            logger.error(f"Failed to copy default teams: {e}")
+            logger.error(f"Failed to copy settings.json: {e}")
 
-    def _ensure_default_prompts(self):
+    def _ensure_mcp_config(self):
+        """Copy mcp.json from templates if it doesn't exist in .pantheon/"""
         try:
-            self._copy_missing_templates(
-                self.system_templates_dir / "prompts",
-                self.prompts_dir,
-                "prompt(s)",
-            )
+            dest = self.settings.pantheon_dir / "mcp.json"
+            if not dest.exists():
+                src = self.system_templates_dir / "mcp.json"
+                if src.exists():
+                    shutil.copy(src, dest)
+                    logger.info("Copied mcp.json from system templates")
         except Exception as e:
-            logger.error(f"Failed to copy default prompts: {e}")
+            logger.error(f"Failed to copy mcp.json: {e}")
 
     # ===== Helper Methods =====
 

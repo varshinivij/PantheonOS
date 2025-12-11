@@ -5,7 +5,7 @@ from .julia import JuliaInterpreterToolSet
 from .shell import ShellToolSet
 from .file_manager import FileManagerToolSet
 from .web import WebToolSet
-from .notebook import IntegratedNotebookToolSet, JupyterKernelToolSet
+from .notebook import IntegratedNotebookToolSet, JupyterKernelToolSet, NotebookToolSet
 from .scraper import ScraperToolSet
 from .rag import VectorRAGToolSet
 from .package import PackageToolSet
@@ -28,6 +28,7 @@ __all__ = [
     # Notebooks
     "JupyterKernelToolSet",
     "IntegratedNotebookToolSet",
+    "NotebookToolSet",
     # RAG
     "VectorRAGToolSet",
     "DatabaseAPIQueryToolSet",

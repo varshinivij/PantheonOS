@@ -86,14 +86,17 @@ class KnowledgeToolSet(ToolSet):
             # 创建 LLM 实例的辅助函数（支持自定义 API base）
             def _create_llm():
                 from llama_index.llms.openai import OpenAI
+                from ...settings import get_settings
+                settings = get_settings()
 
                 llm_kwargs = {
                     "model": "gpt-4o-mini",
                     "temperature": 0.1,
-                    "api_key": os.getenv("OPENAI_API_KEY"),
+                    "api_key": settings.get_api_key("OPENAI_API_KEY"),
                 }
-                if os.getenv("OPENAI_API_BASE"):
-                    llm_kwargs["api_base"] = os.getenv("OPENAI_API_BASE")
+                api_base = settings.get_api_key("OPENAI_API_BASE")
+                if api_base:
+                    llm_kwargs["api_base"] = api_base
                 return OpenAI(**llm_kwargs)
 
             # 标题提取器（需要明确启用，因为需要 LLM）

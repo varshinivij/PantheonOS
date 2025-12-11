@@ -1392,6 +1392,11 @@ class Agent:
 
         # preserve execution_context_id if tool need
         context_variables = (context_variables or {}).copy()
+        
+        # Inject global context variables from settings
+        from .settings import get_settings
+        context_variables.update(get_settings().get_context_variables())
+
         if execution_context_id is not None:
             context_variables["execution_context_id"] = execution_context_id
         # preserve client_id from context_variables or memory

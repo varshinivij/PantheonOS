@@ -194,12 +194,12 @@ async def _start_endpoint_embedded(
 
 
 async def start_services(
-    service_name: str = "pantheon-chatroom",
-    memory_dir: str = "./.pantheon-chatroom",
+    service_name: str = None,
+    memory_dir: str = None,
     endpoint_service_id: str | None = None,
-    workspace_path: str = "./.pantheon-chatroom-workspace",
-    log_level: str = "INFO",
-    speech_to_text_model: str = "gpt-4o-mini-transcribe",
+    workspace_path: str = None,
+    log_level: str = None,
+    speech_to_text_model: str = None,
     endpoint_id_hash: str | None = None,
     endpoint_mode: str = "embedded",
     **kwargs,
@@ -207,17 +207,28 @@ async def start_services(
     """Start the chatroom service.
 
     Args:
-        service_name: The name of the service.
-        memory_dir: The directory to store the memory.
+        service_name: The name of the service. (default from settings)
+        memory_dir: The directory to store the memory. (default from settings)
         id_hash: The hash of the ID, if you want a stable service ID please provide it.
         endpoint_service_id: The service ID of the remote endpoint.
-        workspace_path: The path to the workspace. Endpoint will chdir to this directory.
-        log_level: The level of the log.
-        speech_to_text_model: The model to use for speech to text.
+        workspace_path: The path to the workspace. (default from settings)
+        log_level: The level of the log. (default from settings)
+        speech_to_text_model: The model to use for speech to text. (default from settings)
         endpoint_id_hash: Fixed id_hash for endpoint to generate stable service_id. If not provided, auto-generated.
         endpoint_mode: How to start the endpoint. Options: "embedded" (same event loop),
                       "process" (independent subprocess).
     """
+    # Load settings for defaults (CLI > Settings > code defaults)
+    from ..settings import get_settings
+    settings = get_settings()
+    
+    # Apply defaults: CLI > Settings > code defaults
+    service_name = service_name or settings.get("endpoint.service_name", "pantheon-chatroom")
+    memory_dir = memory_dir or settings.get("chatroom.memory_dir", str(settings.memory_dir))
+    workspace_path = workspace_path or settings.get("endpoint.workspace_path", str(settings.pantheon_dir))
+    log_level = log_level or settings.get("endpoint.log_level", "INFO")
+    speech_to_text_model = speech_to_text_model or settings.get("chatroom.speech_to_text_model", "gpt-4o-mini-transcribe")
+    
     # Convert all relative paths to absolute paths
     memory_dir = str(Path(memory_dir).resolve())
     workspace_path = str(Path(workspace_path).resolve())

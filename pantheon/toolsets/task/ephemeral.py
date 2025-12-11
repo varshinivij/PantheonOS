@@ -1,5 +1,6 @@
 """Ephemeral message generator for Modal Workflow System."""
-from .task_state import ConversationState
+import os
+from .task_state import ConversationState, ArtifactRoles
 
 
 def generate_ephemeral_message(state: ConversationState, brain_dir: str) -> str:
@@ -45,19 +46,33 @@ For complex work, create task.md first, then call task_boundary.
 Do NOT call notify_user unless requesting file review.
 </no_active_task_reminder>""")
     
-    # 3. Conditional reminders
-    if state.active_task and state.active_task.mode == "PLANNING" and state.plan_edited_in_planning:
-        parts.append("""<planning_mode_plan_edited_reminder>
-You modified plan.md in PLANNING mode. Request user review via notify_user before EXECUTION.
-</planning_mode_plan_edited_reminder>""")
+    # 3. Plan artifact modified in plan phase reminder (semantic check)
+    if state.active_task and state.active_task.is_plan_phase:
+        if state.has_plan_artifacts_modified():
+            plan_files = state.get_modified_artifacts_by_role("plan")
+            files_str = ", ".join(os.path.basename(p) for p in plan_files)
+            parts.append(f"""<plan_artifact_modified_reminder>
+You modified plan artifact(s): {files_str} in {state.active_task.mode} mode.
+Request user review via notify_user before proceeding to execution/analysis.
+</plan_artifact_modified_reminder>""")
     
+    # 4. General artifact modification reminder (non-plan phases)
+    if state.active_task and not state.active_task.is_plan_phase:
+        all_modified = state.get_all_modified_artifacts()
+        if all_modified:
+            parts.append(f"""<artifacts_modified_reminder>
+You have modified {len(all_modified)} artifact(s) in this task.
+Consider updating them as you progress.
+</artifacts_modified_reminder>""")
+    
+    # 5. Pending review reminder (after notify_user, not in task)
     if state.pending_review_paths and not state.active_task:
-        parts.append("""<requested_review_not_in_planning_mode_reminder>
+        parts.append("""<requested_review_not_in_task_reminder>
 You used notify_user but haven't set task_boundary since.
-Either: (1) Enter PLANNING to update plan, or (2) Enter EXECUTION to implement.
-</requested_review_not_in_planning_mode_reminder>""")
+Either: (1) Enter planning mode to update plan, or (2) Enter execution mode to implement.
+</requested_review_not_in_task_reminder>""")
     
-    # 4. Artifact access reminder (stale artifacts)
+    # 6. Artifact access reminder (stale artifacts)
     STALE_THRESHOLD = 10
     stale_artifacts = [
         path for path, last_step in state.artifact_last_access.items()

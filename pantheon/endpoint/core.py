@@ -5,10 +5,10 @@ import uuid
 from pathlib import Path
 from typing import TypedDict
 
-import yaml
 from executor.engine import Engine, LocalJob
 
 from ..remote import connect_remote
+from ..settings import get_settings
 from ..toolset import tool
 from ..toolsets.file_transfer import FileTransferToolSet
 from ..utils.log import logger
@@ -60,7 +60,7 @@ class Endpoint(FileTransferToolSet):
         # Priority: parameter > config > default
         if workspace_path is None:
             workspace_path = self.config.get(
-                "workspace_path", "./.pantheon-chatroom-workspace"
+                "workspace_path", str(get_settings().pantheon_dir)
             )
         # Convert to absolute path BEFORE chdir to avoid path resolution issues
         workspace_path = str(Path(workspace_path).resolve())
@@ -92,8 +92,9 @@ class Endpoint(FileTransferToolSet):
 
         # Initialize MCP Pool with log directory and hostname
         mcp_log_dir = str(self.log_dir / "mcp-servers")
-        # Get server host from environment or use localhost (for development)
-        server_host = os.environ.get("PANTHEON_SERVER_HOST", "localhost")
+        # Get server host from Settings (with env var override)
+        settings = get_settings()
+        server_host = settings.get_remote_config().get("server_host", "localhost")
         self.mcp_manager: MCPManager = MCPManager(log_dir=mcp_log_dir, host=server_host)
 
         super().__init__(
@@ -105,12 +106,9 @@ class Endpoint(FileTransferToolSet):
 
     @staticmethod
     def default_config() -> EndpointConfig:
-        with open(
-            os.path.join(os.path.dirname(__file__), "endpoint.yaml"),
-            "r",
-            encoding="utf-8",
-        ) as f:
-            return yaml.safe_load(f)
+        """Get default endpoint configuration from Settings."""
+        settings = get_settings()
+        return settings.get_endpoint_config()
 
     def report_service_id(self):
         with open(self.log_dir / "service_id.txt", "w", encoding="utf-8") as f:

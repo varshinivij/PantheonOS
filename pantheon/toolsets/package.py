@@ -57,8 +57,13 @@ class PackageToolSet(ToolSet):
         **kwargs,
     ):
         super().__init__(name, **kwargs)
-        root = Path(workdir).expanduser().resolve() if workdir else Path.cwd()
-        packages_path = root / ".pantheon" / "packages"
+        
+        # Use global Settings (PROJECT_ROOT based) to avoid path doubling
+        # when Endpoint passes its workspace_path as workdir
+        from ..settings import get_settings
+        settings = get_settings()
+        packages_path = settings.packages_dir
+        
         packages_path.mkdir(parents=True, exist_ok=True)
         self.manager = get_package_manager(packages_path)
         self.enable_semantic_search = enable_semantic_search

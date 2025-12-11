@@ -201,9 +201,12 @@ class PantheonTeam(Team):
             list_agents_func = make_list_agents(caller_slug)
             list_agents_func.__name__ = "list_agents"
             list_agents_func.__doc__ = (
-                "List all available agents and their capabilities. "
-                "Use this to discover agents you can delegate to via call_agent() "
-                "or transfer control to via transfer_to_agent()."
+                "List all available agents and their capabilities.\n\n"
+                "Returns a list of agent names and descriptions. Use this to:\n"
+                "- Discover agents you can delegate to via call_agent()\n"
+                "- Transfer control to via transfer_to_agent()\n"
+                "- Choose the right agent for specific task types\n\n"
+                "Call this before delegating if unsure which agent handles a task."
             )
 
             await run_func(agent.tool, list_agents_func)
@@ -293,9 +296,21 @@ class PantheonTeam(Team):
 
             call_agent.__name__ = "call_agent"
             call_agent.__doc__ = (
-                "Delegate a task to another agent in the team. "
-                "Pass the agent_name and a clear instruction describing the "
-                "context, what to do, and the desired output."
+                "Delegate a task to another agent in the team.\n\n"
+                "Args:\n"
+                "    agent_name: Name of the target agent (use list_agents() to discover).\n"
+                "    instruction: Task description with the following structure:\n"
+                "        - **Goal**: What needs to be accomplished and why it matters.\n"
+                "        - **Context**: All background the agent needs (files, data, constraints).\n"
+                "          Assume the agent has no memory of prior conversation.\n"
+                "        - **Expected Outcome**: Format, files, or deliverables expected.\n\n"
+                "Returns:\n"
+                "    Response content from the target agent.\n\n"
+                "Example instruction:\n"
+                "    'Goal: Analyze gene expression patterns in the PBMC dataset.\\n\\n'\n"
+                "    'Context: Dataset at /data/pbmc.h5ad, already preprocessed. '\n"
+                "    'Focus on T cell subpopulations.\\n\\n'\n"
+                "    'Expected Outcome: Report with UMAP visualization and marker genes.'"
             )
 
             await run_func(calling_agent.tool, call_agent)
