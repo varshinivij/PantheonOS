@@ -385,7 +385,7 @@ class ToolResultRenderer:
         # Render metadata in verbose mode
         self._render_metadata(result)
 
-        return True
+        return core_displayed
 
     def _truncate_lines(self, text: str, limit: Optional[int]) -> tuple[str, int, int]:
         """Truncate text to limit lines"""

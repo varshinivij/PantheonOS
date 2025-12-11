@@ -125,7 +125,12 @@ class FileManagerToolSetBase(ToolSet):
         return {"success": True, "cwd": str(self.path)}
 
     @tool
-    async def list_files(self, sub_dir: str | None = None, recursive: bool = False) -> dict:
+    async def list_files(
+        self,
+        sub_dir: str | None = None,
+        recursive: bool = False,
+        max_depth: int = 5,
+    ) -> dict:
         """List files and directories in the workspace.
 
         Use this tool to browse directory contents. For searching, use shell:
@@ -136,6 +141,9 @@ class FileManagerToolSetBase(ToolSet):
             sub_dir: Subdirectory to list (relative to workspace root).
                      If not provided, lists the workspace root.
             recursive: If True, list all files recursively as a tree structure.
+            max_depth: Maximum depth to recurse (only used when recursive=True).
+                       0 means only the target directory, 1 includes immediate children, etc.
+                       Default is 5.
 
         Returns:
             dict: {success: bool, files: list} with name, type, size, last_modified.
@@ -163,7 +171,7 @@ class FileManagerToolSetBase(ToolSet):
                 ],
             }
         else:
-            def _list_tree(path: Path) -> dict:
+            def _list_tree(path: Path, current_depth: int = 0) -> dict:
                 """Helper function to recursively build the tree structure."""
                 result = {
                     "name": path.name,
@@ -171,16 +179,20 @@ class FileManagerToolSetBase(ToolSet):
                     "size": path.stat().st_size if path.is_file() else 0,
                 }
                 if path.is_dir():
-                    result["children"] = []
-                    for item in sorted(path.iterdir()):
-                        result["children"].append(_list_tree(item))
+                    # Check depth limit before recursing
+                    if max_depth is not None and current_depth >= max_depth:
+                        result["children"] = []  # Empty children at max depth
+                    else:
+                        result["children"] = []
+                        for item in sorted(path.iterdir()):
+                            result["children"].append(_list_tree(item, current_depth + 1))
                 return result
 
             target_path = self.path / sub_dir if sub_dir else self.path
             if not target_path.exists():
                 return {"success": False, "error": "Target directory does not exist"}
 
-            return _list_tree(target_path)
+            return _list_tree(target_path, 0)
 
 
     @tool

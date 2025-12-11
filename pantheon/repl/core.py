@@ -732,13 +732,19 @@ class Repl(ReplUI):
                     if self._is_multi_agent and self._current_agent_name:
                         agent_prefix = f"[cyan]{self._current_agent_name}[/cyan] "
     
+                    # Only show token counts when we have output tokens
+                    if current_output_tokens > 0:
+                        token_info = f"[dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                    else:
+                        token_info = ""
+
                     if self._current_tool_name and self._tools_executing:
                         display_name = format_tool_name(self._current_tool_name)
                         wave_text = create_wave_text(f"Running {display_name}...", wave_offset)
-                        status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                        status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} {token_info}"
                     else:
                         wave_text = create_wave_text("Processing...", wave_offset)
-                        status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} [dim]{sep} {self._format_token_count(input_tokens)} in, {self._format_token_count(current_output_tokens)} out"
+                        status_text = f"[dim]{current_frame}[/dim] {agent_prefix}{wave_text} {token_info}"
     
                     if elapsed > 1:
                         status_text += f"[dim] {sep} {elapsed:.1f}s[/dim]"
@@ -783,10 +789,10 @@ class Repl(ReplUI):
                                     f"\n[dim]→[/dim] [bold cyan]{agent_name}[/bold cyan]"
                                 )
                             self.console.print()
-                            if "```" in assistant_content or "def " in assistant_content or "import " in assistant_content:
-                                self.console.print(assistant_content)
-                            else:
+                            try:
                                 self.console.print(Markdown(assistant_content))
+                            except Exception:
+                                self.console.print(assistant_content)
                             self.console.print()
                             if not self.prompt_app:
                                 processing_live.start()
@@ -946,14 +952,10 @@ class Repl(ReplUI):
                 # Show agent label before final response (multi-agent mode)
                 if self._is_multi_agent and self._current_agent_name:
                     self.console.print(f"[dim]→[/dim] [bold cyan]{self._current_agent_name}[/bold cyan]")
-                if (
-                    "```" in full_content
-                    or "def " in full_content
-                    or "import " in full_content
-                ):
-                    self.console.print(full_content)
-                else:
+                try:
                     self.console.print(Markdown(full_content))
+                except Exception:
+                    self.console.print(full_content)
 
         self.console.print()
 

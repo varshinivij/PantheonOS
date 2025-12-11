@@ -375,9 +375,14 @@ class PantheonInputApp:
 
         wave_html = "".join(wave_text_parts)
 
+        # Only show token counts when we have output tokens
+        if self._output_tokens > 0:
+            token_info = f"{self._separator} {self._input_tokens} in, {self._output_tokens} out "
+        else:
+            token_info = ""
+
         return HTML(
-            f"{self._current_spinner} {wave_html} {self._separator} "
-            f"{self._input_tokens} in, {self._output_tokens} out "
+            f"{self._current_spinner} {wave_html} {token_info}"
             f"{self._separator} {self._current_elapsed:.1f}s "
             f'{self._separator} <style fg="#888888">[Esc] cancel</style>'
         )
