@@ -16,7 +16,7 @@ agents:
 developer_coordinator:
   id: developer_coordinator
   name: Engineering Coordinator
-  model: openai/gpt-5-mini
+  model: openai/gpt-5
   icon: 🧰
   toolsets:
     - file_manager

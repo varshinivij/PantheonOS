@@ -16,7 +16,7 @@ agents:
 research_coordinator:
   id: research_coordinator
   name: Research Coordinator
-  model: openai/gpt-5-mini
+  model: openai/gpt-5
   icon: 🧭
   toolsets:
     - file_manager

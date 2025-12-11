@@ -4,7 +4,8 @@
       "Bash(timeout 30 python:*)",
       "Bash(dir:*)",
       "Bash(python -m py_compile:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

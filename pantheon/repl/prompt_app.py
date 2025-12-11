@@ -383,11 +383,11 @@ class PantheonInputApp:
         )
 
     def get_status_formatted_text(self) -> HTML:
-        """Generate bottom status bar content (model/agent info)."""
+        """Generate bottom status bar content (model/agent info) in muted gray."""
         usage_display = f"ctx: {self._token_usage_pct:.0f}%" if self._token_usage_pct > 0 else "ctx: 0%"
         status = "Processing..." if self._is_processing else "Ready"
         return HTML(
-            f" ⏺ {self._model_name} │ agent: {self._current_agent} │ {usage_display} │ {status} "
+            f'<style fg="#666666">⏺ {self._model_name} │ agent: {self._current_agent} │ {usage_display} │ {status}</style>'
         )
 
     def start_processing(self, input_tokens: int = 0):

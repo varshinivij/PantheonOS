@@ -1,20 +1,20 @@
 ---
 category: general
-description: 'The default team with Team Coordinator that delegates to specialists for comprehensive task handling.'
+description: 'The default team with Leader that delegates to specialists for comprehensive task handling.'
 icon: 🏠
 id: default
 name: Default Team
 type: team
-version: 2.0.0
+version: 1.0.0
 agents:
-  - default_coordinator
+  - leader
   - python_dev
   - data_analyst
   - researcher
-default_coordinator:
-  id: default_coordinator
-  name: Team Coordinator
-  model: openai/gpt-5-mini
+leader:
+  id: leader
+  name: Leader
+  model: openai/gpt-5
   icon: 🧭
   toolsets:
     - file_manager
