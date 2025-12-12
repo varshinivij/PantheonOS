@@ -149,6 +149,9 @@ class Repl(ReplUI):
         self._use_prompt_toolkit = True  # Enable new UI by default
         self.message_queue = None
 
+        # Cache last listed team files for index selection in /team
+        self._last_team_files: list[dict] | None = None
+
     def _create_chatroom_from_agent(
         self, agent: Agent | Team, memory_dir: str
     ) -> ChatRoom:
@@ -605,8 +608,14 @@ class Repl(ReplUI):
             return
 
         # Agents command
-        elif cmd_lower in ["/agents", "/team"]:
+        elif cmd_lower in ["/agents"]:
             await self._handle_show_agents()
+            return
+
+        # Team management command: /team [list|<id|name|index|path>]
+        elif cmd_lower == "/team" or cmd_lower.startswith("/team "):
+            args = cmd[5:].strip()
+            await self._handle_team_command(args)
             return
 
         # Agent switch command: /agent <name> or /agent <number>
@@ -1101,6 +1110,168 @@ class Repl(ReplUI):
         else:
             self.console.print("[dim]No team loaded[/dim]")
         self.console.print()
+
+    async def _handle_team_command(self, args: str):
+        """Manage team templates: list and switch current chat's team.
+        
+        Usage:
+          /team            Show usage and current team
+          /team list       List available team templates
+          /team <sel>      Switch to team by id|name|index|path (teams/xxx.md)
+        """
+        try:
+            # Show usage and current team
+            if not args or args in {"help", "?"}:
+                self.console.print()
+                self.console.print("[dim][bold blue]-- TEAM -------------------------------------------------------------[/bold blue][/dim]")
+                self.console.print()
+                # Try to fetch current template name
+                current_name = None
+                try:
+                    tpl = await self._chatroom.get_chat_template(self._chat_id)
+                    if tpl.get("success"):
+                        t = tpl.get("template") or {}
+                        current_name = t.get("name") or t.get("id")
+                except Exception:
+                    pass
+                if current_name:
+                    self.console.print(f"[dim]Current team:[/dim] [bold]{current_name}[/bold]")
+                self.console.print("[dim]/team list[/dim] - List available team templates")
+                self.console.print("[dim]/team <id|name|index|path>[/dim] - Switch to a team template")
+                self.console.print()
+                return
+
+            # List teams
+            if args.lower().startswith("list"):
+                result = await self._chatroom.list_template_files("teams")
+                if not result.get("success"):
+                    self.console.print(f"[red]Failed to list team templates: {result.get('error') or result.get('message')}[/red]")
+                    self.console.print()
+                    return
+                files = result.get("files", [])
+                self._last_team_files = files
+                self.console.print()
+                self.console.print("[dim][bold blue]-- TEAMS ------------------------------------------------------------[/bold blue][/dim]")
+                self.console.print()
+                if not files:
+                    self.console.print("[dim]No team templates found[/dim]")
+                    self.console.print()
+                    return
+                # Header
+                self.console.print(f"[dim]  #   {'Name':<24} {'ID':<18} Path[/dim]")
+                self.console.print("[dim]  ───────────────────────────────────────────────────────────────[/dim]")
+                for idx, f in enumerate(files, 1):
+                    name = (f.get("name") or "").strip() or "Unnamed"
+                    if len(name) > 22:
+                        name = name[:19] + "..."
+                    fid = (f.get("id") or "").strip()
+                    if len(fid) > 16:
+                        fid = fid[:13] + "..."
+                    path = f.get("path", "")
+                    self.console.print(f"[dim]  [/dim][cyan]{idx:<3}[/cyan] [bold]{name:<24}[/bold] [dim]{fid:<18}[/dim] [dim]{path}[/dim]")
+                self.console.print()
+                return
+
+            # Resolve selection to a template file path
+            selection = args.strip()
+            files = self._last_team_files
+            if not files:
+                r = await self._chatroom.list_template_files("teams")
+                files = r.get("files", []) if r.get("success") else []
+
+            file_path = None
+            # Index selection
+            if selection.isdigit() and files:
+                idx = int(selection)
+                if 1 <= idx <= len(files):
+                    file_path = files[idx - 1].get("path")
+                else:
+                    self.console.print(f"[red]Invalid index: {idx}[/red]")
+                    self.console.print()
+                    return
+            # Direct path
+            if file_path is None and ("/" in selection or selection.endswith(".md")):
+                file_path = selection
+            # Match by id or name
+            if file_path is None and files:
+                sl = selection.lower()
+                # exact id
+                for f in files:
+                    if (f.get("id") or "").lower() == sl:
+                        file_path = f.get("path"); break
+                # name startswith
+                if file_path is None:
+                    for f in files:
+                        if (f.get("name") or "").lower().startswith(sl):
+                            file_path = f.get("path"); break
+                # id startswith
+                if file_path is None:
+                    for f in files:
+                        if (f.get("id") or "").lower().startswith(sl):
+                            file_path = f.get("path"); break
+                # fallback: assume teams/<id>.md
+                if file_path is None:
+                    file_path = f"teams/{selection}.md"
+
+            # Read template
+            read_res = await self._chatroom.read_template_file(file_path, resolve_refs=True)
+            if not read_res.get("success"):
+                self.console.print(f"[red]Template not found or unreadable: {selection}[/red]")
+                err = read_res.get("error") or read_res.get("message")
+                if err:
+                    self.console.print(f"[dim]{err}[/dim]")
+                self.console.print()
+                return
+
+            template = read_res.get("content") or {}
+            # Validate
+            val = await self._chatroom.validate_template(template)
+            if not val.get("success") or (val.get("compatible") is False):
+                self.console.print("[red]Template not compatible with current endpoint[/red]")
+                msg = val.get("message") or "; ".join(val.get("validation_errors", []) or [])
+                if msg:
+                    self.console.print(f"[dim]{msg}[/dim]")
+                self.console.print()
+                return
+
+            # Apply
+            setup = await self._chatroom.setup_team_for_chat(self._chat_id, template)
+            if not setup.get("success"):
+                self.console.print(f"[red]Failed to apply team: {setup.get('message', 'Unknown error')}[/red]")
+                self.console.print()
+                return
+
+            # Refresh local team cache and UI state
+            self._team = await self._chatroom.get_team_for_chat(self._chat_id)
+            self._is_multi_agent = len(self._team.agents) > 1
+            self._current_agent_name = None
+            self._last_printed_agent = None
+
+            # Update status bar to first agent and model
+            if self.prompt_app and self._team and self._team.agents:
+                agent_names = list(self._team.agents.keys())
+                if agent_names:
+                    first_agent_name = agent_names[0]
+                    agent = self._team.agents[first_agent_name]
+                    model = getattr(agent, 'model', 'unknown')
+                    if hasattr(agent, 'models'):
+                        models = agent.models
+                        if isinstance(models, list) and models:
+                            model = models[0]
+                        elif isinstance(models, str):
+                            model = models
+                    self.prompt_app.update_agent(first_agent_name)
+                    self.prompt_app.update_model(model)
+
+            # Confirmation and show agents
+            tpl_name = template.get("name") or template.get("id") or file_path
+            self.console.print(f"[green]✅ Switched team to:[/green] [bold]{tpl_name}[/bold]")
+            await self._handle_show_agents()
+            return
+
+        except Exception as e:
+            self.console.print(f"[red]Error handling /team: {e}[/red]")
+            self.console.print()
 
     async def _handle_switch_agent(self, agent_arg: str):
         """Switch to a different agent by name or number."""

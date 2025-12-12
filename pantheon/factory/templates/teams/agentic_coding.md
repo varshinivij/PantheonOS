@@ -2,8 +2,8 @@
 category: testing
 description: 'Test team for agentic task modal workflow'
 icon: 🧪
-id: agentic_test
-name: Agentic Test Team
+id: agentic_coding
+name: Agentic Coding Team
 type: team
 version: 1.0.0
 agents:
@@ -11,13 +11,13 @@ agents:
 agentic_agent:
   id: agentic_agent
   name: Agentic Agent
-  model: openai/gpt-5-mini
+  model: openai/gpt-5
   icon: 🤖
   toolsets:
     - file_manager
     - python_interpreter
+    - shell
     - task
-
 ---
 
-{{agentic_task}}
+{{agentic_coding}}

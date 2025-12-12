@@ -86,6 +86,7 @@ class TeamConfig:
     version: str = "1.0.0"
     agents: List[AgentConfig] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
+    source_path: Optional[str] = None
 
     @property
     def all_agents(self) -> List[str]:
@@ -103,6 +104,7 @@ class TeamConfig:
             "version": self.version,
             "agents": [a.to_dict() for a in self.agents],
             "tags": self.tags,
+            "source_path": self.source_path,
         }
 
     @classmethod
@@ -124,4 +126,5 @@ class TeamConfig:
             version=data.get("version", "1.0.0"),
             agents=agents,
             tags=data.get("tags", []),
+            source_path=data.get("source_path"),
         )

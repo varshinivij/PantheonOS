@@ -303,9 +303,20 @@ class TemplateManager:
             if file_type not in {"teams", "agents", "all"}:
                 return {"success": False, "error": f"Unknown file_type: {file_type}"}
 
+            def _get_filename(source_path: str, fallback_id: str) -> str:
+                """Extract filename from source_path, fallback to id if not available."""
+                if source_path:
+                    from pathlib import Path
+                    return Path(source_path).stem
+                return fallback_id
+
             team_files = (
                 [
-                    {"id": tmpl.id, "name": tmpl.name, "path": f"teams/{tmpl.id}.md"}
+                    {
+                        "id": tmpl.id,
+                        "name": tmpl.name,
+                        "path": f"teams/{_get_filename(tmpl.source_path, tmpl.id)}.md",
+                    }
                     for tmpl in self.file_manager.list_teams(resolve_refs=False)
                 ]
                 if file_type in {"teams", "all"}
@@ -317,7 +328,7 @@ class TemplateManager:
                     {
                         "id": agent.id,
                         "name": agent.name,
-                        "path": f"agents/{agent.id}.md",
+                        "path": f"agents/{_get_filename(agent.source_path, agent.id)}.md",
                     }
                     for agent in self.file_manager.list_agents()
                 ]

@@ -1186,6 +1186,7 @@ class FileBasedTemplateManager:
                     item = self._read_agent_from_path(path)
                 else:
                     item = self._read_team_from_path(path)
+                    item.source_path = str(path)  # Track original file path
                     if resolve_refs:
                         item = self._resolve_agent_references(item, path.parent)
             except Exception as exc:
@@ -1201,6 +1202,7 @@ class FileBasedTemplateManager:
                         item = self._read_agent_from_path(path)
                     else:
                         item = self._read_team_from_path(path)
+                        item.source_path = str(path)  # Track original file path
                         if resolve_refs:
                             item = self._resolve_agent_references(item, path.parent)
                 except Exception as exc:

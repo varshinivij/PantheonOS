@@ -463,6 +463,7 @@ class ReplUI:
         self.console.print()
         self.console.print("[dim][bold purple]/agents  [/bold purple][/dim] - Show agents in current team")
         self.console.print("[dim][bold purple]/agent   [/bold purple][/dim] - Switch to agent (by name or number)")
+        self.console.print("[dim][bold purple]/team    [/bold purple][/dim] - Switch team: /team list | /team <id>")
         self.console.print()
 
         self.console.print("[dim][bold blue]-- DISPLAY ----------------------------------------------------------[/bold blue][/dim]")

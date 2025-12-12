@@ -59,6 +59,7 @@ class ReplCompleter(Completer):
         # Agent/Team
         ('/agents', 'Show agents in team'),
         ('/agent', 'Switch to specific agent'),
+        ('/team', 'Switch team: /team list | /team <id>'),
         # Display modes
         ('/verbose', 'Verbose output mode'),
         ('/v', 'Verbose (short)'),
