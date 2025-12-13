@@ -90,7 +90,7 @@ class ChatRoom(ToolSet):
                 # Since we want consistency, let's use the global settings instance.
                 from ..settings import get_settings
                 settings = get_settings()
-                workspace_path = str(settings.project_dir)
+                workspace_path = str(settings.workspace)
 
             self._endpoint = Endpoint(
                 config=None,

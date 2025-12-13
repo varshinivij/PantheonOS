@@ -699,6 +699,21 @@ class Repl(ReplUI):
         # No active task: show normally
         return True
 
+    def _build_chat_message(self, message: str) -> list[dict]:
+        """Build chat message, handling @image: attachments.
+        
+        Delegates to vision.parse_image_mentions for unified image handling.
+        Workspace is automatically resolved from settings.
+        
+        Args:
+            message: User input string (may contain @image: tokens)
+            
+        Returns:
+            List of message dicts in OpenAI format
+        """
+        from ..utils.vision import parse_image_mentions
+        return parse_image_mentions(message)
+
     async def _process_message(self, message: str):
         """Process a message through ChatRoom."""
         start_time = time.time()
@@ -952,11 +967,14 @@ class Repl(ReplUI):
                 # This prevents "start freeze" if backend init is synchronous/heavy
                 await asyncio.sleep(0.1)
 
+                # Build message - check for @image: attachments
+                chat_message = self._build_chat_message(message)
+
                 # Call ChatRoom.chat()
                 chat_task = asyncio.create_task(
                     self._chatroom.chat(
                         chat_id=self._chat_id,
-                        message=[{"role": "user", "content": message}],
+                        message=chat_message,
                         process_chunk=smart_process_chunk,
                         process_step_message=process_step_message,
                     )

@@ -40,13 +40,18 @@ if TYPE_CHECKING:
     from .core import Repl
 
 
+# Image file extensions for @image: completion
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'}
+
+
 class ReplCompleter(Completer):
     """Completer that provides completions for REPL commands and file paths.
 
     Supports:
     - Built-in commands starting with /
     - Custom handler commands
-    - File path completions starting with @
+    - File path completions starting with @ (code/text files)
+    - Image completions starting with @image: (images only)
     """
     
     # Built-in commands (sync with core.py run() command handling)
@@ -94,9 +99,14 @@ class ReplCompleter(Completer):
         """
         text = document.text_before_cursor.lstrip()
 
+        # Image completion: triggered by @image:
+        if '@image:' in text:
+            yield from self._get_file_completions(document, images_only=True)
+            return
+
         # File path completion: triggered by @
         if '@' in text:
-            yield from self._get_file_completions(document)
+            yield from self._get_file_completions(document, images_only=False)
             return
 
         # Command completion: starts with /
@@ -124,18 +134,31 @@ class ReplCompleter(Completer):
                                 display_meta=desc
                             )
 
-    def _get_file_completions(self, document):
-        """Generate file path completions for @ mentions."""
+    def _get_file_completions(self, document, images_only: bool = False):
+        """Generate file path completions for @ or @image: mentions.
+        
+        Args:
+            images_only: If True, only show image files (for @image: prefix)
+        """
         text = document.text_before_cursor
-
-        # Find the last @ position
-        at_pos = text.rfind('@')
-        if at_pos == -1:
-            return
-
-        # Extract path prefix after @
-        path_prefix = text[at_pos + 1:]
-        start_position = -(len(path_prefix) + 1)  # Include @
+        
+        # Determine prefix type and extract path
+        if images_only:
+            # @image:path format
+            at_pos = text.rfind('@image:')
+            if at_pos == -1:
+                return
+            path_prefix = text[at_pos + 7:]  # Skip '@image:'
+            start_position = -(len(path_prefix) + 7)  # Include '@image:'
+            completion_prefix = '@image:'
+        else:
+            # @path format
+            at_pos = text.rfind('@')
+            if at_pos == -1:
+                return
+            path_prefix = text[at_pos + 1:]
+            start_position = -(len(path_prefix) + 1)  # Include '@'
+            completion_prefix = '@'
 
         # Get workspace directory
         workspace = self._get_workspace()
@@ -168,35 +191,35 @@ class ReplCompleter(Completer):
             # Prefix match (case-insensitive)
             if not entry.name.lower().startswith(name_prefix.lower()):
                 continue
+            
+            # Filter by file type if images_only
+            if images_only and not entry.is_dir():
+                if entry.suffix.lower() not in IMAGE_EXTENSIONS:
+                    continue
 
             # Build completion path
             rel_path = f"{dir_part}/{entry.name}" if dir_part else entry.name
 
             if entry.is_dir():
                 yield Completion(
-                    f"@{rel_path}/",
+                    f"{completion_prefix}{rel_path}/",
                     start_position=start_position,
                     display=f"{entry.name}/",
                     display_meta="dir"
                 )
             else:
+                file_type = 'img' if images_only else self._get_file_type(entry)
                 yield Completion(
-                    f"@{rel_path}",
+                    f"{completion_prefix}{rel_path}",
                     start_position=start_position,
                     display=entry.name,
-                    display_meta=self._get_file_type(entry)
+                    display_meta=file_type
                 )
 
     def _get_workspace(self) -> Path:
-        """Get workspace path from repl or fallback to PROJECT_ROOT."""
-        if self.repl:
-            try:
-                endpoint = self.repl._chatroom._endpoint
-                if endpoint and hasattr(endpoint, 'path'):
-                    return endpoint.path
-            except AttributeError:
-                pass
-        return PROJECT_ROOT
+        """Get workspace path from settings."""
+        from ..settings import get_settings
+        return get_settings().workspace
 
     def _get_file_type(self, path: Path) -> str:
         """Get file type description based on extension."""

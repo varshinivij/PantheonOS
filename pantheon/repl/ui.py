@@ -342,6 +342,7 @@ class ReplUI:
         quick_start_text = (
             "[bold]Quick Start[/bold]\n"
             "[dim]/help[/dim] commands   [dim]/agents[/dim] team   [dim]/exit[/dim] quit\n"
+            "[dim]@path[/dim] file ref   [dim]@image:path[/dim] attach image\n"
             "[dim]Esc[/dim] cancel   [dim]Ctrl+D[/dim] exit   [dim]Alt+Enter[/dim] newline"
         )
 

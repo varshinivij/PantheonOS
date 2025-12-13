@@ -3,7 +3,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from pantheon.endpoint import Endpoint, wait_endpoint_ready
+from pantheon.endpoint import Endpoint
 from pantheon.remote import connect_remote
 from pantheon.utils.misc import generate_service_id
 from pantheon.utils.log import logger
@@ -220,15 +220,24 @@ async def start_services(
     """
     # Load settings for defaults (CLI > Settings > code defaults)
     from ..settings import get_settings
+
     settings = get_settings()
-    
+
     # Apply defaults: CLI > Settings > code defaults
-    service_name = service_name or settings.get("endpoint.service_name", "pantheon-chatroom")
-    memory_dir = memory_dir or settings.get("chatroom.memory_dir", str(settings.memory_dir))
-    workspace_path = workspace_path or settings.get("endpoint.workspace_path", str(settings.pantheon_dir))
+    service_name = service_name or settings.get(
+        "endpoint.service_name", "pantheon-chatroom"
+    )
+    memory_dir = memory_dir or settings.get(
+        "chatroom.memory_dir", str(settings.memory_dir)
+    )
+    workspace_path = workspace_path or settings.get(
+        "endpoint.workspace_path", str(settings.work_dir)
+    )
     log_level = log_level or settings.get("endpoint.log_level", "INFO")
-    speech_to_text_model = speech_to_text_model or settings.get("chatroom.speech_to_text_model", "gpt-4o-mini-transcribe")
-    
+    speech_to_text_model = speech_to_text_model or settings.get(
+        "chatroom.speech_to_text_model", "gpt-4o-mini-transcribe"
+    )
+
     # Convert all relative paths to absolute paths
     memory_dir = str(Path(memory_dir).resolve())
     workspace_path = str(Path(workspace_path).resolve())

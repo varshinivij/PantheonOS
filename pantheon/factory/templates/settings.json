@@ -8,7 +8,7 @@
     "endpoint": {
         "service_name": "pantheon-chatroom-endpoint",
         // 工作目录：Endpoint 的工作目录
-        "workspace_path": "./.pantheon",
+        "workspace_path": ".",
         "log_level": "INFO",
         // 是否允许通过 Endpoint 传输文件
         "allow_file_transfer": true,

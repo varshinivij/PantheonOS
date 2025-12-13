@@ -1145,6 +1145,10 @@ class Agent:
             if "_llm_content" in msg:
                 msg["content"] = msg["_llm_content"]
 
+        # Expand file:// image references to Base64 for LLM API call
+        from .utils.vision import expand_image_references_for_llm
+        history = expand_image_references_for_llm(history)
+
         tool_timeout = tool_timeout or self.tool_timeout
 
 
@@ -1399,6 +1403,14 @@ class Agent:
         else:
             # User input path: convert input to messages
             input_messages = await self._input_to_openai_messages(msg)
+            
+            # Process images: convert Base64 to file:// paths for efficient storage
+            from .utils.vision import get_image_store
+            image_store = get_image_store()
+            chat_id = memory_instance.id if memory_instance else "default"
+            for m in input_messages:
+                image_store.process_message_images(m, chat_id)
+            
             logger.debug(
                 f"Input messages: {input_messages} , memory_length: {len(memory_instance.get_messages(execution_context_id=execution_context_id))} "
                 f"raw memory_length: {len(memory_instance.get_messages())} memory_id: {memory_instance.id}"
