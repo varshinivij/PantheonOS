@@ -389,7 +389,7 @@ class PantheonInputApp:
             focusable=True,
             style="class:input-area",
             prompt='> ',
-            height=Dimension(min=1, max=10),  # Dynamic height, 1-10 lines
+            height=Dimension(min=1, max=10, preferred=1),  # Start with 1 line, expand as needed
         )
 
         # Track line count for dynamic height adjustment
@@ -511,12 +511,21 @@ class PantheonInputApp:
         )
 
     def _get_input_container(self):
-        """Return input container with top/bottom horizontal lines (no side borders)."""
+        """Return input container with top/bottom horizontal lines (no side borders).
+
+        Height is dynamically calculated based on actual content to prevent
+        prompt_toolkit from allocating excess space on freshly cleared terminals.
+        """
+        # Calculate exact height needed: content lines + 2 (top/bottom borders)
+        content_lines = max(1, self.text_area.buffer.text.count('\n') + 1)
+        content_lines = min(content_lines, 10)  # Cap at max
+        total_height = content_lines + 2  # +2 for border lines
+
         return HSplit([
             self._create_horizontal_line('─', 'fg:ansiblue'),  # Top line
             self.text_area,
             self._create_horizontal_line('─', 'fg:ansiblue'),  # Bottom line
-        ])
+        ], height=total_height)
 
     def accept_input(self, buffer: Buffer):
         """Handle input submission from TextArea."""
@@ -579,6 +588,11 @@ class PantheonInputApp:
         """Run the application asynchronously."""
         # Ensure text area is focused
         self.app.layout.focus(self.text_area)
+        # Force initial renderer reset for clean state (fixes height issues on fresh terminals)
+        try:
+            self.app.renderer.reset()
+        except Exception:
+            pass
         await self.app.run_async()
     
     def get_processing_formatted_text(self) -> HTML:
