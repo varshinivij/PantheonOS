@@ -17,6 +17,11 @@ from pantheon.toolset import ToolSet
 from pantheon.utils.log import logger
 
 
+def _normalize_tool_name(name: str) -> str:
+    """Convert hyphenated MCP tool name to Python-compatible underscore name."""
+    return name.replace("-", "_")
+
+
 @dataclass
 class PackageMethod:
     """Metadata for an exported package method."""
@@ -49,6 +54,20 @@ class PackageRecord:
     origin: str = "user"
 
 
+@dataclass
+class MCPPackageRecord:
+    """Metadata for an MCP server registered as a package."""
+
+    name: str
+    uri: str
+    description: str
+    tools: dict[str, dict] = field(default_factory=dict)  # tool_name -> {name, description, inputSchema}
+    provider: Any = None  # MCPProvider instance
+    origin: str = "mcp"
+    status: str = "ready"
+    last_error: str | None = None
+
+
 class PackageManager:
     """Manages local Pantheon packages by scanning the workspace."""
 
@@ -57,6 +76,7 @@ class PackageManager:
         self.packages_path.mkdir(parents=True, exist_ok=True)
         self._namespace = f"pantheon_packages_{hash(self.packages_path)}"
         self._packages: dict[str, PackageRecord] = {}
+        self._mcp_packages: dict[str, MCPPackageRecord] = {}
         self._lock = threading.Lock()
         self._system_names: list[str] = []
         self._system_sources: dict[str, type[ToolSet]] = {}
@@ -81,8 +101,15 @@ class PackageManager:
                 names.append(entry.name)
         return names
 
-    def list_packages(self) -> list[dict]:
-        """Return high-level metadata for all packages."""
+    async def list_packages(self) -> list[dict]:
+        """Return high-level metadata for all packages.
+        
+        Automatically refreshes MCP packages if endpoint_mcp_uri is available.
+        """
+        
+        # Auto-refresh MCP packages if not already loaded
+        if not self._mcp_packages:
+            await self.refresh_mcp_packages()
 
         results = []
         all_names = sorted(set(self.discover() + self._system_names))
@@ -99,10 +126,106 @@ class PackageManager:
                     "origin": record.origin,
                 }
             )
+        
+        # Include MCP packages
+        for name, record in self._mcp_packages.items():
+            results.append(
+                {
+                    "name": name,
+                    "status": record.status,
+                    "description": record.description,
+                    "methods": sorted(record.tools.keys()),
+                    "path": None,
+                    "last_error": record.last_error,
+                    "origin": record.origin,
+                }
+            )
+        
         return results
+
+    def _json_schema_to_signature(self, schema: dict) -> str:
+        """Convert JSON Schema to Python-style signature string.
+        
+        Args:
+            schema: The inputSchema from MCP tool (function schema format)
+            
+        Returns:
+            Python signature like "(name: str, mode: str = 'code')"
+        """
+        params = schema.get("parameters", {})
+        props = params.get("properties", {})
+        required = set(params.get("required", []))
+        
+        parts = []
+        # Sort: required params first, then optional
+        for name in sorted(props.keys(), key=lambda x: (x not in required, x)):
+            info = props[name]
+            type_str = info.get("type", "Any")
+            if name in required:
+                parts.append(f"{name}: {type_str}")
+            else:
+                default = info.get("default", "...")
+                parts.append(f"{name}: {type_str} = {repr(default)}")
+        
+        return f"({', '.join(parts)})"
+    
+    def _json_schema_to_params(self, schema: dict) -> dict:
+        """Extract parameter details from JSON Schema.
+        
+        Args:
+            schema: The inputSchema from MCP tool (function schema format)
+            
+        Returns:
+            dict of param_name -> {type, description, default, required}
+        """
+        params = schema.get("parameters", {})
+        props = params.get("properties", {})
+        required = set(params.get("required", []))
+        
+        result = {}
+        for name, info in props.items():
+            result[name] = {
+                "type": info.get("type", "Any"),
+                "description": info.get("description", ""),
+                "required": name in required,
+            }
+            if "default" in info:
+                result[name]["default"] = info["default"]
+        
+        return result
 
     def describe_package(self, name: str) -> dict:
         """Return detailed metadata for a package."""
+
+        # Check if MCP package first
+        if name in self._mcp_packages:
+            mcp_record = self._mcp_packages[name]
+            methods = []
+            for tool_name, tool_info in mcp_record.tools.items():
+                input_schema = tool_info.get("inputSchema", {})
+                methods.append({
+                    "name": tool_name,
+                    "doc": tool_info.get("description", ""),
+                    "owner": name,
+                    "signature": self._json_schema_to_signature(input_schema),
+                    "params": self._json_schema_to_params(input_schema),
+                    "async": True,
+                    "accepts_context": False,
+                })
+            return {
+                "success": mcp_record.status == "ready",
+                "package": {
+                    "name": mcp_record.name,
+                    "status": mcp_record.status,
+                    "description": mcp_record.description,
+                    "path": None,
+                    "classes": [],
+                    "methods": methods,
+                    "last_loaded": None,
+                    "last_error": mcp_record.last_error,
+                    "origin": mcp_record.origin,
+                },
+            }
 
         record = self._ensure_loaded(name)
         methods = [
@@ -188,6 +311,139 @@ class PackageManager:
             )
             raise
         return result
+
+    # ------------------------------------------------------------------
+    # MCP Package Support
+    # ------------------------------------------------------------------
+
+    def is_mcp_package(self, name: str) -> bool:
+        """Check if a package name refers to an MCP server."""
+        return name in self._mcp_packages
+
+    async def refresh_mcp_packages(self) -> dict:
+        """Discover MCP servers from Endpoint and register as packages.
+        
+        This queries the Endpoint's MCP server to list available MCP servers,
+        then creates MCPProvider instances for each running server.
+        
+        Returns:
+            dict with success status and list of registered package names
+        """
+        import os
+        from .context import load_context
+        
+        context = load_context()
+        endpoint_uri = context.get("endpoint_mcp_uri")
+        
+        # Fallback for Endpoint main process (e.g., PackageToolSet)
+        if not endpoint_uri:
+            endpoint_uri = os.environ.get("ENDPOINT_MCP_URI")
+        
+        if not endpoint_uri:
+            return {"success": False, "error": "No endpoint_mcp_uri in context"}
+        
+        try:
+            from fastmcp import Client
+            import json
+            
+            # Query Endpoint for MCP server list
+            async with Client(endpoint_uri) as client:
+                call_result = await client.call_tool("manage_service", {
+                    "action": "list",
+                    "service_type": "mcp",
+                })
+            
+            # Extract result from CallToolResult
+            if hasattr(call_result, "structured_content") and call_result.structured_content:
+                result = call_result.structured_content
+            elif hasattr(call_result, "content") and call_result.content:
+                # Extract text from first content block
+                text = call_result.content[0].text if hasattr(call_result.content[0], "text") else str(call_result.content[0])
+                result = json.loads(text)
+            else:
+                result = {}
+            
+            registered = []
+            for server in result.get("services", []):
+                if server.get("status") != "running":
+                    continue
+                
+                server_name = server.get("name")
+                server_uri = server.get("uri")
+                if not server_name or not server_uri:
+                    continue
+                
+                # Create MCPProvider for direct connection
+                from ..providers import MCPProvider
+                from ..endpoint.mcp import MCPServerConfig
+                
+                config = MCPServerConfig(
+                    name=server_name,
+                    type="http",
+                    uri=server_uri,
+                    description=server.get("description", ""),
+                )
+                provider = MCPProvider(config=config)
+                await provider.initialize()
+                
+                # Get tools via provider with normalized names
+                tool_infos = await provider.list_tools()
+                tools = {}
+                for t in tool_infos:
+                    normalized_name = _normalize_tool_name(t.name)
+                    tools[normalized_name] = {
+                        "name": normalized_name,
+                        "original_name": t.name,  # Keep original for MCP calls
+                        "description": t.description,
+                        "inputSchema": getattr(t, "inputSchema", {}),
+                    }
+                
+                self._mcp_packages[server_name] = MCPPackageRecord(
+                    name=server_name,
+                    uri=server_uri,
+                    description=server.get("description", ""),
+                    tools=tools,
+                    provider=provider,
+                )
+                registered.append(server_name)
+                logger.info(f"Registered MCP package '{server_name}' with {len(tools)} tools")
+            
+            return {"success": True, "packages": registered}
+            
+        except Exception as exc:
+            logger.exception("Failed to refresh MCP packages")
+            return {"success": False, "error": str(exc)}
+
+    async def call_mcp_tool(
+        self,
+        package_name: str,
+        method_name: str,
+        **kwargs,
+    ) -> Any:
+        """Call an MCP tool directly via MCPProvider.
+        
+        Args:
+            package_name: Name of the MCP server package
+            method_name: Name of the tool to call
+            **kwargs: Tool arguments
+            
+        Returns:
+            Tool result
+        """
+        record = self._mcp_packages.get(package_name)
+        if not record:
+            raise KeyError(f"MCP package '{package_name}' not found")
+        
+        if not record.provider:
+            raise RuntimeError(f"MCP package '{package_name}' has no provider")
+        
+        # Use original_name for actual MCP call (may have hyphens)
+        tool_info = record.tools.get(method_name)
+        if not tool_info:
+            raise KeyError(f"MCP tool '{method_name}' not found in package '{package_name}'")
+        
+        original_name = tool_info.get("original_name", method_name)
+        return await record.provider.call_tool(original_name, kwargs)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -525,4 +781,4 @@ class PackageManager:
         return {"success": True, "reloaded": [name]}
 
 
-__all__ = ["PackageManager", "PackageMethod", "PackageRecord"]
+__all__ = ["PackageManager", "PackageMethod", "PackageRecord", "MCPPackageRecord"]

@@ -42,10 +42,18 @@ def build_context_payload(
     """Construct a normalized context payload ready for export."""
 
     normalized_workdir = _normalize_path(workdir)
+    
     payload: dict[str, Any] = {
         "workdir": normalized_workdir,
         "context_variables": dict(context_variables or {}),
     }
+    
+    # Auto-inject endpoint_mcp_uri from ENDPOINT_MCP_URI env var if available
+    # This is a top-level field (like workdir), not part of context_variables
+    endpoint_mcp_uri = os.environ.get("ENDPOINT_MCP_URI")
+    if endpoint_mcp_uri:
+        payload["endpoint_mcp_uri"] = endpoint_mcp_uri
+    
     if extras:
         payload.update(extras)
     return payload
@@ -96,29 +104,26 @@ def export_context(payload: Mapping[str, Any], env: dict | None = None) -> dict:
 def load_context(default: Mapping[str, Any] | None = None) -> dict:
     """Load the serialized payload from env, returning a normalized dict."""
 
-    baseline = {"workdir": None, "context_variables": {}}
+    baseline = {"workdir": None, "context_variables": {}, "endpoint_mcp_uri": None}
     if default:
         baseline.update(default)
         if "context_variables" in default:
-            baseline["context_variables"] = dict(default["context_variables"])
+            baseline["context_variables"] = dict(
+                baseline.get("context_variables") or {}
+            ) | dict(default["context_variables"])
 
     raw = os.environ.get(CONTEXT_ENV)
     if not raw:
         return baseline
 
     try:
-        data = json.loads(raw)
-    except Exception:
+        loaded = json.loads(raw)
+        if not isinstance(loaded, dict):
+            return baseline
+        baseline.update(loaded)
         return baseline
-
-    if not isinstance(data, Mapping):
+    except (json.JSONDecodeError, TypeError):
         return baseline
-
-    payload = dict(baseline)
-    payload.update(data)
-    payload["workdir"] = _normalize_path(payload.get("workdir"))
-    payload["context_variables"] = dict(payload.get("context_variables") or {})
-    return payload
  
 
 def _filter_serializable_context(values: Mapping[str, Any]) -> dict[str, Any]:

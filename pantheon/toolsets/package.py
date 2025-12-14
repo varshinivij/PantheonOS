@@ -169,7 +169,7 @@ class PackageToolSet(ToolSet):
             >>> await search_packages("data")
         """
         try:
-            packages = self.manager.list_packages()
+            packages = await self.manager.list_packages()
 
             if not query:
                 return {"success": True, "packages": packages}
@@ -182,15 +182,16 @@ class PackageToolSet(ToolSet):
             logger.exception(f"search_packages failed: {exc}")
             return {"success": False, "error": str(exc)}
 
-    def _get_all_tools(self) -> list[dict]:
+    async def _get_all_tools(self) -> list[dict]:
         """Get all tools from all packages with full metadata.
 
         Returns:
-            List of tool dictionaries with package, method, signature, doc.
+            List of tool dictionaries with package, method, signature, params, doc, origin.
         """
         tools = []
-        for pkg in self.manager.list_packages():
+        for pkg in await self.manager.list_packages():
             pkg_name = pkg.get("name", "unknown")
+            pkg_origin = pkg.get("origin", "user")
             try:
                 detail = self.manager.describe_package(pkg_name)
                 if not detail.get("success"):
@@ -204,9 +205,11 @@ class PackageToolSet(ToolSet):
                         "package": pkg_name,
                         "method": method.get("name"),
                         "signature": method.get("signature", "()"),
+                        "params": method.get("params"),  # May be None for non-MCP
                         "doc": method.get("doc") or "",
                         "async": is_async,
                         "call_example": call_example,
+                        "origin": pkg_origin,
                     })
             except Exception as e:
                 logger.warning(f"Failed to get tools from package {pkg_name}: {e}")
@@ -272,17 +275,18 @@ class PackageToolSet(ToolSet):
 
 ## Task
 
-Return tools that can fulfill the user's need. Consider:
-- Semantic similarity of the query to tool names and descriptions
-- Whether the tool's functionality matches the intent
+Return ALL tools that match the user's query. Consider:
+- **Package names**: If the query matches or contains a package name, include ALL tools from that package
+- **Method names**: If the query matches a method name, include that tool
+- **Descriptions**: If the query semantically relates to a tool's description, include it
+- Be INCLUSIVE rather than exclusive - when in doubt, include the tool
 
 ## Output Format
 
 Output a JSON array of tool identifiers (package.method):
 ["package1.method1", "package2.method2"]
 
-If no tools match, return an empty array:
-[]
+IMPORTANT: Never return an empty array if the query matches a package or method name.
 """
 
         try:
@@ -376,7 +380,7 @@ If no tools match, return an empty array:
             >>> search_tools("find something similar to what we discussed", use_context=True)
         """
         try:
-            tools = self._get_all_tools()
+            tools = await self._get_all_tools()
 
             if not query:
                 result_tools = tools

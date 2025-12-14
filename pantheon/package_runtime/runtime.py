@@ -34,6 +34,16 @@ class PackageRuntimeMethod:
     method_name: str
 
     def _invoke(self, *args, **kwargs):
+        # Check if this is an MCP package
+        if self.manager.is_mcp_package(self.package_name):
+            # MCP calls are always async, return coroutine
+            return self.manager.call_mcp_tool(
+                self.package_name,
+                self.method_name,
+                **kwargs,
+            )
+        
+        # Regular package call
         context = kwargs.pop("context_variables", None)
         if context is None:
             context_payload = load_context()
@@ -103,14 +113,25 @@ class PackageRuntime:
     def __init__(self, manager: PackageManager):
         self.manager = manager
 
-    def list_packages(self):
-        return self.manager.list_packages()
+    async def list_packages(self):
+        return await self.manager.list_packages()
 
     def describe(self, name: str):
         return self.manager.describe_package(name)
 
     def reload(self, name: str | None = None):
         return self.manager.reload_package(name)
+
+    async def refresh_mcp_packages(self):
+        """Discover and register MCP servers as packages.
+        
+        Call this to sync MCP servers from the Endpoint.
+        Requires endpoint_mcp_uri to be set in context.
+        
+        Returns:
+            dict with success status and list of registered package names
+        """
+        return await self.manager.refresh_mcp_packages()
 
     def __getattr__(self, item: str) -> PackageProxy:
         return PackageProxy(item, self.manager)

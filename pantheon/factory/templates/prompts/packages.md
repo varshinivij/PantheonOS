@@ -1,96 +1,107 @@
 ---
 id: packages
-name: Pantheon packages
-description: Pantheon packages usage guide
+name: Extended Tools
+description: Using extended tools via packages API
 ---
 
-# Pantheon Packages Usage Guide
+# Extended Tools
 
-Pantheon packages collect reusable packages under `${{pantheon_dir}}/packages/`. Use them whenever you need to run domain logic (analytics, workflows, notifications, etc.) inside Python code without requesting extra tools. Packages run the same way inside `shell`, `python_interpreter`, and `integrated_notebook` sessions.
+Extended tools provide reusable capabilities beyond the core tools. They are designed for building complete programs rather than one-off operations.
 
+**When to use extended tools:**
+- Prefer writing Python scripts that combine multiple extended tools over calling individual tools separately
+- Use packages for multi-step workflows: fetch data → process → analyze → output results
+- Chain package methods together in a single script for complex operations
+- Leverage packages for domain-specific logic (analytics, data processing, integrations)
 
-## What Packages Are & When to Reach for Them
-- Each folder inside `${{pantheon_dir}}/packages/` defines one package (e.g. `sales_report`).
-- Use packages to group related functions or ToolSets so that one import unlocks an entire capability set.
-- Prefer packages for multi-step logic: synthesize data, call APIs, write files, and coordinate results within one script.
+> [!IMPORTANT]
+> **Always call `await pp.packages.list_packages()` first** to discover and refresh available packages including MCP servers.
 
-## Discovering Capabilities
+## 1. Direct Tool: `search_tools`
+
+Use the `search_tools` tool directly to discover available extended tools.
+
+---
+
+## 2. Python API (via Interpreter Tools)
+
+Use the following tools to execute extended tools:
+
+- **python_interpreter** - `from pantheon import packages as pp`
+- **shell** - `python -c "from pantheon import packages as pp; ..."`
+- **notebook** - Import in any cell
+
+### Complete Usage Pattern
+
 ```python
+import asyncio
 from pantheon import packages as pp
+# use async main() pattern only in python_interpreter tools, you can directly use await in notebooks
+async def main():
+    # Step 1: ALWAYS list packages first to refresh MCP servers
+    packages = await pp.packages.list_packages()
+    print(f"Available packages: {[p['name'] for p in packages]}")
+    
+    # Step 2: Orchestrate package methods
+    result = await pp.packages.<package>.<method>(arg1="value")
+    # multi-step workflows: fetch data → process → analyze → output results
+    return result
 
-catalog = pp.packages.list_packages()
-sales = pp.packages.describe("sales_report")
-matches = pp.packages.search("inventory")
+# Run the async main function
+result = asyncio.run(main())
+print(result)
 ```
 
-**`list_packages()`** → returns a list of package summaries. Each entry contains:
-- `name`: package directory name
-- `origin`: `user` (workspace code) or `system` (built-in ToolSets)
-- `status`: `ready`, `empty`, or `error`
-- `methods`: exported method names
-- `description`/`path` for quick context
+### Discovery Functions
 
-**`describe(name)`** → returns one package with rich metadata:
-- `classes`: class names found in the package
-- `methods`: for each method, you get docstring, signature, async flag, and any
-  parameters you should provide
-- `last_loaded`, `last_error`, and filesystem path to help debug
+#### `await pp.packages.list_packages()` → `list[dict]`
 
-**`search(query)`** → performs a fuzzy match across package names, method names,
-docstrings, and descriptions. The result mirrors the list output but filtered to
-relevant entries, so you can quickly jump to the right package or function.
+List all available packages (including MCP servers).
 
-## Calling Package Methods
+**Returns:** List of package summaries:
 ```python
-from pantheon import packages as pp
-
-report = pp.packages.sales_report.generate(date="2025-12-01", region="APAC")
-
-inventory = pp.packages.inventory.restock(product="Widget", delta=5)
-
-notification = await pp.packages.ops_center.notify(payload={"event": "ready"})
+[
+    {
+        "name": str,           # Package name
+        "description": str,    # Package description
+        "methods": list[str],  # Available method names
+        "status": str          # "ready" | "empty" | "error"
+    }
+]
 ```
-- **Sync methods**: Call directly like any Python function.
-- **Async methods**: Use `await` to get the result.
-- **Force sync execution**: Use `.sync_call(...)` to run an async method synchronously (handles nested event loops automatically).
 
-## Authoring or Updating Packages
-1. Create/modify files under `${{pantheon_dir}}/packages/<package_name>/` via `file_manager`, `shell`, or `python_interpreter`. No `__init__.py` is required.
-2. Define a normal class whose public methods encapsulate your capability.
-3. Any public method (name not starting with `_`) that has a docstring becomes callable through `pp.packages.<package>.<method>`.
+#### `pp.packages.describe(name: str)` → `dict`
 
-Example:
+Get detailed metadata for a specific package.
+
+**Returns:**
 ```python
-class SalesReportPackage:
-    """Sales analytics helpers."""
-
-    def generate(self, date: str, region: str | None = None):
-        """Return a structured summary for the requested date."""
-        ...
-
+{
+    "success": bool,
+    "package": {
+        "name": str,
+        "description": str,
+        "methods": [
+            {
+                "name": str,
+                "signature": str,   # e.g., "(data: list, format: str = 'json')"
+                "params": dict,     # MCP only: {param_name: {type, description, required}}
+                "doc": str,
+                "async": bool
+            }
+        ]
+    }
+}
 ```
-Save the file—future imports automatically pick up the latest code.
 
-## Surfaces Where You Can Use Packages
-- **python_interpreter**: write scripts, import `pantheon.packages`, call packages.
-- **shell.execute_command**: run inline Python (e.g. `python - <<'PY' ... PY`) and use the same import.
-- **integrated_notebook / jupyter_kernel**: start a cell with `from pantheon import packages as pp` and continue.
+---
 
-### Advanced / Direct Imports (optional)
-- Always prefer `from pantheon import packages as pp`; it keeps discovery, context injection, and system packages consistent.
-- If you *must* bypass the shim (for example, a class expects custom constructor args), first import `pantheon.packages` somewhere in the same process (that import ensures the package path is on `sys.path`). Afterwards you can import the module/class directly and instantiate it yourself:
-  ```python
-  import pantheon.packages  # sets up sys.path and package manager
-  from sales_report.specialized import SpecializedPackage  # maps to ${{pantheon_dir}}/packages/sales_report/specialized.py
+## Quick Reference
 
-  pkg = SpecializedPackage(config_path="/tmp/custom.yaml")
-  pkg.generate(...)
-  ```
-- Treat this as a last-resort escape hatch; sticking with `pp.packages.*` keeps future runtime improvements transparent and consistent across all tools.
+| Need | Method |
+|------|--------|
+| Discover (direct tool) | `search_tools("keyword")` |
+| List all (via interpreter) | `await pp.packages.list_packages()` |
+| Get API details | `pp.packages.describe("name")` |
+| Call method | `await pp.packages.<pkg>.<method>(...)` |
 
-## Quick Checklist
-- Need to understand what exists? `list_packages()` → `describe()` → `search()`.
-- Need new behavior? Add files under `${{pantheon_dir}}/packages/<name>/`, ensure methods have docstrings, then import again.
-- Need async work? Just `await` the method. Need sync execution? Use `.sync_call(...)`.
-
-Stick to this workflow and you can discover, modify, and invoke every package capability directly from your Python code without learning any extra tools or internal details.

@@ -20,6 +20,8 @@ agentic_agent:
     - integrated_notebook
     - task
     - code
+    - package
 ---
 
 {{agentic_coding}}
+{{packages}}

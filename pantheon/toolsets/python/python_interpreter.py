@@ -34,6 +34,13 @@ def exec_with_echo(code, env=None):
 
 
 DEFAULT_INIT_CODE = """
+# Enable nested asyncio for packages API async methods (e.g., asyncio.run() in event loop)
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except ImportError:
+    pass  # nest_asyncio not available
+
 try:
     import matplotlib; matplotlib.use('Agg')
     import matplotlib.pyplot as plt

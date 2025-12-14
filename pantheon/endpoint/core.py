@@ -166,6 +166,43 @@ class Endpoint(FileTransferToolSet):
         # ===== Phase 3: Health checks are now handled asynchronously =====
         logger.info("Phase 3: MCP servers initialized with async health monitoring")
 
+        # ===== Phase 4: Expose Endpoint as MCP Server =====
+        logger.info("Phase 4: Starting Endpoint MCP server for package API access...")
+        await self._start_endpoint_mcp_server()
+
+    async def _start_endpoint_mcp_server(self):
+        """Start Endpoint as MCP server for cross-process package API access.
+        
+        This allows package API (running in separate Python/shell/Jupyter processes)
+        to discover and access MCP servers managed by this Endpoint.
+        """
+        import os
+        
+        self.endpoint_mcp_port = self.config.get("endpoint_mcp_port", 3100)
+        mcp_server = self.to_mcp()
+        
+        async def run_mcp():
+            try:
+                await mcp_server.run_http_async(
+                    host="127.0.0.1",
+                    port=self.endpoint_mcp_port,
+                    path="/mcp",
+                    show_banner=False,
+                    log_level="error",  # Suppress uvicorn startup logs
+                )
+            except Exception as e:
+                logger.error(f"Endpoint MCP server error: {e}")
+        
+        self._endpoint_mcp_task = asyncio.create_task(run_mcp())
+        
+        # Set ENDPOINT_MCP_URI env var for build_context_payload to pick up
+        endpoint_mcp_uri = f"http://127.0.0.1:{self.endpoint_mcp_port}/mcp"
+        os.environ["ENDPOINT_MCP_URI"] = endpoint_mcp_uri
+        
+        logger.info(f"Endpoint MCP server started at {endpoint_mcp_uri}")
+
+
+
     def _get_tool_method(self, obj, method_name: str, context: str):
         """Get and validate a tool method from an object."""
         if not hasattr(obj, method_name):

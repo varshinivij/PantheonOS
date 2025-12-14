@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from pantheon.agent import Agent
 from pantheon.package_runtime import (
     configure_package_manager,
@@ -76,13 +78,14 @@ def test_packages_module_adds_packages_path(tmp_path, monkeypatch):
     assert str(pkg_dir.resolve()) in sys.path
 
 
-def test_runtime_imports_sample_packages(monkeypatch):
+@pytest.mark.asyncio
+async def test_runtime_imports_sample_packages(monkeypatch):
     workspace = SAMPLE_WORKSPACE
     packages_dir = workspace / ".pantheon" / "packages"
     runtime = _prepare_runtime(workspace, packages_dir, monkeypatch)
 
     manager = PackageManager(packages_dir)
-    packages = manager.list_packages()
+    packages = await manager.list_packages()
     user_names = {pkg["name"] for pkg in packages if pkg.get("origin") == "user"}
     assert user_names == set(SAMPLE_PACKAGES)
     assert any(
@@ -98,14 +101,12 @@ def test_runtime_imports_sample_packages(monkeypatch):
     inventory = runtime.packages.inventory.restock(product="Widget", delta=3)
     assert inventory == {"product": "Widget", "delta": 3, "status": "restocked"}
 
-    notification = asyncio.run(
-        runtime.packages.ops_center.notify.async_call(
-            payload={"event": "report-ready"},
-            context_variables={
-                "execution_context_id": "exec-1",
-                "client_id": "cli-1",
-            },
-        )
+    notification = await runtime.packages.ops_center.notify(
+        payload={"event": "report-ready"},
+        context_variables={
+            "execution_context_id": "exec-1",
+            "client_id": "cli-1",
+        },
     )
     assert notification["context_id"] == "exec-1"
     assert notification["payload"]["event"] == "report-ready"
@@ -135,7 +136,7 @@ def test_agent_end_to_end_package_pipeline(monkeypatch):
             inventory = pp_local.packages.inventory.restock(
                 product="Widget", delta=5
             )
-            notification = await pp_local.packages.ops_center.notify.async_call(
+            notification = await pp_local.packages.ops_center.notify(
                 payload={"report_status": report["status"]},
                 context_variables=context_variables,
             )
