@@ -564,6 +564,10 @@ class ToolSetManager:
             workflow_path = params.get("workflow_path")
             if workflow_path:
                 args["workflow_path"] = workflow_path
+        elif service_type == "integrated_notebook":
+            # Disable NATS streaming in local mode (e.g., REPL)
+            args["workdir"] = str(self.path)
+            args["streaming_mode"] = "local"
 
         return args
 
