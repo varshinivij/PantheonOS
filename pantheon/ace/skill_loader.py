@@ -1,0 +1,308 @@
+"""
+ACE Skill Loader module for Pantheon.
+
+This module provides functionality to load and merge skills from multiple sources:
+1. skillbook.json (auto-learned skills)
+2. SKILLS.md (user-defined simple rules)
+3. skills/*.md files (user-defined detailed skills with front_matter)
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import frontmatter
+
+from ..utils.log import logger
+from .skillbook import Skill, Skillbook
+
+
+# ===========================================================================
+# Helper Functions
+# ===========================================================================
+
+
+def _get_relative_path(file_path: Path, base_dir: Path) -> Path:
+    """Get relative path from base directory (skills_dir)."""
+    try:
+        return file_path.relative_to(base_dir)
+    except ValueError:
+        return Path(file_path.name)
+
+
+def parse_front_matter(file_path: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Parse YAML front matter from a Markdown file using python-frontmatter.
+    
+    Args:
+        file_path: Path to the Markdown file
+    
+    Returns:
+        Tuple of (front_matter dict or None, body content)
+    """
+    try:
+        post = frontmatter.load(file_path)
+        if post.metadata:
+            return dict(post.metadata), post.content
+        return None, post.content
+    except Exception as e:
+        logger.warning(f"Failed to parse front matter in {file_path}: {e}")
+        return None, ""
+
+
+# ===========================================================================
+# Section Normalization
+# ===========================================================================
+
+# Known section name normalization (e.g., "User Rules" -> "user_rules")
+KNOWN_SECTIONS = {
+    "user rules": "user_rules",
+    "strategies": "strategies",
+    "patterns": "patterns",
+    "workflows": "workflows",
+}
+
+
+def _normalize_section(section_name: str) -> str:
+    """Normalize section name: use known mapping or lowercase with underscores."""
+    return KNOWN_SECTIONS.get(section_name, section_name.replace(" ", "_"))
+
+
+# ===========================================================================
+# SKILLS.md Parsing
+# ===========================================================================
+
+
+def parse_skills_md(file_path: Path, skills_dir: Path) -> List[Skill]:
+    """
+    Parse SKILLS.md file to extract simple rule-based skills.
+    
+    Args:
+        file_path: Path to SKILLS.md
+        skills_dir: Base skills directory (for source_path)
+    
+    Returns:
+        List of Skill objects
+    """
+    if not file_path.exists():
+        return []
+    
+    _, body = parse_front_matter(file_path)
+    
+    skills = []
+    current_section = "strategies"
+    skill_counter: Dict[str, int] = {}
+    relative_path = _get_relative_path(file_path, skills_dir)
+    
+    # Track multi-line comment state
+    in_comment_block = False
+    
+    for line in body.split("\n"):
+        stripped = line.strip()
+        
+        # Handle multi-line HTML comment blocks
+        if "<!--" in line:
+            in_comment_block = True
+        if in_comment_block:
+            if "-->" in line:
+                in_comment_block = False
+            continue
+        
+        # Section header (only valid ## headers outside comments)
+        if stripped.startswith("## "):
+            current_section = _normalize_section(stripped[3:].strip().lower())
+            continue
+        
+        # Rule item
+        if stripped.startswith("- "):
+            content = stripped[2:].strip()
+            if not content:
+                continue
+            
+            # Generate unique ID
+            prefix = current_section[:3]
+            skill_counter[prefix] = skill_counter.get(prefix, 0) + 1
+            skill_id = f"user-{prefix}-{skill_counter[prefix]:03d}"
+            
+            skills.append(Skill(
+                id=skill_id,
+                section=current_section,
+                content=content,
+                source_path=str(relative_path),
+                type="user",  # User-defined skill from SKILLS.md
+            ))
+    
+    return skills
+
+
+# ===========================================================================
+# Skill File Scanning
+# ===========================================================================
+
+
+def scan_skill_files(skills_dir: Path) -> List[Path]:
+    """
+    Recursively scan skills directory for .md files.
+    
+    Skips hidden files/directories and SKILLS.md in root.
+    """
+    if not skills_dir.exists():
+        return []
+    
+    result = []
+    for path in skills_dir.rglob("*.md"):
+        # Get relative path from skills_dir (not from cwd)
+        try:
+            rel_path = path.relative_to(skills_dir)
+        except ValueError:
+            continue
+        
+        # Skip hidden files/dirs (check relative path parts only)
+        if any(p.startswith(('.', '_')) for p in rel_path.parts):
+            continue
+        
+        # Skip SKILLS.md in root (not in subdirs)
+        if rel_path.name == "SKILLS.md" and len(rel_path.parts) == 1:
+            continue
+        
+        result.append(path)
+    
+    return result
+
+
+def parse_skill_from_file(file_path: Path, skills_dir: Path) -> Optional[Skill]:
+    """
+    Parse a skill file and create a Skill object from its front matter.
+    
+    Requires 'id' and 'description' in front matter.
+    """
+    front_matter, _ = parse_front_matter(file_path)
+    
+    if not front_matter:
+        return None
+    
+    skill_id = front_matter.get("id")
+    description = front_matter.get("description")
+    
+    if not skill_id or not description:
+        return None
+    
+    relative_path = _get_relative_path(file_path, skills_dir)
+    
+    return Skill(
+        id=skill_id,
+        section=front_matter.get("section", "workflows"),
+        content=description.strip(),  # Pure description, file ref added at runtime
+        type=front_matter.get("type", "user"),  # Default to user, allow override
+        source_path=str(relative_path),
+        tags=front_matter.get("tags", []),
+        learned_from=front_matter.get("learned_from"),
+        created_at=front_matter.get("created_at", ""),
+    )
+
+
+# ===========================================================================
+# Skill Loader
+# ===========================================================================
+
+
+class SkillLoader:
+    """
+    Loads and merges skills from multiple sources.
+    
+    Loading order:
+    1. Scan skills/*.md files
+    2. Parse SKILLS.md (simple rules)
+    3. Cleanup orphan skills
+    """
+    
+    def __init__(self, skills_dir: Path, skillbook: Skillbook):
+        self.skills_dir = skills_dir
+        self.skillbook = skillbook
+        self._loaded_skill_ids: Set[str] = set()
+    
+    def load_and_merge(self, cleanup_orphans: bool = True) -> int:
+        """Load skills from all sources and merge into skillbook."""
+        loaded_count = 0
+        self._loaded_skill_ids.clear()
+        
+        # 1. Scan and process skill files
+        for file_path in scan_skill_files(self.skills_dir):
+            skill = parse_skill_from_file(file_path, self.skills_dir)
+            if skill:
+                self._merge_skill(skill, is_user_defined=skill.is_user_defined())
+                self._loaded_skill_ids.add(skill.id)
+                loaded_count += 1
+        
+        # 2. Parse SKILLS.md (simple rules)
+        skills_md = self.skills_dir / "SKILLS.md"
+        if skills_md.exists():
+            for skill in parse_skills_md(skills_md, self.skills_dir):
+                self._merge_skill(skill, is_user_defined=True)
+                self._loaded_skill_ids.add(skill.id)
+                loaded_count += 1
+        
+        # 3. Cleanup orphan skills
+        if cleanup_orphans:
+            orphan_count = self._cleanup_orphan_skills()
+            if orphan_count > 0:
+                logger.info(f"Cleaned up {orphan_count} orphan skills")
+        
+        logger.info(f"Loaded {loaded_count} skills from files")
+        return loaded_count
+    
+    def _merge_skill(self, skill: Skill, is_user_defined: bool = False) -> None:
+        """
+        Merge skill into skillbook.
+        
+        For user-defined skills, clears system flag if overriding.
+        Always preserves existing ratings.
+        """
+        existing = self.skillbook.get_skill(skill.id)
+        
+        if existing:
+            # Update content, preserve ratings
+            existing.content = skill.content
+            existing.section = skill.section
+            existing.source_path = skill.source_path
+            existing.tags = skill.tags if skill.tags else existing.tags
+            
+            # Clear system flag if user overrides
+            if is_user_defined and existing.type == "system":
+                existing.type = None
+        else:
+            self._add_skill_to_skillbook(skill)
+    
+    def _add_skill_to_skillbook(self, skill: Skill) -> None:
+        """Add new skill directly to skillbook internal structures."""
+        self.skillbook._skills[skill.id] = skill
+        self.skillbook._sections.setdefault(skill.section, []).append(skill.id)
+    
+    def _cleanup_orphan_skills(self) -> int:
+        """Remove skills whose source files no longer exist."""
+        orphan_ids = [
+            skill_id for skill_id, skill in self.skillbook._skills.items()
+            if skill.source_path and skill_id not in self._loaded_skill_ids
+        ]
+        
+        for skill_id in orphan_ids:
+            skill = self.skillbook._skills.pop(skill_id, None)
+            if skill:
+                section_list = self.skillbook._sections.get(skill.section, [])
+                if skill_id in section_list:
+                    section_list.remove(skill_id)
+                logger.debug(f"Removed orphan skill: {skill_id}")
+        
+        return len(orphan_ids)
+
+
+def load_skills_into_skillbook(
+    skills_dir: Path, 
+    skillbook: Skillbook,
+    cleanup_orphans: bool = True,
+) -> int:
+    """Convenience function to load skills into a skillbook."""
+    loader = SkillLoader(skills_dir, skillbook)
+    return loader.load_and_merge(cleanup_orphans=cleanup_orphans)
+

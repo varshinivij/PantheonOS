@@ -3,11 +3,12 @@ Comprehensive tests for ACE (Agentic Context Engineering) module.
 
 Tests cover:
 1. Skillbook CRUD operations and persistence
-2. LearningInput and build_learning_input
-3. Reflector LLM analysis
-4. SkillManager LLM decisions
-5. ACELearningPipeline async workflow
-6. End-to-end integration
+2. SkillLoader file parsing and merging
+3. LearningInput and build_learning_input
+4. Reflector LLM analysis
+5. SkillManager LLM decisions
+6. ACELearningPipeline async workflow
+7. End-to-end integration
 
 Run with: pytest tests/test_ace.py -v
 """
@@ -163,7 +164,10 @@ class TestSkillbook:
         assert skill.status == "invalid"  # Soft removal marks as invalid
 
     def test_get_skills_for_agent(self, skillbook):
-        """Test retrieving skills for specific agent."""
+        """Test retrieving skills for specific agent with scope enabled."""
+        # Enable agent scope for this test
+        skillbook.enable_agent_scope = True
+        
         # Add global skill
         skillbook.add_skill("strategies", "Global strategy", agent_scope="global")
         # Add agent-specific skill
@@ -171,7 +175,7 @@ class TestSkillbook:
         # Add another agent's skill
         skillbook.add_skill("mistakes", "File mistake", agent_scope="file_agent")
 
-        # Global agent should see global skills
+        # Unknown agent should only see global skills (scope enabled)
         global_skills = skillbook.get_skills_for_agent("unknown_agent")
         assert len(global_skills) == 1
 
@@ -243,6 +247,327 @@ class TestSkillbook:
 
 
 # ===========================================================================
+# SkillLoader Tests
+# ===========================================================================
+
+
+class TestSkillLoader:
+    """Tests for SkillLoader functionality."""
+
+    @pytest.fixture
+    def skills_dir(self, temp_dir):
+        """Create a skills directory for testing."""
+        skills = Path(temp_dir) / "skills"
+        skills.mkdir()
+        return skills
+
+    def test_parse_front_matter(self, skills_dir):
+        """Test parsing YAML front matter from markdown files."""
+        from pantheon.ace.skill_loader import parse_front_matter
+
+        # Create a skill file with front matter
+        skill_file = skills_dir / "test.md"
+        skill_file.write_text("""---
+id: test-skill
+description: A test skill
+section: workflows
+tags: [test, demo]
+---
+
+# Content here
+""")
+
+        fm, body = parse_front_matter(skill_file)
+        
+        assert fm is not None
+        assert fm["id"] == "test-skill"
+        assert fm["description"] == "A test skill"
+        assert fm["section"] == "workflows"
+        assert fm["tags"] == ["test", "demo"]
+        assert "# Content here" in body
+
+    def test_parse_front_matter_no_front_matter(self, skills_dir):
+        """Test parsing file without front matter."""
+        from pantheon.ace.skill_loader import parse_front_matter
+
+        # Create a file without front matter
+        no_fm_file = skills_dir / "no_fm.md"
+        no_fm_file.write_text("# Just content\n\nNo front matter here.")
+
+        fm, body = parse_front_matter(no_fm_file)
+        
+        assert fm is None
+        assert "# Just content" in body
+
+    def test_parse_skills_md(self, skills_dir):
+        """Test parsing SKILLS.md for simple rules."""
+        from pantheon.ace.skill_loader import parse_skills_md
+
+        # Create SKILLS.md
+        skills_md = skills_dir / "SKILLS.md"
+        skills_md.write_text("""---
+# User rules
+---
+
+## User Rules
+
+- Always use uv for Python projects
+- Run tests before commit
+
+## Strategies
+
+- Use polars for large data
+""")
+
+        skills = parse_skills_md(skills_md, skills_dir)
+        
+        assert len(skills) == 3
+        
+        # Check user rules
+        user_rules = [s for s in skills if s.section == "user_rules"]
+        assert len(user_rules) == 2
+        assert any("uv" in s.content for s in user_rules)
+        
+        # Check strategies
+        strategies = [s for s in skills if s.section == "strategies"]
+        assert len(strategies) == 1
+        assert "polars" in strategies[0].content
+
+    def test_scan_skill_files(self, skills_dir):
+        """Test scanning skills directory for .md files."""
+        from pantheon.ace.skill_loader import scan_skill_files
+
+        # Create various files
+        (skills_dir / "skill1.md").write_text("# Skill 1")
+        (skills_dir / "skill2.md").write_text("# Skill 2")
+        (skills_dir / "SKILLS.md").write_text("# Main skills")  # Should be skipped
+        (skills_dir / "subdir").mkdir()
+        (skills_dir / "subdir" / "nested.md").write_text("# Nested")
+        (skills_dir / ".hidden").mkdir()
+        (skills_dir / ".hidden" / "secret.md").write_text("# Hidden")  # Should be skipped
+
+        files = scan_skill_files(skills_dir)
+        
+        # Should find 3 files (skill1, skill2, nested), skip SKILLS.md and hidden
+        assert len(files) == 3
+        file_names = [f.name for f in files]
+        assert "skill1.md" in file_names
+        assert "skill2.md" in file_names
+        assert "nested.md" in file_names
+        assert "SKILLS.md" not in file_names
+        assert "secret.md" not in file_names
+
+    def test_parse_skill_from_file(self, skills_dir):
+        """Test parsing a skill file and creating a Skill object."""
+        from pantheon.ace.skill_loader import parse_skill_from_file
+
+        # Create a valid skill file
+        skill_file = skills_dir / "my-workflow.md"
+        skill_file.write_text("""---
+id: my-workflow
+description: A workflow for doing X
+section: workflows
+tags: [example]
+---
+
+# Detailed content
+""")
+
+        skill = parse_skill_from_file(skill_file, skills_dir)
+        
+        assert skill is not None
+        assert skill.id == "my-workflow"
+        assert "A workflow for doing X" in skill.content
+        assert skill.section == "workflows"
+        assert skill.tags == ["example"]
+        assert skill.is_user_defined()
+
+    def test_parse_skill_from_file_missing_required_fields(self, skills_dir):
+        """Test that files without id or description are skipped."""
+        from pantheon.ace.skill_loader import parse_skill_from_file
+
+        # Create file without description
+        no_desc = skills_dir / "no-desc.md"
+        no_desc.write_text("""---
+id: no-desc
+---
+# Missing description
+""")
+
+        skill = parse_skill_from_file(no_desc, skills_dir)
+        assert skill is None
+
+        # Create file without id
+        no_id = skills_dir / "no-id.md"
+        no_id.write_text("""---
+description: No id here
+---
+# Missing id
+""")
+
+        skill = parse_skill_from_file(no_id, skills_dir)
+        assert skill is None
+
+    def test_skill_loader_merge(self, skills_dir):
+        """Test SkillLoader merging skills into skillbook."""
+        from pantheon.ace.skill_loader import SkillLoader
+
+        # Create skill files
+        (skills_dir / "workflow1.md").write_text("""---
+id: workflow1
+description: First workflow
+section: workflows
+---
+# Details
+""")
+        (skills_dir / "workflow2.md").write_text("""---
+id: workflow2
+description: Second workflow
+---
+# Details
+""")
+
+        # Create skillbook with existing skill
+        skillbook = Skillbook()
+
+        # Load and merge
+        loader = SkillLoader(skills_dir, skillbook)
+        loaded = loader.load_and_merge(cleanup_orphans=False)
+
+        assert loaded == 2
+        assert skillbook.get_skill("workflow1") is not None
+        assert skillbook.get_skill("workflow2") is not None
+        assert "First workflow" in skillbook.get_skill("workflow1").content
+
+    def test_skill_loader_preserves_ratings(self, skills_dir):
+        """Test that SkillLoader preserves existing ratings when updating."""
+        from pantheon.ace.skill_loader import SkillLoader
+
+        # Create skillbook with existing skill that has ratings
+        skillbook = Skillbook()
+        existing = Skill(
+            id="existing-skill",
+            section="strategies",
+            content="Old content",
+            source_path="skills/existing.md",
+            helpful=10,
+            harmful=2,
+        )
+        skillbook._skills[existing.id] = existing
+        skillbook._sections.setdefault(existing.section, []).append(existing.id)
+
+        # Create skill file with same id but different content
+        (skills_dir / "existing.md").write_text("""---
+id: existing-skill
+description: Updated content
+section: strategies
+---
+# New details
+""")
+
+        # Load and merge
+        loader = SkillLoader(skills_dir, skillbook)
+        loader.load_and_merge(cleanup_orphans=False)
+
+        # Verify content was updated but ratings preserved
+        skill = skillbook.get_skill("existing-skill")
+        assert skill is not None
+        assert "Updated content" in skill.content
+        assert skill.helpful == 10
+        assert skill.harmful == 2
+
+    def test_skill_loader_orphan_cleanup(self, skills_dir):
+        """Test that SkillLoader cleans up orphan skills."""
+        from pantheon.ace.skill_loader import SkillLoader
+
+        # Create skillbook with orphan skill (source file doesn't exist)
+        skillbook = Skillbook()
+        orphan = Skill(
+            id="orphan-skill",
+            section="strategies",
+            content="This file was deleted",
+            source_path="skills/deleted.md",
+        )
+        skillbook._skills[orphan.id] = orphan
+        skillbook._sections.setdefault(orphan.section, []).append(orphan.id)
+
+        # Add a pure content skill (no source_path) - should NOT be cleaned up
+        pure_content = Skill(
+            id="str-00001",
+            section="strategies",
+            content="Auto-learned skill",
+            type="system",
+        )
+        skillbook._skills[pure_content.id] = pure_content
+        skillbook._sections["strategies"].append(pure_content.id)
+
+        # Create one valid skill file
+        (skills_dir / "valid.md").write_text("""---
+id: valid-skill
+description: This exists
+---
+# Details
+""")
+
+        # Load with orphan cleanup
+        loader = SkillLoader(skills_dir, skillbook)
+        loader.load_and_merge(cleanup_orphans=True)
+
+        # Orphan should be removed
+        assert skillbook.get_skill("orphan-skill") is None
+        # Pure content skill should be kept
+        assert skillbook.get_skill("str-00001") is not None
+        # New skill should be added
+        assert skillbook.get_skill("valid-skill") is not None
+
+    def test_skill_loader_no_orphan_cleanup(self, skills_dir):
+        """Test that orphan cleanup can be disabled."""
+        from pantheon.ace.skill_loader import SkillLoader
+
+        # Create skillbook with orphan skill
+        skillbook = Skillbook()
+        orphan = Skill(
+            id="orphan-skill",
+            section="strategies",
+            content="This file was deleted",
+            source_path="skills/deleted.md",
+        )
+        skillbook._skills[orphan.id] = orphan
+        skillbook._sections.setdefault(orphan.section, []).append(orphan.id)
+
+        # Load without orphan cleanup
+        loader = SkillLoader(skills_dir, skillbook)
+        loader.load_and_merge(cleanup_orphans=False)
+
+        # Orphan should still exist
+        assert skillbook.get_skill("orphan-skill") is not None
+
+    def test_skill_loader_system_skill(self, skills_dir):
+        """Test loading system-generated skill files."""
+        from pantheon.ace.skill_loader import SkillLoader
+
+        # Create a system skill file
+        (skills_dir / "wfl-00001.md").write_text("""---
+id: wfl-00001
+description: System learned workflow
+section: workflows
+type: system
+learned_from: chat-abc123
+---
+# Auto-generated content
+""")
+
+        skillbook = Skillbook()
+        loader = SkillLoader(skills_dir, skillbook)
+        loader.load_and_merge()
+
+        skill = skillbook.get_skill("wfl-00001")
+        assert skill is not None
+        assert skill.is_system()
+        assert skill.learned_from == "chat-abc123"
+
+
+# ===========================================================================
 # LearningInput Tests
 # ===========================================================================
 
@@ -286,10 +611,12 @@ class TestLearningInput:
             agent_name="agent",
             messages=messages,
             learning_dir=temp_dir,
-            max_arg_length=100,
+            max_tool_arg_length=100,
+            max_tool_output_length=100,
         )
 
-        assert "(truncated)" in li.trajectory
+        # Unified format uses "... [N chars, see details_path]"
+        assert "... [" in li.trajectory and "chars" in li.trajectory
 
     def test_details_saved(self, sample_messages, temp_dir):
         """Test that full details are saved to file."""
@@ -305,7 +632,8 @@ class TestLearningInput:
 
         with open(li.details_path) as f:
             data = json.load(f)
-        assert data["turn_id"] == "save-test"
+        # Unified format saves messages directly
+        assert "messages" in data
         assert len(data["messages"]) == 4
 
     def test_skill_citation_extraction(self, temp_dir):
@@ -764,8 +1092,12 @@ class TestPantheonTeamACE:
             ace_pipeline=pipeline,
         )
         
-        # Verify skillbook was injected
-        assert "## Skillbook" in agent.instructions
+        # Manually trigger skill injection (normally happens on first run)
+        team._inject_skillbook_to_agents()
+        team._skills_injected = True
+        
+        # Verify skillbook was injected - check for new header format
+        assert "Available Strategic Knowledge" in agent.instructions or "User Rules" in agent.instructions
         assert "validate user input" in agent.instructions
         assert "descriptive variable names" in agent.instructions
         
@@ -971,6 +1303,9 @@ class TestPantheonTeamACE:
 
         skillbook, pipeline = ace_resources
         
+        # Enable agent scope for this test
+        skillbook.enable_agent_scope = True
+        
         # Add global skill
         skillbook.add_skill(
             "strategies",
@@ -1005,6 +1340,10 @@ class TestPantheonTeamACE:
             skillbook=skillbook,
             ace_pipeline=pipeline,
         )
+        
+        # Manually trigger skill injection (normally happens on first run)
+        team._inject_skillbook_to_agents()
+        team._skills_injected = True
         
         # Verify correct skills were injected
         assert "Global tip" in python_agent.instructions

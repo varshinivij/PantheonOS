@@ -160,7 +160,6 @@ For each analysis step:
 
 Record work intensity in `task.md`.
 
-{{skills(root_dir='../skills/omics')}}
 
 {{output_format}}
 

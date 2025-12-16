@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from ..utils.log import logger
 from .reflector import Reflector
+from .skill_loader import load_skills_into_skillbook
 from .skill_manager import SkillManager, UpdateOperation
 from .skillbook import Skillbook
 
@@ -46,132 +47,47 @@ def build_learning_input(
     agent_name: str,
     messages: List[dict],
     learning_dir: str = ".pantheon/ace/learning",
-    max_arg_length: int = 200,
+    max_tool_arg_length: int = 200,
+    max_tool_output_length: int = 200,
 ) -> LearningInput:
     """
     Build a LearningInput from conversation messages.
+    
+    Uses unified format_messages_to_text for message formatting.
     
     Args:
         turn_id: Unique identifier for this turn
         agent_name: Name of the agent
         messages: List of message dicts from the conversation
         learning_dir: Directory to save full turn details
-        max_arg_length: Max chars for tool args/results in trajectory
+        max_tool_arg_length: Max chars for tool argument values in trajectory
+        max_tool_output_length: Max chars for tool output in trajectory
     
     Returns:
         LearningInput ready for submission to Reflector
     """
-    # 1. Extract user question (first user message)
-    question = ""
-    for msg in messages:
-        if msg.get("role") == "user":
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                question = content
-            elif isinstance(content, list):
-                # Handle multimodal content
-                for item in content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        question = item.get("text", "")
-                        break
-            break
-
-    # 2. Format trajectory with truncation
-    trajectory_parts: List[str] = []
-    final_answer = ""
-    skill_ids: List[str] = []
-
-    for msg in messages:
-        role = msg.get("role", "")
-        
-        # Prioritize _llm_content if present and not empty
-        # This captures the actual context sent to the LLM (e.g. XML wrappers)
-        # We check truthiness to allow fallback if _llm_content is accidentally empty
-        if msg.get("_llm_content"):
-            content = msg["_llm_content"]
-        else:
-            content = msg.get("content")
-            
-        content = content or ""
-
-        # Handle multimodal content
-        if isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-            content = " ".join(text_parts)
-
-        if role == "user":
-            trajectory_parts.append(f"[USER]\n{content}")
-
-        elif role == "assistant":
-            # Extract cited skill IDs (format: [xxx-00001])
-            if content:
-                skill_ids.extend(re.findall(r"\[([a-z]+-\d{5})\]", content))
-
-            tool_calls = msg.get("tool_calls")
-            if tool_calls:
-                # Assistant with tool calls
-                if content:
-                    trajectory_parts.append(f"[ASSISTANT]\n{content}")
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    name = func.get("name", "unknown")
-                    args = func.get("arguments", "")
-                    tc_id = tc.get("id", "")
-
-                    # Truncate args
-                    if len(args) > max_arg_length:
-                        args = args[:max_arg_length] + "... (truncated)"
-
-                    trajectory_parts.append(
-                        f"[TOOL_CALL: {name}] id={tc_id}\n{args}"
-                    )
-            else:
-                # Final assistant response
-                trajectory_parts.append(f"[ASSISTANT]\n{content}")
-                final_answer = content
-
-        elif role == "tool":
-            tc_id = msg.get("tool_call_id", "")
-            result = content
-
-            # Truncate result
-            if len(result) > max_arg_length:
-                result = result[:max_arg_length] + "... (truncated)"
-
-            trajectory_parts.append(f"[TOOL_RESULT] id={tc_id}\n{result}")
-
-    # 3. Save full details for later reference
-    details_path = ""
-    if learning_dir:
-        try:
-            details_path_obj = Path(learning_dir) / f"turn_{turn_id}.json"
-            details_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            with details_path_obj.open("w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "turn_id": turn_id,
-                        "agent_name": agent_name,
-                        "messages": messages,
-                    },
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            details_path = str(details_path_obj)
-        except Exception as e:
-            logger.warning(f"Failed to save turn details: {e}")
-
+    from ..utils.message_formatter import format_messages_to_text
+    
+    # Use unified function for formatting
+    details_path = f"{learning_dir}/turn_{turn_id}.json" if learning_dir else None
+    
+    result = format_messages_to_text(
+        messages,
+        max_arg_length=max_tool_arg_length,
+        max_output_length=max_tool_output_length,
+        extract_files=True,
+        extract_skills=True,
+        save_details_to=details_path,
+    )
+    
     return LearningInput(
         turn_id=turn_id,
         agent_name=agent_name,
-        question=question,
-        trajectory="\n\n".join(trajectory_parts),
-        final_answer=final_answer,
-        skill_ids_cited=list(set(skill_ids)),
-        details_path=details_path,
+        question=result.question,
+        trajectory=result.text,
+        final_answer=result.final_answer,
+        skill_ids_cited=result.skill_ids,
+        details_path=result.details_path,
     )
 
 
@@ -198,12 +114,14 @@ class ACELearningPipeline:
         skill_manager: SkillManager,
         learning_dir: str,
         cleanup_after_learning: bool = False,
+        skills_dir: Optional[Path] = None,
     ):
         self._skillbook = skillbook
         self._reflector = reflector
         self._skill_manager = skill_manager
         self._learning_dir = learning_dir
         self._cleanup_after_learning = cleanup_after_learning
+        self._skills_dir = skills_dir
         self._queue: asyncio.Queue[LearningInput] = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -300,7 +218,10 @@ class ACELearningPipeline:
             if self._cleanup_after_learning and input.details_path:
                 self._cleanup_learning_file(input.details_path)
             
-            # 7. Log learning summary
+            # 7. Reload skills from files (in case user modified them)
+            self._reload_skills_from_files()
+
+            # 8. Log learning summary
             ops_str = ", ".join(f"{k}:{v}" for k, v in ops_summary.items() if v > 0) or "none"
             logger.info(
                 f"📚 [ACE Learning] Agent: {input.agent_name} | "
@@ -312,6 +233,20 @@ class ACELearningPipeline:
         except Exception as e:
             logger.error(f"Learning task failed for {input.agent_name}: {e}")
             # Don't re-raise - continue processing next task
+
+    def _reload_skills_from_files(self) -> None:
+        """Reload skills from files to pick up any user modifications."""
+        if not self._skills_dir or not self._skills_dir.exists():
+            return
+        try:
+            loaded = load_skills_into_skillbook(
+                self._skills_dir, self._skillbook, cleanup_orphans=True
+            )
+            if loaded > 0:
+                self._skillbook.save()
+                logger.debug(f"Reloaded {loaded} skills from files")
+        except Exception as e:
+            logger.warning(f"Failed to reload skills from files: {e}")
 
     def _cleanup_learning_file(self, file_path: str) -> None:
         """Delete a learning trajectory file after processing."""
@@ -326,6 +261,15 @@ class ACELearningPipeline:
     def _apply_operation(self, op: UpdateOperation) -> None:
         """Apply a single update operation to the skillbook."""
         try:
+            # Protect user-defined skills from modification (allow TAG only)
+            if op.skill_id and op.type in ("UPDATE", "REMOVE"):
+                skill = self._skillbook.get_skill(op.skill_id)
+                if skill and skill.is_user_defined():
+                    logger.warning(
+                        f"Skipping {op.type} on user-defined skill: {op.skill_id}"
+                    )
+                    return
+
             if op.type == "ADD":
                 if op.section and op.content:
                     skill = self._skillbook.add_skill(
