@@ -18,7 +18,10 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .utils.model_selector import ModelSelector
 
 from dotenv import load_dotenv
 
@@ -237,10 +240,24 @@ class Settings:
         """Directory for ACE long-term memory data."""
         return self.pantheon_dir / "ace"
 
+    def get_model_selector(self) -> "ModelSelector":
+        """
+        Get a ModelSelector instance for smart model selection.
+
+        The ModelSelector uses environment API keys to detect available providers
+        and resolves model tags to fallback chains.
+
+        Returns:
+            ModelSelector instance
+        """
+        from .utils.model_selector import ModelSelector
+
+        return ModelSelector(self)
+
     def get_ace_config(self) -> Dict[str, Any]:
         """
         Get ACE (Agentic Context Engineering) configuration.
-        
+
         Returns:
             Dict with ACE config: enable, skillbook_path, learning_model, etc.
         """

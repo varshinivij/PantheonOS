@@ -1,7 +1,6 @@
 ---
 icon: 📓
 id: notebook_assistant
-model: openai/gpt-5-mini
 name: Notebook Assistant
 toolsets:
 - integrated_notebook

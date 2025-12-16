@@ -15,7 +15,11 @@
       "WebFetch(domain:docs.litellm.ai)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(micromamba run -n pantheon python3:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(micromamba run -n pantheon python -m pytest:*)",
+      "Bash(micromamba run:*)",
+      "Bash(grep:*)",
+      "Bash(timeout 5 micromamba run -n pantheon python:*)"
     ],
     "deny": [],
     "ask": []

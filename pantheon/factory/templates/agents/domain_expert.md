@@ -1,7 +1,6 @@
 ---
 icon: 🎓
 id: domain_expert
-model: openai/gpt-5
 name: Domain Expert
 toolsets:
   - file_manager

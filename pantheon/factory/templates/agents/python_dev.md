@@ -1,7 +1,6 @@
 ---
 icon: 🐍
 id: python_dev
-model: openai/gpt-5-mini
 name: Python Developer
 toolsets:
 - python_interpreter

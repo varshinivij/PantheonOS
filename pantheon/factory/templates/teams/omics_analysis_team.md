@@ -22,7 +22,6 @@ leader:
   description: |
     Team leader for omics analysis. Coordinates research strategy, delegates analysis tasks,
     synthesizes findings, and manages the research workflow using agentic task planning.
-  model: openai/gpt-5
   icon: 🧭
   toolsets:
     - file_manager

@@ -1,7 +1,6 @@
 ---
 icon: 🕷️
 id: scraper
-model: openai/gpt-5-mini
 name: Data Scraper
 toolsets:
 - scraper

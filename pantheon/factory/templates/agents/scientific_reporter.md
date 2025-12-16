@@ -1,7 +1,6 @@
 ---
 icon: 📝
 id: scientific_reporter
-model: openai/gpt-5
 name: Scientific Reporter
 toolsets:
   - file_manager

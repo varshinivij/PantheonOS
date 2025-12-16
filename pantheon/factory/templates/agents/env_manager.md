@@ -1,7 +1,6 @@
 ---
 icon: 💻
 id: env_manager
-model: openai/gpt-5-mini
 name: Environment Manager
 toolsets:
   - python_interpreter

@@ -39,7 +39,68 @@ from .utils.log import logger
 from .utils.misc import desc_to_openai_dict, run_func
 from .utils.vision import VisionInput, vision_to_openai
 
-DEFAULT_MODEL = "gpt-5-mini"
+def _get_default_model() -> list[str]:
+    """Get default model fallback chain from ModelSelector.
+
+    Uses environment API keys to detect available providers and
+    returns appropriate default models.
+
+    Returns:
+        List of models as fallback chain
+    """
+    try:
+        from .utils.model_selector import get_default_model
+
+        return get_default_model()
+    except Exception as e:
+        logger.warning(f"Failed to get default model from selector: {e}")
+        return ["gpt-4o-mini"]  # Ultimate fallback
+
+
+def _is_model_tag(model_str: str) -> bool:
+    """Check if a string is a model tag vs a model name.
+
+    Model tags are quality/capability identifiers like "high", "normal,vision".
+    Model names are actual model identifiers like "openai/gpt-4o", "gpt-4o-mini".
+
+    Args:
+        model_str: The string to check
+
+    Returns:
+        True if the string is a tag, False if it's a model name
+    """
+    # Model names typically contain "/" (provider/model format)
+    if "/" in model_str:
+        return False
+
+    # Check if all parts are known tags
+    try:
+        from .utils.model_selector import QUALITY_TAGS, CAPABILITY_MAP
+
+        parts = [p.strip().lower() for p in model_str.split(",")]
+        all_known_tags = QUALITY_TAGS | set(CAPABILITY_MAP.keys())
+
+        return all(part in all_known_tags for part in parts if part)
+    except ImportError:
+        return False
+
+
+def _resolve_model_tag(tag: str) -> list[str]:
+    """Resolve a tag string to a model list.
+
+    Args:
+        tag: Tag string like "high", "normal,vision"
+
+    Returns:
+        List of models as fallback chain
+    """
+    from .utils.model_selector import get_model_selector
+
+    return get_model_selector().resolve_model(tag)
+
+
+# Legacy constant for backwards compatibility (deprecated - use _get_default_model())
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
 # ===== Execution Context =====
@@ -339,7 +400,7 @@ class Agent:
         self,
         name: str,
         instructions: str,
-        model: str | list[str] = DEFAULT_MODEL,
+        model: str | list[str] | None = None,
         model_params: dict | None = None,
         icon: str = "🤖",
         tools: list[Callable] | None = None,
@@ -355,15 +416,24 @@ class Agent:
         self.name = name
         self.instructions = instructions
         self.description = description
-        if not model:
-            model = DEFAULT_MODEL
-        self.model_params = model_params or {}
-        if isinstance(model, str):
-            self.models = [model]
-            if model != DEFAULT_MODEL:
-                self.models.append(DEFAULT_MODEL)
+
+        # Smart model selection: use ModelSelector when no model specified
+        if model is None:
+            # Get default model fallback chain from ModelSelector
+            self.models = _get_default_model()
+        elif isinstance(model, str):
+            # Check if it's a tag string (e.g., "high", "normal,vision")
+            if _is_model_tag(model):
+                # Resolve tag to model fallback chain
+                self.models = _resolve_model_tag(model)
+            else:
+                # Regular model name - wrap in list
+                self.models = [model]
         else:
-            self.models = model
+            # Already a list of models (fallback chain)
+            self.models = list(model)
+
+        self.model_params = model_params or {}
         # Tool storage (simplified - unified handling)
         self._base_functions: dict[
             str, Callable

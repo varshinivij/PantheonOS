@@ -1,7 +1,6 @@
 ---
 icon: 🌐
 id: web_researcher
-model: openai/gpt-5-mini
 name: Web Researcher
 toolsets:
   - web

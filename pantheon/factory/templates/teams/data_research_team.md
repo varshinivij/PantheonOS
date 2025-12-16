@@ -18,9 +18,8 @@ leader:
   id: leader
   name: Research Leader
   description: |
-    Team leader for data-driven research. Coordinates research strategy, 
+    Team leader for data-driven research. Coordinates research strategy,
     delegates analysis tasks, and synthesizes findings using agentic task planning.
-  model: openai/gpt-5
   icon: 🧭
   toolsets:
     - file_manager

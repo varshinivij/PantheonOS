@@ -14,7 +14,6 @@ agents:
 leader:
   id: leader
   name: Leader
-  model: openai/gpt-5
   icon: 🧭
   toolsets:
     - file_manager

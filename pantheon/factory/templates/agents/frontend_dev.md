@@ -1,7 +1,6 @@
 ---
 icon: 🎨
 id: frontend_dev
-model: openai/gpt-5-mini
 name: Frontend Developer
 toolsets:
 - file_manager

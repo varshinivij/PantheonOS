@@ -1,7 +1,6 @@
 ---
 icon: 📊
 id: data_analyst
-model: openai/gpt-5-mini
 name: Data Analyst
 toolsets:
 - python_interpreter

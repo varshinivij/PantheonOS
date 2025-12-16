@@ -1,7 +1,6 @@
 ---
 icon: 📊
 id: analysis_expert
-model: openai/gpt-5
 name: Analysis Expert
 toolsets:
   - notebook

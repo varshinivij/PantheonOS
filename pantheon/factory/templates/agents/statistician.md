@@ -1,7 +1,6 @@
 ---
 icon: 📈
 id: statistician
-model: openai/gpt-5-mini
 name: Statistician
 toolsets:
 - python_interpreter

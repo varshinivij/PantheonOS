@@ -749,7 +749,7 @@ class UnifiedMarkdownParser:
         if team.agents:
             metadata["agents"] = [agent.id for agent in team.agents]
             for agent in team.agents:
-                if not agent.model:  # Reference - skip metadata, only include in agents list
+                if not agent.name:  # Reference - skip metadata, only include in agents list
                     continue
                 agent_meta: Dict[str, Any] = {
                     "id": agent.id,
@@ -1072,8 +1072,8 @@ class FileBasedTemplateManager:
         resolved_agents: List[AgentConfig] = []
 
         for agent in team.agents:
-            if agent.model:
-                # Already resolved (inline definition)
+            if agent.name:
+                # Already resolved (inline definition with name)
                 resolved_agents.append(agent)
             elif _is_path_reference(agent.id):
                 # Path reference: load from file

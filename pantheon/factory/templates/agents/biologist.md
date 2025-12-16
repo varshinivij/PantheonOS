@@ -1,7 +1,6 @@
 ---
 icon: 🔬
 id: biologist
-model: openai/gpt-5
 name: Biologist
 toolsets:
   - file_manager

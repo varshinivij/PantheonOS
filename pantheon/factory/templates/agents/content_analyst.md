@@ -1,7 +1,6 @@
 ---
 icon: 📋
 id: content_analyst
-model: openai/gpt-5-mini
 name: Content Analyst
 toolsets:
 - python_interpreter

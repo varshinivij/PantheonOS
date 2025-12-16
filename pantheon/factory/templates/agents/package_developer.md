@@ -1,7 +1,6 @@
 ---
 icon: 📦
 id: package_developer
-model: openai/gpt-5-mini
 name: Package Developer
 toolsets:
 - python_interpreter

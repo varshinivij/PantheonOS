@@ -1,7 +1,6 @@
 ---
 icon: 🔧
 id: data_engineer
-model: openai/gpt-5-mini
 name: Data Engineer
 toolsets:
 - python_interpreter

@@ -1,7 +1,6 @@
 ---
 icon: 🤖
 id: ml_engineer
-model: openai/gpt-5-mini
 name: ML Engineer
 toolsets:
 - python_interpreter

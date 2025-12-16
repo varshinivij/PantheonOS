@@ -11,7 +11,6 @@ agents:
 agentic_agent:
   id: agentic_agent
   name: Agentic Agent
-  model: openai/gpt-5
   icon: 🤖
   toolsets:
     - file_manager
