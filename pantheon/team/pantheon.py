@@ -151,15 +151,13 @@ class PantheonTeam(Team):
         # ACE long-term memory
         self._skillbook = skillbook
         self._ace_pipeline = ace_pipeline
+        self._skills_injected = False  # Track if skills are already injected
 
         super().__init__(agents)
 
         # Keep triage reference for backward compatibility (first agent)
         self.triage = self.team_agents[0]
-        
-        # Inject skillbook to all agents at init time
-        if self._skillbook:
-            self._inject_skillbook_to_agents()
+        # Note: Skillbook injection moved to first run() call for cache-friendly behavior
 
     def _inject_skillbook_to_agents(self) -> None:
         """Inject relevant skillbook content into all agent instructions."""
@@ -444,6 +442,12 @@ class PantheonTeam(Team):
         await self.async_setup()
         if memory is None:
             memory = Memory(name="pantheon-team")
+        
+        # Inject skillbook on first run (cache-friendly: avoids re-injection)
+        if self._skillbook and not self._skills_injected:
+            self._inject_skillbook_to_agents()
+            self._skills_injected = True
+            logger.debug("Skillbook injected into agents on first run")
         
         # Record turn start for learning
         turn_start_index = len(memory._messages)

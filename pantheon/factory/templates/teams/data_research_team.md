@@ -142,7 +142,6 @@ workdir/
 └── references/     # Literature and citations
 ```
 
-{{skills}}
 
 {{output_format}}
 

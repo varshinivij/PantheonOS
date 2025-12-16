@@ -6,6 +6,7 @@ from their interactions and improve over time.
 
 Core Components:
 - Skillbook: Structured knowledge store with skills organized by section
+- SkillLoader: Loads and merges skills from multiple sources
 - Reflector: Analyzes agent trajectories to extract learnings
 - SkillManager: Decides what updates to apply to the Skillbook
 - ACELearningPipeline: Async pipeline coordinating the learning process
@@ -20,6 +21,7 @@ from .reflector import (
     ReflectorOutput,
     SkillTag,
 )
+from .skill_loader import SkillLoader, load_skills_into_skillbook
 from .skill_manager import SkillManager, SkillManagerOutput, UpdateOperation
 from .skillbook import Skill, Skillbook
 
@@ -33,6 +35,11 @@ def create_ace_resources(
     
     Reads configuration from settings if not provided.
     Returns (None, None) if ACE is disabled.
+    
+    Loading order:
+    1. Load skillbook.json (base data + ratings)
+    2. Scan skills/*.md files and merge (user skills have priority)
+    3. Save updated skillbook.json
     
     Args:
         enable: Override for enable flag (None = use config)
@@ -52,6 +59,7 @@ def create_ace_resources(
         logger.info("ACE disabled")
         return None, None
     
+    # Create skillbook and load from JSON
     skillbook = Skillbook(
         max_skills_per_section=_config["max_skills_per_section"],
         max_content_length=_config["max_content_length"],
@@ -59,12 +67,22 @@ def create_ace_resources(
     )
     skillbook.load(_config["skillbook_path"])
     
+    # Load and merge skills from files
+    skills_dir = settings.skills_dir
+    if skills_dir.exists():
+        loaded = load_skills_into_skillbook(skills_dir, skillbook)
+        if loaded > 0:
+            skillbook.save()  # Save merged skills
+            logger.info(f"Merged {loaded} skills from {skills_dir}")
+    
+    # Create learning pipeline (with skills_dir for async reload)
     pipeline = ACELearningPipeline(
         skillbook=skillbook,
         reflector=Reflector(model=_config["learning_model"]),
         skill_manager=SkillManager(model=_config["learning_model"]),
         learning_dir=_config["learning_dir"],
         cleanup_after_learning=_config.get("cleanup_after_learning", False),
+        skills_dir=skills_dir if skills_dir.exists() else None,
     )
     
     logger.info(f"ACE enabled: {len(skillbook.skills())} skills loaded")
@@ -77,6 +95,9 @@ __all__ = [
     # Skillbook
     "Skill",
     "Skillbook",
+    # SkillLoader
+    "SkillLoader",
+    "load_skills_into_skillbook",
     # Learning
     "LearningInput",
     "build_learning_input",
@@ -95,6 +116,7 @@ __all__ = [
     "SKILLBOOK_USAGE_INSTRUCTIONS",
     "SKILLBOOK_HEADER",
     "USER_RULES_HEADER",
+    "SKILL_LOADING_GUIDANCE",
 ]
 
 # Import prompt constants from skillbook
@@ -102,4 +124,5 @@ from .skillbook import (
     SKILLBOOK_USAGE_INSTRUCTIONS,
     SKILLBOOK_HEADER,
     USER_RULES_HEADER,
+    SKILL_LOADING_GUIDANCE,
 )

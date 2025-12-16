@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from ..utils.log import logger
 from .reflector import Reflector
+from .skill_loader import load_skills_into_skillbook
 from .skill_manager import SkillManager, UpdateOperation
 from .skillbook import Skillbook
 
@@ -198,12 +199,14 @@ class ACELearningPipeline:
         skill_manager: SkillManager,
         learning_dir: str,
         cleanup_after_learning: bool = False,
+        skills_dir: Optional[Path] = None,
     ):
         self._skillbook = skillbook
         self._reflector = reflector
         self._skill_manager = skill_manager
         self._learning_dir = learning_dir
         self._cleanup_after_learning = cleanup_after_learning
+        self._skills_dir = skills_dir
         self._queue: asyncio.Queue[LearningInput] = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -300,7 +303,10 @@ class ACELearningPipeline:
             if self._cleanup_after_learning and input.details_path:
                 self._cleanup_learning_file(input.details_path)
             
-            # 7. Log learning summary
+            # 7. Reload skills from files (in case user modified them)
+            self._reload_skills_from_files()
+
+            # 8. Log learning summary
             ops_str = ", ".join(f"{k}:{v}" for k, v in ops_summary.items() if v > 0) or "none"
             logger.info(
                 f"📚 [ACE Learning] Agent: {input.agent_name} | "
@@ -312,6 +318,20 @@ class ACELearningPipeline:
         except Exception as e:
             logger.error(f"Learning task failed for {input.agent_name}: {e}")
             # Don't re-raise - continue processing next task
+
+    def _reload_skills_from_files(self) -> None:
+        """Reload skills from files to pick up any user modifications."""
+        if not self._skills_dir or not self._skills_dir.exists():
+            return
+        try:
+            loaded = load_skills_into_skillbook(
+                self._skills_dir, self._skillbook, cleanup_orphans=True
+            )
+            if loaded > 0:
+                self._skillbook.save()
+                logger.debug(f"Reloaded {loaded} skills from files")
+        except Exception as e:
+            logger.warning(f"Failed to reload skills from files: {e}")
 
     def _cleanup_learning_file(self, file_path: str) -> None:
         """Delete a learning trajectory file after processing."""
@@ -326,6 +346,15 @@ class ACELearningPipeline:
     def _apply_operation(self, op: UpdateOperation) -> None:
         """Apply a single update operation to the skillbook."""
         try:
+            # Protect user-defined skills from modification (allow TAG only)
+            if op.skill_id and op.type in ("UPDATE", "REMOVE"):
+                skill = self._skillbook.get_skill(op.skill_id)
+                if skill and skill.is_user_defined():
+                    logger.warning(
+                        f"Skipping {op.type} on user-defined skill: {op.skill_id}"
+                    )
+                    return
+
             if op.type == "ADD":
                 if op.section and op.content:
                     skill = self._skillbook.add_skill(
