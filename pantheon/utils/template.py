@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 import yaml
 from collections import OrderedDict
 

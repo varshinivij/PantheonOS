@@ -155,6 +155,9 @@ class LearningPipeline:
         """
         if self._should_skip(input):
             logger.debug(f"Skipping learning for {input.agent_name}: criteria not met")
+            # Ensure cleanup happens even if skipped
+            if self._cleanup_after_learning and input.details_path:
+                self._cleanup_learning_file(input.details_path)
             return
         self._queue.put_nowait(input)
         logger.debug(f"Submitted learning task for {input.agent_name}")
@@ -214,14 +217,10 @@ class LearningPipeline:
             # 5. Persist after each update
             self._skillbook.save()
             
-            # 6. Cleanup trajectory file if configured
-            if self._cleanup_after_learning and input.details_path:
-                self._cleanup_learning_file(input.details_path)
-            
-            # 7. Reload skills from files (in case user modified them)
+            # 6. Reload skills from files (in case user modified them)
             self._reload_skills_from_files()
 
-            # 8. Log learning summary
+            # 7. Log learning summary
             ops_str = ", ".join(f"{k}:{v}" for k, v in ops_summary.items() if v > 0) or "none"
             logger.info(
                 f"📚 [ACE Learning] Agent: {input.agent_name} | "
@@ -233,6 +232,10 @@ class LearningPipeline:
         except Exception as e:
             logger.error(f"Learning task failed for {input.agent_name}: {e}")
             # Don't re-raise - continue processing next task
+        finally:
+            # 8. Cleanup trajectory file if configured (happens regardless of success/fail)
+            if self._cleanup_after_learning and input.details_path:
+                self._cleanup_learning_file(input.details_path)
 
     def _reload_skills_from_files(self) -> None:
         """Reload skills from files to pick up any user modifications."""
