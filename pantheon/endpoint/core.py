@@ -222,6 +222,8 @@ class Endpoint(FileTransferToolSet):
                     show_banner=False,
                     log_level="error",  # Suppress uvicorn startup logs
                 )
+            except asyncio.CancelledError:
+                logger.debug("Endpoint MCP server stopped (Cancelled)")
             except Exception as e:
                 logger.error(f"Endpoint MCP server error: {e}")
 

@@ -449,6 +449,7 @@ class ReplUI:
         self.console.print("[dim]Esc      [/dim] - Cancel operation / clear input")
         self.console.print("[dim]Ctrl+C   [/dim] - Cancel, press twice to exit")
         self.console.print("[dim]Ctrl+D   [/dim] - Exit immediately")
+        self.console.print("[dim]Ctrl+T   [/dim] - Toggle display mode (compact/verbose)")
         self.console.print("[dim]Alt+Enter[/dim] - Insert newline (multiline input)")
         self.console.print("[dim]Ctrl+J   [/dim] - Insert newline (alternative)")
         self.console.print()

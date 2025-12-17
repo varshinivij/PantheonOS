@@ -1,11 +1,13 @@
 """Tests for REPL Task UI Renderers."""
 import pytest
+from collections import deque
 from io import StringIO
 
 from rich.console import Console
 
 from pantheon.repl.task_renderers import (
     ToolCallInfo,
+    MessageInfo,
     AssistantStep,
     TaskUIState,
     TaskUIRenderer,
@@ -28,17 +30,25 @@ class TestAssistantStep:
     
     def test_default(self):
         step = AssistantStep()
-        assert step.content == ""
-        assert step.tool_calls == []
+        assert step.items == []
     
-    def test_with_content(self):
-        step = AssistantStep(content="Hello")
-        assert step.content == "Hello"
+    def test_with_message(self):
+        msg = MessageInfo(content="Hello", is_current=True)
+        step = AssistantStep(items=[msg])
+        assert len(step.items) == 1
+        assert isinstance(step.items[0], MessageInfo)
     
     def test_with_tools(self):
         tool = ToolCallInfo(name="test", key_param="", is_running=False)
-        step = AssistantStep(tool_calls=[tool])
-        assert len(step.tool_calls) == 1
+        step = AssistantStep(items=[tool])
+        assert len(step.items) == 1
+        assert isinstance(step.items[0], ToolCallInfo)
+    
+    def test_with_mixed_items(self):
+        msg = MessageInfo(content="Hello", is_current=True)
+        tool = ToolCallInfo(name="test", key_param="", is_running=False)
+        step = AssistantStep(items=[msg, tool])
+        assert len(step.items) == 2
 
 
 class TestTaskUIState:
@@ -48,22 +58,27 @@ class TestTaskUIState:
         state = TaskUIState()
         assert state.task_name == ""
         assert state.mode == ""
-        assert state.recent_steps == []
+        assert len(state.recent_steps) == 0
         assert state._current_step is None
     
     def test_reset(self):
         state = TaskUIState()
         state.task_name = "Test"
         state.mode = "PLANNING"
-        state.recent_steps = [AssistantStep()]
+        state.recent_steps.append(AssistantStep())
         state._current_step = AssistantStep()
         
         state.reset()
         
         assert state.task_name == ""
         assert state.mode == ""
-        assert state.recent_steps == []
+        assert len(state.recent_steps) == 0
         assert state._current_step is None
+    
+    def test_recent_steps_is_bounded_deque(self):
+        state = TaskUIState()
+        assert isinstance(state.recent_steps, deque)
+        assert state.recent_steps.maxlen == 7
 
 
 class TestTaskUIRenderer:
@@ -147,8 +162,9 @@ class TestTaskUIRenderer:
         renderer.add_tool_call("file_manager__read_file", args={"file_path": "/test.py"}, is_running=True)
         
         assert renderer.state._current_step is not None
-        assert len(renderer.state._current_step.tool_calls) == 1
-        tc = renderer.state._current_step.tool_calls[0]
+        assert len(renderer.state._current_step.items) == 1
+        tc = renderer.state._current_step.items[0]
+        assert isinstance(tc, ToolCallInfo)
         assert tc.name == "file_manager__read_file"
         assert tc.key_param == "/test.py"
         assert tc.is_running is True
@@ -157,19 +173,41 @@ class TestTaskUIRenderer:
         renderer.add_tool_call("test_tool", is_running=True)
         renderer.update_tool_complete("test_tool")
         
-        tc = renderer.state._current_step.tool_calls[0]
+        tc = renderer.state._current_step.items[0]
+        assert isinstance(tc, ToolCallInfo)
         assert tc.is_running is False
     
     def test_add_message(self, renderer):
         renderer.add_message("Short message")
         assert renderer.state._current_step is not None
-        assert renderer.state._current_step.content == "Short message"
+        assert len(renderer.state._current_step.items) == 1
+        msg = renderer.state._current_step.items[0]
+        assert isinstance(msg, MessageInfo)
+        assert msg.content == "Short message"
     
-    def test_add_message_truncates_long(self, renderer):
+    def test_add_message_preserves_full_content(self, renderer):
+        """Messages are NOT truncated - Rich Panel handles wrapping."""
         long_msg = "x" * 100
         renderer.add_message(long_msg)
-        assert len(renderer.state._current_step.content) < 100
-        assert renderer.state._current_step.content.endswith("...")
+        msg = renderer.state._current_step.items[0]
+        assert isinstance(msg, MessageInfo)
+        # Full content is preserved (no truncation)
+        assert len(msg.content) == 100
+        assert msg.content == long_msg
+    
+    def test_add_message_and_tool_preserves_order(self, renderer):
+        """Test that messages and tools are added in chronological order."""
+        renderer.add_message("First message")
+        renderer.add_tool_call("tool1", is_running=True)
+        renderer.add_message("Second message")
+        renderer.add_tool_call("tool2", is_running=True)
+        
+        items = renderer.state._current_step.items
+        assert len(items) == 4
+        assert isinstance(items[0], MessageInfo)
+        assert isinstance(items[1], ToolCallInfo)
+        assert isinstance(items[2], MessageInfo)
+        assert isinstance(items[3], ToolCallInfo)
     
     def test_render_dynamic_panel_no_task(self, renderer):
         panel = renderer.render_dynamic_task_panel()
@@ -228,10 +266,10 @@ class TestTaskUIRenderer:
         assert len(renderer.state.recent_steps) >= 1
     
     def test_flatten_step(self, renderer):
-        step = AssistantStep(
-            content="Message",
-            tool_calls=[ToolCallInfo(name="test_tool", key_param="/path", is_running=False)]
-        )
+        step = AssistantStep(items=[
+            MessageInfo(content="Message", is_current=False),
+            ToolCallInfo(name="test_tool", key_param="/path", is_running=False)
+        ])
         items = renderer._flatten_step(step, is_current=False)
         assert len(items) == 2  # message + tool
 

@@ -909,8 +909,8 @@ class Repl(ReplUI):
                                 # Update Task UI
                                 if "task_boundary" in tool_name:
                                     self.task_ui_renderer.update_task_boundary(args)
-                                else:
-                                    # Add tool to recent activity with args for key param display
+                                elif "notify_user" not in tool_name:
+                                    # Add tool to recent activity (skip notify_user - has its own UI)
                                     self.task_ui_renderer.add_tool_call(tool_name, args=args, is_running=True)
                                 
                                 # Display in scrollback (filtered in compact mode with active task)

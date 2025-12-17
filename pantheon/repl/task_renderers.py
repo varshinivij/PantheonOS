@@ -24,18 +24,27 @@ class ToolCallInfo:
     name: str           # Full tool name (e.g., 'file_manager__read_file')
     key_param: str      # Key parameter value for display
     is_running: bool    # Whether tool is currently running
-    
+
+
+@dataclass
+class MessageInfo:
+    """Info about an assistant message."""
+    content: str        # Truncated message content for display
+    is_current: bool    # Whether this is in the current (in-progress) step
+
+
+# Union type for step items (message or tool call)
+StepItem = ToolCallInfo | MessageInfo
+
 
 @dataclass
 class AssistantStep:
-    """An assistant step containing optional content and tool calls.
+    """An assistant step containing ordered items (messages and tool calls).
     
-    Represents one assistant message which may have:
-    - Text content (optional)
-    - One or more tool calls (optional)
+    Items are stored in chronological order to preserve the sequence of
+    messages and tool calls within a single status phase.
     """
-    content: str = ""                              # Text content (truncated for display)
-    tool_calls: list[ToolCallInfo] = field(default_factory=list)
+    items: list[StepItem] = field(default_factory=list)
 
 
 @dataclass
@@ -48,14 +57,15 @@ class TaskUIState:
         summary: Task summary (what has been done)
         current_status: Current status (what is being done next)
         status_history: List of previous status updates
-        recent_steps: Recent assistant steps (messages + tool calls as units)
+        recent_steps: Recent assistant steps (bounded deque for automatic LRU)
     """
     task_name: str = ""
     mode: str = ""
     summary: str = ""
     current_status: str = ""
     status_history: list[str] = field(default_factory=list)
-    recent_steps: list[AssistantStep] = field(default_factory=list)
+    # Use deque with maxlen for automatic bounded storage
+    recent_steps: deque = field(default_factory=lambda: deque(maxlen=7))
     
     # Internal: current step being built (accumulates content + tools)
     _current_step: Optional[AssistantStep] = field(default=None, repr=False)
@@ -67,7 +77,7 @@ class TaskUIState:
         self.summary = ""
         self.current_status = ""
         self.status_history = []
-        self.recent_steps = []
+        self.recent_steps = deque(maxlen=7)
         self._current_step = None
 
 
@@ -78,8 +88,11 @@ class TaskUIRenderer:
     Dynamic: Real-time updates in fixed position above input area
     """
     
-    MAX_RECENT_TOOLS = 5
+    MAX_RECENT_ITEMS = 7  # Number of recent items to display
     MAX_STATUS_HISTORY = 10
+    
+    # Key param value truncation (only the value, not the whole param)
+    KEY_PARAM_MAX_LEN = 50  # Max length for key param value display
     
     # Spinner animation frames for active status
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -215,7 +228,7 @@ class TaskUIRenderer:
             key_param=key_param,
             is_running=is_running
         )
-        self.state._current_step.tool_calls.append(tool_info)
+        self.state._current_step.items.append(tool_info)
         self._update_dynamic_panel()
     
     def update_tool_complete(self, tool_name: str, args: dict = None):
@@ -224,39 +237,47 @@ class TaskUIRenderer:
             return
         
         func_name = self._get_func_name(tool_name)
-        for tool_info in self.state._current_step.tool_calls:
-            if func_name in tool_info.name and tool_info.is_running:
-                tool_info.is_running = False
+        # Search in items list for matching ToolCallInfo
+        for item in self.state._current_step.items:
+            if isinstance(item, ToolCallInfo) and func_name in item.name and item.is_running:
+                item.is_running = False
                 break
         self._update_dynamic_panel()
     
     def add_message(self, content: str):
-        """Add/update assistant message content to current step.
+        """Add assistant message content to current step.
+        
+        Messages are added in order alongside tool calls to preserve
+        the chronological sequence of events.
+        
+        Note: Messages are NOT truncated - Rich Panel handles automatic
+        text wrapping for long content.
         
         Args:
-            content: Message content (will be truncated)
+            content: Message content (will be displayed in full, with wrapping)
         """
-        snippet = content[:60] + "..." if len(content) > 60 else content
-        snippet = snippet.replace("\n", " ").strip()
+        # Replace newlines with spaces for single-line display, but keep full content
+        snippet = content.replace("\n", " ").strip()
         
         if self.state._current_step is None:
-            self.state._current_step = AssistantStep(content=snippet)
-        else:
-            self.state._current_step.content = snippet
+            self.state._current_step = AssistantStep()
+        
+        msg_info = MessageInfo(content=snippet, is_current=True)
+        self.state._current_step.items.append(msg_info)
         self._update_dynamic_panel()
     
     def _finalize_current_step(self):
         """Finalize current step and add to recent_steps."""
         if self.state._current_step is not None:
-            # Mark all tools as complete
-            for tool_info in self.state._current_step.tool_calls:
-                tool_info.is_running = False
+            # Mark all items as not current
+            for item in self.state._current_step.items:
+                if isinstance(item, ToolCallInfo):
+                    item.is_running = False
+                elif isinstance(item, MessageInfo):
+                    item.is_current = False
             
+            # deque with maxlen automatically discards oldest items
             self.state.recent_steps.append(self.state._current_step)
-            # Keep only recent steps (last 5)
-            if len(self.state.recent_steps) > 5:
-                self.state.recent_steps = self.state.recent_steps[-5:]
-            
             self.state._current_step = None
     
     def render_static_task_panel(self, state: TaskUIState):
@@ -332,16 +353,16 @@ class TaskUIRenderer:
         # Flattened recent steps (message + tool_calls as separate lines)
         all_items = []
         
-        # Add completed steps
-        for step in self.state.recent_steps[-3:]:  # Last 3 completed steps
+        # Add all completed steps from deque
+        for step in self.state.recent_steps:
             all_items.extend(self._flatten_step(step, is_current=False))
         
         # Add current step (in progress)
         if self.state._current_step:
             all_items.extend(self._flatten_step(self.state._current_step, is_current=True))
         
-        # Show only last 5 items
-        for item in all_items[-5:]:
+        # Show only last N items (MAX_RECENT_ITEMS)
+        for item in all_items[-self.MAX_RECENT_ITEMS:]:
             lines.append(f"    {item}")
         
         # Mode badge color
@@ -357,6 +378,9 @@ class TaskUIRenderer:
     def _flatten_step(self, step: AssistantStep, is_current: bool = False) -> list[str]:
         """Flatten an AssistantStep into display lines.
         
+        Iterates over step.items in order, formatting each MessageInfo or
+        ToolCallInfo appropriately.
+        
         Args:
             step: The AssistantStep to flatten
             is_current: Whether this is the current (in-progress) step
@@ -364,22 +388,25 @@ class TaskUIRenderer:
         Returns:
             List of formatted strings for display
         """
-        items = []
+        result = []
         
-        # Add message content (if any)
-        if step.content:
-            icon = "💬" if is_current else "[dim]💬[/dim]"
-            content = step.content if is_current else f"[dim]{step.content}[/dim]"
-            items.append(f"{icon} {content}")
+        for item in step.items:
+            if isinstance(item, MessageInfo):
+                # Format message
+                is_msg_current = item.is_current if is_current else False
+                icon = "💬" if is_msg_current else "[dim]💬[/dim]"
+                content = item.content if is_msg_current else f"[dim]{item.content}[/dim]"
+                result.append(f"{icon} {content}")
+            elif isinstance(item, ToolCallInfo):
+                # Format tool call
+                result.append(self._format_tool_info(item))
         
-        # Add tool calls
-        for tool_info in step.tool_calls:
-            items.append(self._format_tool_info(tool_info))
-        
-        return items
+        return result
     
     def _format_tool_info(self, tool_info: ToolCallInfo) -> str:
         """Format a ToolCallInfo for display.
+        
+        Note: key_param is already truncated in _get_key_param_value.
         
         Args:
             tool_info: The ToolCallInfo to format
@@ -393,12 +420,9 @@ class TaskUIRenderer:
         # Use common formatting
         base = self._format_tool_base(tool_info.name)
         
-        # Add key param
+        # Add key param (already truncated in _get_key_param_value)
         if tool_info.key_param:
-            key_display = tool_info.key_param
-            if len(key_display) > 35:
-                key_display = "..." + key_display[-32:]
-            return f"[{status_color}]{status}[/{status_color}] {base} : [dim]{key_display}[/dim]"
+            return f"[{status_color}]{status}[/{status_color}] {base} : [dim]{tool_info.key_param}[/dim]"
         
         return f"[{status_color}]{status}[/{status_color}] {base}"
     
@@ -463,15 +487,20 @@ class TaskUIRenderer:
     def _get_key_param_value(self, func_name: str, args: dict) -> str:
         """Get the key parameter value for a function.
         
+        The value is truncated to KEY_PARAM_MAX_LEN if too long.
+        Truncation preserves the end of the value (e.g., file paths show filename).
+        
         Args:
             func_name: Function name (e.g., 'read_file')
             args: Tool arguments dict
             
         Returns:
-            Key parameter value or empty string
+            Key parameter value (truncated if needed) or empty string
         """
         if not args:
             return ""
+        
+        value = ""
         
         # Check specific mapping first
         if func_name in self.KEY_PARAMS:
@@ -480,14 +509,20 @@ class TaskUIRenderer:
                 return ""
             value = args.get(param_name, "")
             if value:
-                return str(value)
+                value = str(value)
         
         # Fallback to generic params
-        for param in self.GENERIC_KEY_PARAMS:
-            if param in args and args[param]:
-                return str(args[param])
+        if not value:
+            for param in self.GENERIC_KEY_PARAMS:
+                if param in args and args[param]:
+                    value = str(args[param])
+                    break
         
-        return ""
+        # Truncate value if too long (keep the end, useful for file paths)
+        if value and len(value) > self.KEY_PARAM_MAX_LEN:
+            value = "..." + value[-(self.KEY_PARAM_MAX_LEN - 3):]
+        
+        return value
     
     def _get_mode_color(self, mode: str) -> str:
         """Get color for mode badge.
@@ -580,6 +615,7 @@ class NotifyUIRenderer:
 
 __all__ = [
     "ToolCallInfo",
+    "MessageInfo",
     "AssistantStep",
     "TaskUIState",
     "TaskUIRenderer", 
