@@ -61,6 +61,7 @@ class ChatRoom(ToolSet):
         default_team: "PantheonTeam | None" = None,
         enable_learning: bool | None = None,
         learning_config: dict | None = None,
+        enable_auto_chat_name: bool = False,
         **kwargs,
     ):
         # Initialize ToolSet (will handle worker creation in run())
@@ -135,6 +136,9 @@ class ChatRoom(ToolSet):
 
         # Background tasks management (for non-blocking operations like chat renaming)
         self._background_tasks: set[asyncio.Task] = set()
+
+        # Auto chat name generation (disabled by default, enable for UI mode)
+        self._enable_auto_chat_name = enable_auto_chat_name
 
         # ACE (Agentic Context Engineering) long-term memory
         self._init_learning(enable_learning, learning_config)
@@ -915,10 +919,11 @@ class ChatRoom(ToolSet):
             await thread.run()
 
             # Generate or update chat name in background (non-blocking)
-            # This prevents UI lag from the LLM call for name generation
-            task = asyncio.create_task(self._background_rename_chat(memory))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
+            # Only enabled for UI mode to avoid unnecessary LLM calls in REPL/API
+            if self._enable_auto_chat_name:
+                task = asyncio.create_task(self._background_rename_chat(memory))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
 
             # Publish chat finished message if NATS streaming enabled
             if self._nats_adapter is not None:

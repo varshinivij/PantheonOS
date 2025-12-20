@@ -290,6 +290,7 @@ async def start_services(
         name=service_name,
         speech_to_text_model=speech_to_text_model,
         enable_nats_streaming=True,  # Enable NATS streaming for remote service
+        enable_auto_chat_name=True,  # Enable auto chat name for UI mode
         **kwargs,
     )
 
