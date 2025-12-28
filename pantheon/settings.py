@@ -240,6 +240,11 @@ class Settings:
         """Directory for learning long-term memory data."""
         return self.pantheon_dir / "learning"
 
+    @property
+    def logs_dir(self) -> Path:
+        """Directory for log files (REPL logs, etc.)."""
+        return self.pantheon_dir / "logs"
+
     def get_model_selector(self) -> "ModelSelector":
         """
         Get a ModelSelector instance for smart model selection.
@@ -573,6 +578,16 @@ class Settings:
         """
         self._ensure_loaded()
         return self._settings.get("enable_mcp_tools", True)
+
+    @property
+    def tool_timeout(self) -> int:
+        """
+        Get local toolset timeout configuration.
+        Unified timeout for Agents, ToolSets, Jupyter Kernels, and Remote Workers.
+        Defaults to 3600s (1 hour) if not configured.
+        """
+        self._ensure_loaded()
+        return self._settings.get("endpoint", {}).get("local_toolset_timeout", 3600)
 
 
     @property

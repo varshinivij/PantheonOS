@@ -4,6 +4,7 @@ id: skill_manager
 name: Skill Manager
 toolsets:
   - skillbook
+  - file_manager
 description: |
   ACE Skill Manager V2 - Manages skillbook updates.
   Does NOT handle sources - SkillbookToolSet auto-converts long content internally.

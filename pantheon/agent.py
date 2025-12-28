@@ -394,7 +394,7 @@ class Agent:
         use_memory: Whether to use memory for the agent. (default: True)
         memory: The memory to use for the agent.
             If not provided, a new memory will be created.
-        tool_timeout: The timeout for the tool. (default: 10 minutes)
+        tool_timeout: The timeout for the tool. (default: from settings.endpoint.local_toolset_timeout, or 3600s)
         force_litellm: Whether to force using LiteLLM. (default: False)
         max_tool_content_length: The maximum length of the tool content. (default: 100000)
         description: The description of the agent. (default: None)
@@ -411,7 +411,7 @@ class Agent:
         response_format: Any | None = None,
         use_memory: bool = True,
         memory: Memory | None = None,
-        tool_timeout: int = 10 * 60,
+        tool_timeout: int | None = None,
         force_litellm: bool = False,
         max_tool_content_length: int | None = 100000,
         description: str | None = None,
@@ -449,7 +449,14 @@ class Agent:
         self.response_format = response_format
         self.use_memory = use_memory
         self.memory = memory or Memory(str(uuid4()))
-        self.tool_timeout = tool_timeout
+        
+        # Tool timeout: use provided value, or get from settings (unified with ToolSetManager and Kernel)
+        if tool_timeout is not None:
+            self.tool_timeout = tool_timeout
+        else:
+            from .settings import get_settings
+            self.tool_timeout = get_settings().tool_timeout
+        
         self.events_queue: asyncio.Queue = asyncio.Queue()
         self.force_litellm = force_litellm
         self.icon = icon

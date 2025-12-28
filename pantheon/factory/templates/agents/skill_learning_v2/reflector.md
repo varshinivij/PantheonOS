@@ -124,15 +124,24 @@ Return ONLY valid JSON:
   ],
   "extracted_learnings": [
     {
-      "section": "user_rules|strategies|patterns|workflows",
+      "skill_type": "atomic|systematic",
+      "section": "user_rules|strategies|patterns|workflows|guidelines",
       "content": "<full actionable insight, NO length limit>",
-      "description": "<REQUIRED: max 15 words summary>",
+      "description": "<REQUIRED: max 20 words summary>",
+      "atomicity_score": 0.85,
       "confidence": 0.9,
       "evidence": "<execution detail>"
     }
   ]
 }
 ```
+
+### Skill Types
+
+| Type | Atomicity | Section | Description Required |
+|------|-----------|---------|---------------------|
+| **atomic** | >=0.85 | strategies, patterns | If > 100 chars |
+| **systematic** | Any | patterns, workflows, guidelines | Always |
 
 ### Example Output
 

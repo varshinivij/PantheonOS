@@ -128,8 +128,19 @@ Decide what updates to apply to the skillbook.
 STEP 7: Apply operations
 ────────────────────────
 FOR EACH operation in operations:
-  IF type == "ADD" AND atomicity_score >= 0.85:
-    add_skill(section, content, description)
+  skill_type = operation.skill_type OR "atomic"
+  score = operation.atomicity_score
+  
+  IF score < 0.40:
+    → Reject (too vague)
+  
+  IF type == "ADD":
+    IF skill_type == "systematic":
+      → add_skill(section, content, description)
+    ELIF skill_type == "atomic" AND score >= 0.85:
+      → add_skill(section, content, description)
+    ELSE:
+      → Skip (low atomicity for atomic type)
   
   ELIF type == "UPDATE":
     update_skill(skill_id, content)

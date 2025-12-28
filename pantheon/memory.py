@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -22,11 +23,17 @@ class Memory:
         extra_data: The extra data of the memory.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, file_path: str | None = None, persist_delay: float = 2.0):
         self.name = name
         self.id = str(uuid4())
         self._messages: list[dict] = []
         self.extra_data: dict[str, object] = {}
+        
+        # Debounced persistence (opt-in: only when file_path is set)
+        self._file_path: str | None = file_path
+        self._persist_delay = persist_delay
+        self._persist_task: asyncio.Task | None = None
+        self._dirty: bool = False
 
     def __getitem__(self, key: int | slice):
         """Get a message or slice of messages from the memory."""
@@ -91,6 +98,58 @@ class Memory:
         """
         messages = process_messages_for_store(messages)
         self._messages.extend(messages)
+        self._schedule_persist()  # Trigger debounced auto-persistence
+
+    def _schedule_persist(self):
+        """Schedule debounced persistence (non-blocking).
+        
+        Only schedules if file_path is set (opt-in behavior).
+        Uses debounce window to batch multiple writes.
+        """
+        if not self._file_path:
+            return
+        
+        self._dirty = True
+        
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running, skip auto-persist
+            # (Will be persisted by MemoryManager.save() later)
+            return
+        
+        # Cancel existing scheduled task (debounce)
+        if self._persist_task and not self._persist_task.done():
+            self._persist_task.cancel()
+        
+        async def _delayed_persist():
+            await asyncio.sleep(self._persist_delay)
+            self._do_persist()
+        
+        self._persist_task = loop.create_task(_delayed_persist())
+
+    def _do_persist(self):
+        """Actually write memory to disk."""
+        if self._file_path and self._dirty:
+            try:
+                self.save(self._file_path)
+                self._dirty = False
+                logger.debug(f"Memory '{self.name}' auto-persisted to {self._file_path}")
+            except Exception as e:
+                logger.error(f"Failed to auto-persist memory '{self.name}': {e}")
+
+    async def flush(self):
+        """Force immediate persistence, cancel any pending debounce.
+        
+        Use this for graceful shutdown to ensure all data is saved.
+        """
+        if self._persist_task and not self._persist_task.done():
+            self._persist_task.cancel()
+            try:
+                await self._persist_task
+            except asyncio.CancelledError:
+                pass
+        self._do_persist()
 
     def get_messages(self, execution_context_id=_ALL_CONTEXTS, for_llm: bool = True) -> list[dict]:
         """
@@ -225,6 +284,8 @@ class MemoryManager:
             name = DEFAULT_CHAT_NAME
         memory = Memory(name)
         self.memory_store[memory.id] = memory
+        # Enable auto-persistence for managed memories
+        memory._file_path = str(self.path / f"{memory.id}.json")
         return memory
 
     def get_memory(self, id: str) -> Memory:
@@ -273,6 +334,8 @@ class MemoryManager:
         for file in self.path.glob("*.json"):
             try:
                 memory = Memory.load(str(file))
+                # Enable auto-persistence for managed memories
+                memory._file_path = str(file)
                 logger.debug(f"Loaded memory: {memory.name} from {file}")
                 self.memory_store[memory.id] = memory
                 if memory.extra_data.get("running"):

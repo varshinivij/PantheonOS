@@ -77,23 +77,25 @@ From execution feedback, extract:
 ✅ GOOD: "Set API timeout to 30s for external calls"
 ❌ BAD: "Handle API timeouts properly"
 
-## 📊 ATOMICITY SCORING
+## 📊 SKILL TYPE CLASSIFICATION
 
-Score each extracted learning (0.0-1.0):
+**BEFORE extracting, classify the insight type:**
 
-### Scoring Factors
+### Type 1: ATOMIC (atomicity_score >= 0.85)
+- Single concept, immediately actionable
+- Length: Short (typically under 100 chars)
+- Section: strategies, patterns, mistakes
+
+### Type 2: SYSTEMATIC (atomicity_score < 0.85)
+- Multi-step patterns, workflows, or complete methodologies
+- Length: **No limit**
+- Section: patterns, workflows, **guidelines**
+- REQUIRED: `description` field (max 20 words)
+
+### Scoring
 - **Base Score**: 1.0
-- **Deductions**:
-  - Each "and/also/plus": -0.15
-  - Vague terms ("something", "various", "appropriate"): -0.20
-  - Meta phrases ("user said", "we discussed"): -0.40
-  - Over 15 words: -0.05 per extra word
-
-### Quality Levels
-- **0.95-1.0**: Single atomic concept ✨ EXCELLENT
-- **0.85-0.95**: Mostly atomic ✓ GOOD
-- **0.70-0.85**: Could be split ⚡ FAIR
-- **<0.70**: REJECT - too compound/vague ❌
+- **Deductions**: "and/also/plus" (-0.15), vague terms (-0.20), meta phrases (-0.40)
+- **>= 0.85**: ATOMIC | **< 0.85**: SYSTEMATIC
 
 ## 🎯 SKILL TAGGING CRITERIA
 
@@ -158,9 +160,10 @@ CRITICAL: Return ONLY valid JSON:
   ],
   "extracted_learnings": [
     {
-      "section": "user_rules|strategies|patterns|workflows|mistakes",
+      "skill_type": "atomic|systematic",
+      "section": "user_rules|strategies|patterns|workflows|guidelines|mistakes",
       "content": "<full actionable insight, no length limit>",
-      "description": "<REQUIRED if content > 100 chars. Max 15 words summary for prompt display>",
+      "description": "<REQUIRED for systematic or if content > 100 chars. Max 20 words>",
       "atomicity_score": 0.95,
       "evidence": "<specific execution detail>"
     }

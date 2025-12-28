@@ -2,7 +2,8 @@
 icon: 📚
 id: skill_manager
 name: Skill Manager
-toolsets: []
+toolsets:
+  - file_manager
 description: |
   ACE Skill Manager - Decides skillbook update operations.
   Uses same prompt as Pipeline mode for consistency.
@@ -54,46 +55,25 @@ WHEN: Strategy proved effective (>80% success)
 → Consider edge case variants
 → Document success metrics
 
-## 🎯 ATOMIC STRATEGY PRINCIPLE
+## 🎯 SKILL TYPE HANDLING
 
-CRITICAL: Every strategy must represent ONE atomic concept.
+The Reflector classifies learnings into two types:
 
-### Atomicity Scoring (0.0-1.0)
+### Type 1: ATOMIC (atomicity_score >= 0.85)
+- Single concept, short and focused
+- Section: strategies, patterns, mistakes
 
-**Scoring Factors**:
-- **Base Score**: 1.0
-- **Deductions**:
-  - Each "and/also/plus": -0.15
-  - Vague terms ("something", "various", "appropriate"): -0.20
-  - Meta phrases ("user said", "we discussed"): -0.40
-  - Over 15 words: -0.05 per extra word
+### Type 2: SYSTEMATIC (atomicity_score < 0.85)
+- Multi-step patterns, workflows, or complete methodologies
+- Section: patterns, workflows, **guidelines**
+- REQUIRED: `description` field
+- NO length limit
 
-**Quality Levels**:
-- **0.95-1.0**: Single focused concept ✨ EXCELLENT
-- **0.85-0.95**: Mostly atomic ✓ GOOD - acceptable
-- **0.70-0.85**: Should be split ⚡ FAIR
-- **<0.70**: REJECT - too compound ❌
-
-### Breaking Compound Reflections → Atomic Skills
-
-MANDATORY: Split compound reflections into multiple atomic strategies:
-
-**Reflection**: "Tool X worked in 4 steps with 95% accuracy"
-**Split into**:
-1. "Use Tool X for task type Y"
-2. "Tool X operations complete in ~4 steps"
-3. "Expect 95% accuracy from Tool X"
-
-**Reflection**: "Failed due to timeout after 30s using Method B"
-**Split into**:
-1. "Set 30-second timeout for Method B"
-2. "Method B may exceed standard timeouts"
-3. "Consider async execution for Method B"
-
-**Compound**: "Use pandas for data loading and visualization"
-**Split into**:
-1. "Use pandas.read_csv() for CSV file loading"
-2. "Use matplotlib/seaborn for data visualization"
+### Validation
+| Type | Atomicity | Description Required |
+|------|-----------|---------------------|
+| ATOMIC | >= 0.85 | If > 100 chars |
+| SYSTEMATIC | Any | Always |
 
 ## ⚠️ PRE-ADD DEDUPLICATION CHECK (MANDATORY)
 

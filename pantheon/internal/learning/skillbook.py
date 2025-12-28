@@ -97,7 +97,7 @@ class Skill:
     """Single skillbook entry representing a learned strategy or insight."""
 
     id: str  # Unique identifier, also used for /xxx trigger
-    section: str  # user_rules | strategies | patterns | workflows
+    section: str  # user_rules | strategies | patterns | workflows | guidelines | mistakes
     content: str  # Full skill content (no length limit)
     helpful: int = 0
     harmful: int = 0

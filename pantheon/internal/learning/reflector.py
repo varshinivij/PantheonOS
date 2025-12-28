@@ -94,23 +94,39 @@ From execution feedback, extract:
 ✅ GOOD: "Set API timeout to 30s for external calls"
 ❌ BAD: "Handle API timeouts properly"
 
-## 📊 ATOMICITY SCORING
+## 📊 SKILL TYPE CLASSIFICATION
 
-Score each extracted learning (0.0-1.0):
+**BEFORE extracting, classify the insight type:**
 
-### Scoring Factors
+### Type 1: ATOMIC (atomicity_score >= 0.85)
+- Single concept, immediately actionable
+- Length: Short (typically under 100 chars)
+- Section: strategies, patterns, mistakes
+- Example: "Use pandas.read_csv() for CSV files over 1MB"
+
+### Type 2: SYSTEMATIC (atomicity_score < 0.85)
+- Multi-step patterns, workflows, or complete methodologies
+- Length: **No limit** (can be any length needed)
+- Section: patterns, workflows, **guidelines**
+- REQUIRED: `description` field (max 20 words summary for prompt display)
+- Can use markdown formatting for complex content
+- Examples:
+  - Multi-step API retry pattern
+  - Complete data analysis pipeline
+  - Domain-specific best practices guide
+
+### Type Selection
+- Default to ATOMIC if the insight is a single, focused concept
+- Use SYSTEMATIC for anything that:
+  - Has multiple steps
+  - Requires detailed explanation
+  - Forms a cohesive guide or methodology
+
+### Scoring (still required)
 - **Base Score**: 1.0
-- **Deductions**:
-  - Each "and/also/plus": -0.15
-  - Vague terms ("something", "various", "appropriate"): -0.20
-  - Meta phrases ("user said", "we discussed"): -0.40
-  - Over 15 words: -0.05 per extra word
-
-### Quality Levels
-- **0.95-1.0**: Single atomic concept ✨ EXCELLENT
-- **0.85-0.95**: Mostly atomic ✓ GOOD
-- **0.70-0.85**: Could be split ⚡ FAIR
-- **<0.70**: REJECT - too compound/vague ❌
+- **Deductions**: "and/also/plus" (-0.15), vague terms (-0.20), meta phrases (-0.40)
+- **>= 0.85**: ATOMIC
+- **< 0.85**: SYSTEMATIC
 
 ## 🎯 SKILL TAGGING CRITERIA
 
@@ -175,10 +191,11 @@ CRITICAL: Return ONLY valid JSON:
   ],
   "extracted_learnings": [
     {
-      "section": "user_rules|strategies|patterns|workflows|mistakes",
-      "content": "<full actionable insight, no length limit>",
-      "description": "<REQUIRED if content > 100 chars. Max 15 words summary for prompt display>",
-      "atomicity_score": 0.95,
+      "skill_type": "atomic|systematic",
+      "section": "user_rules|strategies|patterns|workflows|guidelines|mistakes",
+      "content": "<full actionable insight - for systematic, use markdown formatting>",
+      "description": "<REQUIRED for systematic or if content > 100 chars. Max 20 words>",
+      "atomicity_score": 0.75,
       "evidence": "<specific execution detail>"
     }
   ],
@@ -269,9 +286,10 @@ class SkillTag(BaseModel):
 class ExtractedLearning(BaseModel):
     """A new learning extracted from the trajectory."""
 
-    section: str  # strategies | mistakes | patterns | workflows
+    skill_type: str = "atomic"  # atomic | systematic (NOT Skill.type which is "system")
+    section: str  # strategies | patterns | workflows | guidelines | mistakes
     content: str
-    description: Optional[str] = None  # Short summary for long content
+    description: Optional[str] = None  # Short summary for long content (required for systematic)
     agent_scope: str = "global"
     atomicity_score: float = 0.8
     evidence: str = ""

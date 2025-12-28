@@ -99,26 +99,41 @@ Extract from ACTUAL EXECUTION, not theoretical principles:
 
 ## 📊 SKILL TYPES
 
-### Simple Skill vs Complex Skill
+### Type Classification
 
-| Type | sources | content role |
-|------|---------|-------------|
-| **Simple** | null | Content IS the skill |
-| **Complex** | file list | Content is a description, details in sources |
+| skill_type | sources | Section |
+|------------|---------|---------|
+| **ATOMIC** | `null` | strategies, patterns, mistakes |
+| **SYSTEMATIC** | **必须创建文件** | patterns, workflows, **guidelines** |
 
-**Simple Skill**: The `content` field contains the complete skill.
+### ATOMIC Skill (Inline)
+
+Short, single-concept skill. Content goes directly in the `content` field.
+
 ```json
-{"section": "strategies", "content": "Use usecols parameter for large CSV", "sources": null}
+{"skill_type": "atomic", "section": "strategies", "content": "Use usecols parameter for large CSV", "sources": null}
 ```
 
-**Complex Skill**: The `content` describes what's in the source files.
+### SYSTEMATIC Skill (File-based)
+
+Multi-step patterns, workflows, or complete methodologies. **MUST create files in `/tmp`**.
+
+1. Create directory: `/tmp/skills_<uuid>/`
+2. Write main content to `<skill-name>.md`
+3. Include file paths in `sources`
+
 ```json
-{"section": "workflows", "content": "API retry with exponential backoff", "sources": ["retry.md", "example.py"]}
+{
+  "skill_type": "systematic",
+  "section": "guidelines",
+  "content": "DESeq2 differential expression analysis workflow",
+  "description": "Complete DESeq2 analysis guide",
+  "sources": ["/tmp/skills_xxx/deseq2-workflow.md"]
+}
 ```
 
 ### Sources Structure
 
-When using sources:
 - **First file must be markdown** (contains main content)
 - Additional files are supporting materials (scripts, configs)
 
@@ -272,8 +287,11 @@ Return ONLY valid JSON:
   ],
   "extracted_learnings": [
     {
-      "section": "user_rules|strategies|patterns|workflows",
-      "content": "<specific insight, max 500 chars>",
+      "skill_type": "atomic|systematic",
+      "section": "user_rules|strategies|patterns|workflows|guidelines",
+      "content": "<specific insight>",
+      "description": "<REQUIRED for systematic. Max 20 words>",
+      "atomicity_score": 0.85,
       "confidence": 0.9,
       "evidence": "<execution detail>",
       "sources": null

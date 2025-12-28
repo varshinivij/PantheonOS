@@ -470,10 +470,18 @@ class JupyterKernelToolSet(ToolSet):
         name: str,
         workdir: str | None = None,
         use_unified_listener: bool = True,
+        execution_timeout: int | None = None,
         **kwargs,
     ):
         super().__init__(name, **kwargs)
         self.workdir = workdir or os.getcwd()
+
+        # Execution timeout: use provided value, or get from settings
+        if execution_timeout is not None:
+            self.execution_timeout = execution_timeout
+        else:
+            from pantheon.settings import get_settings
+            self.execution_timeout = get_settings().tool_timeout
 
         # Event bus will be set by parent toolset during setup
         self.event_bus: Optional[IOPubEventBus] = None
@@ -494,7 +502,7 @@ class JupyterKernelToolSet(ToolSet):
         self.unified_listener: Optional[KernelListener] = None
         if self.use_unified_listener:
             self.unified_listener = KernelListener()
-            logger.debug("Initialized unified kernel listener")
+            logger.debug(f"Initialized unified kernel listener (execution_timeout={self.execution_timeout}s)")
 
     def _current_context_dict(self) -> dict:
         ctx = self.get_context()
@@ -693,13 +701,13 @@ class JupyterKernelToolSet(ToolSet):
 
             # Wait for execution reply - handle both sync and async versions
             try:
-                reply = client.get_shell_msg(timeout=60)
+                reply = client.get_shell_msg(timeout=self.execution_timeout)
                 # If get_shell_msg is async, it returns a coroutine
                 if hasattr(reply, "__await__"):
                     reply = await reply
             except TypeError:
                 # Fallback to async version
-                reply = await client.get_shell_msg(timeout=60)
+                reply = await client.get_shell_msg(timeout=self.execution_timeout)
 
             # Update execution count
             if store_history and reply["content"].get("status") == "ok":
@@ -808,10 +816,14 @@ class JupyterKernelToolSet(ToolSet):
 
         except Exception as e:
             session_info.status = KernelStatus.IDLE
-            logger.error(f"Execute request failed for session {session_id}: {e}")
+            # Improve error message for Empty exception (timeout) which has empty str()
+            error_msg = str(e)
+            if not error_msg:
+                error_msg = f"Kernel execution timeout after {self.execution_timeout}s (kernel may still be running). Consider increasing 'endpoint.local_toolset_timeout' in settings."
+            logger.error(f"Execute request failed for session {session_id}: {error_msg}")
             return {
                 "success": False,
-                "error": str(e),
+                "error": error_msg,
                 "outputs": [],
                 "execution_count": None,
             }
