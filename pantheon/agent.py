@@ -1134,12 +1134,12 @@ class Agent:
         
         # Format log message
         timing_log = (
-            f"📊 [Agent:{self.name}][{model}] \n"
+            f"📊 [Agent:{self.name}] "
             f"⏳ Timing: Total: {total_time:.3f}s | "
             f"Message: {timings.get('message_processing', 0):.3f}s | "
             f"Begin: {timings.get('begin_chunk', 0):.3f}s | "
             f"LLM: {timings['llm_api']:.3f}s | "
-            f"Tool: {timings.get('tools_conversion', 0):.3f}s for {len(tools or [])} tools \n"
+            f"Tool: {timings.get('tools_conversion', 0):.3f}s for {len(tools or [])} tools "
             f"💬 Tokens: {total_tokens:,} | "
             f"Usage: {usage_pct:.1f}% | "
             f"Cost: ${current_cost:.4f}"

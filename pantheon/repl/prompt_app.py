@@ -45,6 +45,7 @@ from prompt_toolkit.formatted_text import HTML
 
 from .utils import get_animation_frames, get_separator, get_wave_color
 from pantheon.constant import FILE_COMPLETION_IGNORED, PROJECT_ROOT
+from pantheon.utils.log import logger
 
 if TYPE_CHECKING:
     from .core import Repl
@@ -764,6 +765,8 @@ class PantheonInputApp:
         )
 
         # Initialize Application
+        # Exception handling: set_exception_handler=False in run_async() suppresses
+        # "Press ENTER to continue..." prompts. Additional catch in core.py logs exceptions.
         self.app = Application(
             layout=self.layout,
             style=self.style,
@@ -931,7 +934,9 @@ class PantheonInputApp:
             self.app.renderer.reset()
         except Exception:
             pass
-        await self.app.run_async()
+        # set_exception_handler=False prevents "Press ENTER to continue..." prompts
+        # when unhandled exceptions occur in the event loop
+        await self.app.run_async(set_exception_handler=False)
 
     def get_processing_formatted_text(self) -> HTML:
         """Generate processing status line content (above input) with wave animation."""

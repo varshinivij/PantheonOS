@@ -99,7 +99,7 @@ def print_agent_message_modern_style(
             console.print(
                 Syntax(formatted, "json", theme="monokai", line_numbers=False)
             )
-        except:
+        except Exception:
             console.print(f"[dim]{content}[/dim]")
 
     # Handle assistant messages with markdown

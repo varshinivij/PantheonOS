@@ -653,6 +653,10 @@ class Repl(ReplUI):
                              await self.prompt_app.run_async()
                          except (EOFError, KeyboardInterrupt):
                              pass # Suppress stack traces on exit
+                         except Exception as e:
+                             # Log unexpected exceptions instead of letting them propagate
+                             # This prevents "Press ENTER to continue..." or similar prompts
+                             logger.warning(f"Prompt app exception: {e}")
                      finally:
                          # Cancel processing loop on exit
                          processing_task.cancel()
