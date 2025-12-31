@@ -1368,6 +1368,36 @@ class ChatRoom(ToolSet):
             logger.error(f"Error setting agent model: {e}")
             return {"success": False, "message": str(e)}
 
+
+    @tool
+    async def compress_chat(self, chat_id: str) -> dict:
+        """Trigger context compression for a chat.
+        
+        Args:
+            chat_id: The chat to compress
+            
+        Returns:
+            dict with success status and compression details
+        """
+        try:
+            team = await self.get_team_for_chat(chat_id)
+            memory = await run_func(self.memory_manager.get_memory, chat_id)
+            
+            if not hasattr(team, 'force_compress'):
+                return {"success": False, "message": "Team does not support compression"}
+            
+            result = await team.force_compress(memory)
+            
+            # Save memory to persist compression changes
+            if result.get("success"):
+                await run_func(self.memory_manager.save)
+                logger.info(f"Manual compression completed for chat {chat_id}")
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error compressing chat: {e}")
+            return {"success": False, "message": str(e)}
+
     def _validate_model_provider(self, model: str) -> tuple[bool, str]:
         """Validate that the provider for a model has a valid API key.
 

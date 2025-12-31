@@ -159,6 +159,12 @@ class Repl(ReplUI):
 
         # Cache last listed team files for index selection in /team
         self._last_team_files: list[dict] | None = None
+        
+        # ✅ P3.1: Real-time status bar update
+        self._status_update_task: asyncio.Task | None = None
+        self._is_processing = False
+        self._status_update_requested = False
+        self._last_status_update = 0.0
 
     def _create_chatroom_from_agent(
         self, agent: Agent | Team, memory_dir: str
@@ -274,6 +280,13 @@ class Repl(ReplUI):
                 # Process message
                 if self.prompt_app:
                     self.prompt_app.start_processing(self._estimate_tokens(current_message))
+                    
+                    # ✅ P3.1: Start status update loop
+                    if not self._is_processing:
+                        self._is_processing = True
+                        self._last_status_update = time.time()
+                        self._status_update_task = asyncio.create_task(self._status_update_loop())
+                    
                     # Yield to event loop to let prompt_toolkit render first frame
                     await asyncio.sleep(0)
 
@@ -285,8 +298,22 @@ class Repl(ReplUI):
                     self.console.print(f"[red]Error processing message: {e}[/red]")
                 finally:
                     if self.prompt_app:
+                        # ✅ P3.1: Request final update before stopping
+                        self._status_update_requested = True
+                        await asyncio.sleep(0.1)  # Give update loop time to process
+                        
+                        # Stop processing and background loop
+                        self._is_processing = False
+                        if self._status_update_task:
+                            self._status_update_task.cancel()
+                            try:
+                                await self._status_update_task
+                            except asyncio.CancelledError:
+                                pass
+                            self._status_update_task = None
+                        
                         self.prompt_app.stop_processing()
-                        # Update token usage in status bar
+                        # Final update after processing
                         await self._update_status_bar_token_usage()
                     self.message_queue.task_done()
                     
@@ -377,44 +404,12 @@ class Repl(ReplUI):
             raise
 
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count with language-aware approximation.
-
-        Different character types have different token ratios:
-        - CJK characters (Chinese/Japanese/Korean): ~1.5 tokens per character
-        - ASCII (English, code, punctuation): ~0.25 tokens per character (4 chars/token)
-        - Other Unicode: ~0.5 tokens per character (2 chars/token)
+        """Estimate token count for text.
+        
+        Reuses the language-aware estimation from llm._fallback_token_count.
         """
-        if not text:
-            return 0
-
-        cjk_chars = 0
-        ascii_chars = 0
-        other_chars = 0
-
-        for char in text:
-            code = ord(char)
-            # CJK Unified Ideographs and common CJK ranges
-            if (0x4E00 <= code <= 0x9FFF or      # CJK Unified Ideographs
-                0x3400 <= code <= 0x4DBF or      # CJK Extension A
-                0x3000 <= code <= 0x303F or      # CJK Punctuation
-                0xFF00 <= code <= 0xFFEF or      # Fullwidth Forms
-                0xAC00 <= code <= 0xD7AF or      # Korean Hangul
-                0x3040 <= code <= 0x309F or      # Japanese Hiragana
-                0x30A0 <= code <= 0x30FF):       # Japanese Katakana
-                cjk_chars += 1
-            elif code < 128:  # ASCII
-                ascii_chars += 1
-            else:  # Other Unicode (emojis, symbols, etc.)
-                other_chars += 1
-
-        # Calculate estimated tokens
-        tokens = (
-            cjk_chars * 1.5 +       # CJK: ~1.5 tokens per char
-            ascii_chars * 0.25 +    # ASCII: ~4 chars per token
-            other_chars * 0.5       # Other: ~2 chars per token
-        )
-
-        return max(1, int(tokens))
+        from pantheon.utils.llm import _fallback_token_count
+        return _fallback_token_count(text)
 
     def _format_token_count(self, count: int) -> str:
         """Format token count with appropriate units."""
@@ -437,24 +432,111 @@ class Repl(ReplUI):
     async def _update_status_bar_token_usage(self):
         """Update token usage percentage in status bar (async).
         
-        Uses get_detailed_token_stats to include system prompt and tools,
-        matching the /tokens command output.
+        Optimized to use cached reads from message metadata instead of
+        full token counting for better performance.
         """
         if not self.prompt_app:
             return
+        
         try:
+            # ✅ Fast path: Read from cached metadata (O(1))
+            if self._chatroom and self._chat_id:
+                memory = self._chatroom.memory_manager.get_memory(self._chat_id)
+                if memory:
+                    # Get only root agent messages
+                    messages = memory.get_messages(execution_context_id=None)
+                    
+                    if messages:
+                        # Find last message with token metadata
+                        # After compression, there may be no assistant message yet
+                        last_with_tokens = next(
+                            (m for m in reversed(messages)
+                             if "_metadata" in m and "total_tokens" in m["_metadata"]),
+                            None
+                        )
+                        
+                        if last_with_tokens:
+                            meta = last_with_tokens["_metadata"]
+                            total_tokens = meta.get("total_tokens", 0)
+                            max_tokens = meta.get("max_tokens", 200000)
+                            
+                            # Calculate usage percentage
+                            usage_pct = (total_tokens / max_tokens * 100) if max_tokens > 0 else 0
+                        else:
+                            # No message with total_tokens found (e.g., after compression)
+                            # Show 0% until next LLM call or user runs /tokens
+                            usage_pct = 0.0
+                        
+                        # Calculate total cost from all messages (including compressed)
+                        # Use for_llm=False to get full message history
+                        all_messages = memory.get_messages(for_llm=False)
+                        from pantheon.utils.llm import calculate_total_cost_from_messages
+                        total_cost = calculate_total_cost_from_messages(all_messages)
+                        
+                        # Update status bar
+                        self.prompt_app.update_token_usage(usage_pct, total_cost)
+                        return
+            return
+            
+            # Fallback: Use detailed stats if fast path fails
             from .utils import get_detailed_token_stats
             fallback = {
                 "total_input_tokens": self.total_input_tokens,
                 "total_output_tokens": self.total_output_tokens,
                 "message_count": self.message_count,
             }
-            token_info = await get_detailed_token_stats(self._chatroom, self._chat_id, self._team, fallback)
+            token_info = await get_detailed_token_stats(
+                self._chatroom, self._chat_id, self._team, fallback
+            )
             usage_pct = token_info.get("usage_percent", 0)
             total_cost = token_info.get("total_cost") or 0.0
             self.prompt_app.update_token_usage(usage_pct, total_cost)
+            
         except Exception:
             pass  # Silently ignore errors
+
+
+    async def _status_update_loop(self):
+        """Background loop for real-time status bar updates.
+        
+        Updates occur on:
+        1. Periodic intervals (every 8 seconds)
+        2. Event triggers (when _status_update_requested is set)
+        
+        Includes debouncing (min 3s between updates) to prevent excessive calls.
+        """
+        UPDATE_INTERVAL = 8  # Periodic update every 8 seconds
+        MIN_INTERVAL = 3      # Minimum time between updates (debouncing)
+        
+        while self._is_processing:
+            try:
+                now = time.time()
+                should_update = False
+                
+                # Check 1: Periodic update
+                if now - self._last_status_update >= UPDATE_INTERVAL:
+                    should_update = True
+                
+                # Check 2: Event-driven update (with debouncing)
+                if self._status_update_requested:
+                    if now - self._last_status_update >= MIN_INTERVAL:
+                        should_update = True
+                        self._status_update_requested = False
+                
+                # Perform update if needed
+                if should_update:
+                    await self._update_status_bar_token_usage()
+                    self._last_status_update = now
+                
+                # Sleep before next check
+                await asyncio.sleep(1)
+                
+            except asyncio.CancelledError:
+                # Clean shutdown
+                break
+            except Exception as e:
+                logger.debug(f"Status update loop error: {e}")
+                await asyncio.sleep(1)
 
 
     async def _setup(self):
@@ -638,6 +720,11 @@ class Repl(ReplUI):
         # Tokens command
         elif cmd_lower in ["tokens", "/tokens"]:
             await self._print_token_analysis()
+            return
+
+        # Compress command
+        elif cmd_lower in ["/compress"]:
+            await self._handle_compress()
             return
 
         # Save command
@@ -1653,6 +1740,41 @@ class Repl(ReplUI):
             )
         except Exception as e:
             self.console.print(f"[red]Error loading conversation: {str(e)}[/red]")
+        self.console.print()
+
+    async def _handle_compress(self):
+        """Trigger manual context compression."""
+        self.console.print()
+        self.console.print(
+            "[dim][bold blue]-- COMPRESS ---------------------------------------------------------[/bold blue][/dim]"
+        )
+        self.console.print()
+        
+        try:
+            result = await self._chatroom.compress_chat(self._chat_id)
+            
+            if result.get("success"):
+                # Show compression stats if available
+                compressed_msgs = result.get("compressed_messages", 0)
+                original_tokens = result.get("original_tokens", 0)
+                new_tokens = result.get("new_tokens", 0)
+                
+                self.console.print("[green]✅ Context compression completed[/green]")
+                if compressed_msgs:
+                    saved_tokens = original_tokens - new_tokens
+                    self.console.print(f"[dim]  • Compressed {compressed_msgs} messages[/dim]")
+                    self.console.print(f"[dim]  • Tokens: {original_tokens:,} → {new_tokens:,} (saved {saved_tokens:,})[/dim]")
+                
+                # Refresh status bar token usage to show updated context
+                await self._update_status_bar_token_usage()
+                
+            else:
+                msg = result.get("message", "Compression not available")
+                self.console.print(f"[yellow]⚠ {msg}[/yellow]")
+        
+        except Exception as e:
+            self.console.print(f"[red]Error: {str(e)}[/red]")
+        
         self.console.print()
 
 

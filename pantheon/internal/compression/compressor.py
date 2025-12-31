@@ -264,6 +264,13 @@ class ContextCompressor:
             details_path=result.details_path or "(not saved)",
         )
 
+        # ✅ Simplified: Only store compression LLM cost
+        # Old messages remain in memory and will be counted when using for_llm=False
+        # No need to track compressed_messages_cost separately (avoids double counting)
+        compression_llm_cost = 0.0
+        if hasattr(response, "_metadata"):
+            compression_llm_cost = response._metadata.get("current_cost", 0.0)
+
         # 10. Create compression message
         compression_index = self._count_existing_compressions(messages) + 1
         compression_message = {
@@ -278,6 +285,8 @@ class ContextCompressor:
                 "edited_files": result.edited_files,
                 "compression_index": compression_index,
                 "details_path": result.details_path,
+                # ✅ Simplified: Only store compression cost as current_cost
+                "current_cost": compression_llm_cost,
             },
         }
 
@@ -287,7 +296,8 @@ class ContextCompressor:
 
         logger.info(
             f"Context compressed: {original_tokens} -> {new_tokens} tokens "
-            f"({len(messages_to_compress)} messages)"
+            f"({len(messages_to_compress)} messages), "
+            f"compression cost: ${compression_llm_cost:.4f}"
         )
 
         return CompressionResult(

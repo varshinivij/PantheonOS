@@ -272,11 +272,15 @@ class PantheonTeam(Team):
             f"Submitted learning for {agent_name}, turn_id={turn_id}, chat_id={chat_id[:8] if chat_id else 'N/A'}"
         )
 
-    async def _perform_compression(self, memory: Memory) -> None:
+    async def _perform_compression(self, memory: Memory, force: bool = False) -> dict:
         """Perform context compression on the memory.
 
         Args:
             memory: Memory instance to compress
+            force: If True, bypass chunk size checks and force compression
+            
+        Returns:
+            dict with compression result info
         """
         from pantheon.settings import get_settings
 
@@ -288,6 +292,7 @@ class PantheonTeam(Team):
         result = await self._compressor.compress(
             messages=memory._messages,
             compression_dir=compression_dir,
+            force=force,
         )
 
         if result.compression_message:
@@ -312,6 +317,41 @@ class PantheonTeam(Team):
                 f"Context compression checkpoint inserted at index {compress_end}. "
                 f"Compressed {compress_end - compress_start} messages ({result.original_tokens} -> {result.new_tokens} tokens)."
             )
+            
+            return {
+                "success": True,
+                "compressed_messages": compress_end - compress_start,
+                "original_tokens": result.original_tokens,
+                "new_tokens": result.new_tokens,
+            }
+        
+        # Handle different failure statuses
+        from pantheon.internal.compression.compressor import CompressionStatus
+        
+        if result.status == CompressionStatus.SKIPPED:
+            return {"success": False, "message": "Not enough messages to compress"}
+        elif result.status == CompressionStatus.FAILED_INFLATED:
+            return {"success": False, "message": "Compression would increase token count"}
+        elif result.status == CompressionStatus.FAILED_ERROR:
+            error_msg = result.error or "Unknown compression error"
+            return {"success": False, "message": f"Compression failed: {error_msg}"}
+        
+        return {"success": False, "message": "Compression did not produce a result"}
+
+    async def force_compress(self, memory: Memory) -> dict:
+        """Force context compression regardless of threshold.
+        
+        Args:
+            memory: Memory instance to compress
+            
+        Returns:
+            dict with compression result info
+        """
+        if not self._compressor:
+            return {"success": False, "message": "Compression not enabled in settings"}
+        
+        # Perform compression with force=True to bypass chunk size checks
+        return await self._perform_compression(memory, force=True)
 
     def get_active_agent(self, memory: Memory) -> Agent | RemoteAgent:
         active_agent_name = memory.extra_data.get("active_agent")

@@ -495,6 +495,13 @@ async def openai_embedding(
 
 
 def remove_hidden_fields(content: dict) -> dict:
+    """Remove hidden fields from dict content.
+    
+    If content is not a dict, return as-is.
+    """
+    if not isinstance(content, dict):
+        return content
+    
     content = deepcopy(content)
     if "hidden_to_model" in content:
         hidden_fields = content.pop("hidden_to_model")
@@ -628,15 +635,53 @@ class TimingTracker:
 
 
 def _fallback_token_count(text: str) -> int:
-    """Fallback token counter using tiktoken for unsupported models."""
+    """Fallback token counter with language awareness.
+    
+    Attempts tiktoken first, then falls back to language-aware estimation.
+    
+    Token estimation ratios:
+    - CJK (Chinese/Japanese/Korean): ~1.5 tokens/char
+    - ASCII (English/code): ~0.25 tokens/char (4 chars/token)
+    - Other Unicode: ~0.5 tokens/char (2 chars/token)
+    """
     try:
         import tiktoken
 
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
     except Exception:
-        # Ultimate fallback: rough estimate (4 chars per token for English)
-        return len(text) // 4
+        # Enhanced fallback with CJK detection
+        if not text:
+            return 0
+        
+        cjk_chars = 0
+        ascii_chars = 0
+        other_chars = 0
+        
+        for char in text:
+            code = ord(char)
+            # CJK Unified Ideographs and common CJK ranges
+            if (0x4E00 <= code <= 0x9FFF or      # CJK Unified Ideographs
+                0x3400 <= code <= 0x4DBF or      # CJK Extension A
+                0x3000 <= code <= 0x303F or      # CJK Punctuation
+                0xFF00 <= code <= 0xFFEF or      # Fullwidth Forms
+                0xAC00 <= code <= 0xD7AF or      # Korean Hangul
+                0x3040 <= code <= 0x309F or      # Japanese Hiragana
+                0x30A0 <= code <= 0x30FF):       # Japanese Katakana
+                cjk_chars += 1
+            elif code < 128:  # ASCII
+                ascii_chars += 1
+            else:  # Other Unicode (emojis, symbols, etc.)
+                other_chars += 1
+        
+        # Calculate tokens
+        tokens = (
+            cjk_chars * 1.5 +       # CJK: ~1.5 tokens per char
+            ascii_chars * 0.25 +    # ASCII: ~4 chars per token
+            other_chars * 0.5       # Other: ~2 chars per token
+        )
+        
+        return max(1, int(tokens))
 
 
 def _safe_token_counter(
@@ -665,6 +710,111 @@ def _safe_token_counter(
 
             total += _fallback_token_count(json.dumps(tools))
         return total
+
+
+def calculate_total_cost_from_messages(messages: list[dict]) -> float:
+    """Calculate total cost from message list
+    
+    Uniformly processes all message types, calculating current_cost only once per message.
+    
+    Note: Should pass in the full message list (for_llm=False), including compressed messages.
+    The system naturally calculates only once because:
+    - Compressed assistant messages have their own current_cost
+    - Compression messages only record the cost of compression itself
+    - No duplicate calculations
+    
+    Args:
+        messages: Message list (recommended to use memory.get_messages(for_llm=False))
+    
+    Returns:
+        Total cost (rounded to 4 decimals)
+    """
+    total = 0.0
+    
+    for msg in messages:
+        # Unified processing: read current_cost from all messages
+        total += msg.get("_metadata", {}).get("current_cost", 0)
+    
+    return round(total, 4)
+
+
+def collect_message_stats_lightweight(
+    message: dict,
+    messages: list[dict],
+    model: str,
+) -> None:
+    """Lightweight statistics collection - read usage from _debug fields
+    
+    Only collects essential fields:
+    - total_tokens: actual size of current context
+    - current_cost: current message cost
+    - max_tokens: model's maximum context
+    
+    Data source priority:
+    1. Read from _debug_usage/_debug_cost (populated by call_llm_provider)
+    2. Fallback: manually calculate new messages
+    """
+    meta = message.setdefault("_metadata", {})
+    
+    # ========== 1. Read from _debug fields ==========
+    # call_llm_provider has already stored usage info in _debug_usage
+    if "_debug_usage" in meta:
+        usage = meta["_debug_usage"]
+        
+        # ✅ Read total_tokens (includes prompt + completion)
+        # This is the complete context size for the next call
+        meta["total_tokens"] = usage.get("total_tokens", 0)
+        
+        # ✅ Read current_cost (write if exists, including 0.0)
+        # _debug_cost is calculated by _extract_cost_and_usage, already includes fallback logic
+        if "_debug_cost" in meta:
+            meta["current_cost"] = meta["_debug_cost"]
+        
+        # ✅ Clean up temporary debug fields
+        meta.pop("_debug_cost", None)
+        meta.pop("_debug_usage", None)
+        
+    # ========== 2. Fallback: manually calculate new messages ==========
+    else:
+        # Find the previous assistant message
+        last_assistant_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.get("role") == "assistant" and "_metadata" in msg:
+                last_assistant_idx = i
+                break
+        
+        # Calculate new messages
+        if last_assistant_idx >= 0:
+            # All messages after last assistant + current assistant
+            new_messages = messages[last_assistant_idx + 1:] + [message]
+            
+            # Get previous total_tokens
+            prev_meta = messages[last_assistant_idx].get("_metadata", {})
+            prev_total = prev_meta.get("total_tokens", 0)
+        else:
+            # First message, calculate all
+            new_messages = messages + [message]
+            prev_total = 0
+        
+        try:
+            # Calculate tokens for new portion
+            new_tokens = _safe_token_counter(model, messages=new_messages)
+            
+            # Accumulate
+            meta["total_tokens"] = prev_total + new_tokens
+            
+        except Exception as e:
+            logger.warning(f"Failed to calculate tokens: {e}")
+            meta["total_tokens"] = 0
+    
+    # ========== 3. Max tokens ==========
+    try:
+        from litellm.utils import get_model_info
+        model_info = get_model_info(model)
+        meta["max_tokens"] = model_info.get("max_input_tokens", 200000)
+    except Exception:
+        meta["max_tokens"] = 200000
 
 
 def count_tokens_in_messages(
@@ -767,58 +917,39 @@ def count_tokens_in_messages(
         if target_message:
             meta = target_message.get("_metadata", {})
 
-            # Scenario A: Write Mode (Provider returned debug cost in metadata)
+            # Scenario A: Legacy - Convert _debug_cost to current_cost
+            # (Rarely triggers - collect_message_stats_lightweight handles most cases)
             if "_debug_cost" in meta:
                 current_cost = meta.pop("_debug_cost", 0.0)
-                meta.pop("_debug_usage", None)  # Consume debug usage
-
-                # Calculate total cost from history
-                # Find the most recent previous assistant message with cost data
-                prev_msg = next(
-                    (
-                        m
-                        for m in reversed(messages)
-                        if m is not target_message
-                        and m.get("role") == "assistant"
-                        and "total_cost" in m.get("_metadata", {})
-                    ),
-                    None,
-                )
-
-                previous_total = (
-                    prev_msg["_metadata"]["total_cost"] if prev_msg else 0.0
-                )
-                total_session_cost = previous_total + current_cost
-
-                # Persist updated cost info to metadata
-                meta["current_cost"] = current_cost
+                meta.pop("_debug_usage", None)
+                
+                # Store as current_cost if not already set
+                if "current_cost" not in meta:
+                    meta["current_cost"] = current_cost
+                
+                # Don't calculate total_session_cost here - let Scenario C handle it
 
             # Scenario A': Write Mode (No provider cost, store estimated cost)
             elif "current_cost" not in meta and current_cost > 0:
                 meta["current_cost"] = current_cost
 
-            # Store token counts for compression to read (Always write this)
-            meta["total_tokens"] = int(total_tokens)
+            # Note: total_tokens is now written by collect_message_stats_lightweight
+            # (removed redundant write here to avoid overwriting)
 
             # Ensure metadata dict is attached to message
             if "_metadata" not in target_message:
                 target_message["_metadata"] = meta
 
             # Scenario B: Read Mode (Historical data exists)
-            elif "current_cost" in meta:
+            if "current_cost" in meta and total_session_cost is None:
                 current_cost = meta["current_cost"]
-                total_session_cost = meta.get("total_cost")
+                # ✅ Fixed: Calculate total_cost dynamically, don't read from metadata
+                # (it was never stored there anyway)
 
-        # Scenario C: Fallback estimation (no _debug_cost, no stored total_cost)
-        # Sum up current_cost from each assistant message's metadata
+        # Scenario C: Fallback - calculate total cost from all assistant messages
         if total_session_cost is None:
-            accumulated = 0.0
-            for msg in msgs_to_count:
-                if msg.get("role") == "assistant":
-                    msg_cost = msg.get("_metadata", {}).get("current_cost", 0)
-                    accumulated += msg_cost
-            if accumulated > 0:
-                total_session_cost = round(accumulated, 4)
+            # ✅ Use common utility function
+            total_session_cost = calculate_total_cost_from_messages(msgs_to_count)
 
         return {
             "total": int(total_tokens),

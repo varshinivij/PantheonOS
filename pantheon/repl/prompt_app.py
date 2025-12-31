@@ -189,6 +189,8 @@ class ReplCompleter(Completer):
         ("/v", "Verbose (short)"),
         ("/compact", "Compact output mode"),
         ("/c", "Compact (short)"),
+        # Context management
+        ("/compress", "Force context compression"),
     ]
 
     # File search configuration

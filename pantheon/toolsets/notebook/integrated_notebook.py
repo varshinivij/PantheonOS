@@ -339,6 +339,91 @@ class IntegratedNotebookToolSet(ToolSet):
         return True, ""
 
     # ═══════════════════════════════════════════════════════════
+    # Internal Execute Logic (shared by execute_cell, add_cell, update_cell)
+    # ═══════════════════════════════════════════════════════════
+
+    async def _execute_cell_internal(
+        self,
+        notebook_path: str,
+        cell_id: str,
+        session_id: str,
+    ) -> dict:
+        """
+        Internal execute logic, reusable by add_cell/update_cell/execute_cell.
+        
+        This method handles:
+        - Getting or creating kernel context
+        - Finding cell content
+        - rpy2 auto-initialization for R magic
+        - Executing code and updating notebook
+        
+        Args:
+            notebook_path: Path to notebook file
+            cell_id: Cell identifier
+            session_id: Agent session ID
+            
+        Returns:
+            dict with success, output, kernel_session_id, etc.
+        """
+        try:
+            # Get or create context (this triggers kernel if needed)
+            context = await self._get_or_create_context(notebook_path, session_id)
+
+            # Find existing cell
+            cell_index, cell_data = await self._get_cell_by_id(notebook_path, cell_id)
+
+            if cell_index is None:
+                return {"success": False, "error": f"Cell {cell_id} not found"}
+
+            # Get existing code from cell
+            if cell_data and "source" in cell_data:
+                code = self.notebook_contents._format_source(cell_data["source"])
+            else:
+                code = ""
+
+            # Detect R magic and auto-initialize rpy2 if needed
+            code_stripped = code.strip()
+            needs_rpy2 = (
+                code_stripped.startswith("%%R") or
+                code_stripped.startswith("%R ") or
+                code_stripped.startswith("%R\n") or
+                "\n%R " in code
+            )
+
+            if needs_rpy2 and not context.rpy2_initialized:
+                logger.info(f"Detected R magic, initializing rpy2 for session {context.kernel_session_id[:8]}")
+                init_result = await self.kernel_toolset.execute_request(
+                    RPY2_INIT_CODE,
+                    context.kernel_session_id,
+                    silent=True,
+                    store_history=False,
+                    execution_metadata={"operated_by": "system"},
+                )
+                if init_result.get("success"):
+                    context.rpy2_initialized = True
+                    logger.info("rpy2 initialized successfully")
+                else:
+                    logger.warning(f"rpy2 initialization failed: {init_result.get('error')}")
+
+            # Execute with cell_id (not cell_index for stability)
+            exec_result = await self._execute_and_update(
+                context.kernel_session_id, notebook_path, cell_id, code
+            )
+            # Return stable identifiers (cell_id + kernel_session_id + notebook_path)
+            exec_result["cell_id"] = cell_id
+            exec_result["kernel_session_id"] = context.kernel_session_id
+            exec_result["notebook_path"] = notebook_path
+
+            # Remove metadata to save tokens (it is already saved to file)
+            exec_result.pop("metadata", None)
+
+            return exec_result
+
+        except Exception as e:
+            logger.error(f"_execute_cell_internal failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ═══════════════════════════════════════════════════════════
     # Core Tools
     # ═══════════════════════════════════════════════════════════
 
@@ -434,63 +519,7 @@ class IntegratedNotebookToolSet(ToolSet):
         if not session_id:
             return {"success": False, "error": "No session_id provided"}
 
-        try:
-            # Get or create context (automatic)
-            context = await self._get_or_create_context(notebook_path, session_id)
-
-            # Find existing cell
-            cell_index, cell_data = await self._get_cell_by_id(notebook_path, cell_id)
-
-            if cell_index is None:
-                return {"success": False, "error": f"Cell {cell_id} not found"}
-
-            # Get existing code from cell
-            if cell_data and "source" in cell_data:
-                code = self.notebook_contents._format_source(cell_data["source"])
-            else:
-                code = ""
-
-            # Detect R magic and auto-initialize rpy2 if needed
-            code_stripped = code.strip()
-            needs_rpy2 = (
-                code_stripped.startswith("%%R") or
-                code_stripped.startswith("%R ") or
-                code_stripped.startswith("%R\n") or
-                "\n%R " in code
-            )
-
-            if needs_rpy2 and not context.rpy2_initialized:
-                logger.info(f"Detected R magic, initializing rpy2 for session {context.kernel_session_id[:8]}")
-                init_result = await self.kernel_toolset.execute_request(
-                    RPY2_INIT_CODE,
-                    context.kernel_session_id,
-                    silent=True,
-                    store_history=False,
-                    execution_metadata={"operated_by": "system"},
-                )
-                if init_result.get("success"):
-                    context.rpy2_initialized = True
-                    logger.info("rpy2 initialized successfully")
-                else:
-                    logger.warning(f"rpy2 initialization failed: {init_result.get('error')}")
-
-            # Execute with cell_id (not cell_index for stability)
-            exec_result = await self._execute_and_update(
-                context.kernel_session_id, notebook_path, cell_id, code
-            )
-            # Return stable identifiers (cell_id + kernel_session_id + notebook_path)
-            exec_result["cell_id"] = cell_id
-            exec_result["kernel_session_id"] = context.kernel_session_id
-            exec_result["notebook_path"] = notebook_path
-
-            # Remove metadata to save tokens (it is already saved to file)
-            exec_result.pop("metadata", None)
-
-            return exec_result
-
-        except Exception as e:
-            logger.error(f"execute_cell failed: {e}")
-            return {"success": False, "error": str(e)}
+        return await self._execute_cell_internal(notebook_path, cell_id, session_id)
 
     @tool
     async def add_cell(
@@ -500,6 +529,7 @@ class IntegratedNotebookToolSet(ToolSet):
         content: str = "",
         cell_id: Optional[str] = None,
         position: Optional[str] = None,
+        execute: bool = False,
     ) -> dict:
         """
         Add a new cell to the notebook.
@@ -516,17 +546,22 @@ class IntegratedNotebookToolSet(ToolSet):
                      - None: Append to end
                      - "0", "1", "-1": Insert at specific index (0-based)
                      - "cell_id": Insert AFTER the cell with this ID
+            execute: Execute the cell after adding.
+                    **RECOMMENDED: Use execute=True for code cells** to avoid
+                    a separate execute_cell call. Skipped for markdown/raw cells.
 
         Returns:
             dict with:
             - success: True if cell was added
             - cell_id: The cell identifier
             - notebook_path: Path to the notebook
+            - output: Execution output (only when execute=True and cell_type="code")
         """
         session_id = self.get_session_id()
 
         try:
-            # Get context if exists (don't create kernel for simple edit)
+            # NOTE: When execute=False, we don't trigger kernel (lightweight CRUD)
+            # Get context only if exists (don't create kernel for simple edit)
             context = self._get_context(notebook_path, session_id) if session_id else None
 
             # Call notebook_contents API
@@ -545,6 +580,18 @@ class IntegratedNotebookToolSet(ToolSet):
                 if context:
                     result["kernel_session_id"] = context.kernel_session_id
 
+                # Execute if requested and cell is code type
+                # NOTE: Kernel is started here only when execute=True
+                if execute and cell_type == "code" and session_id:
+                    exec_result = await self._execute_cell_internal(
+                        notebook_path, result["cell_id"], session_id
+                    )
+                    result["output"] = exec_result.get("output")
+                    result["execution_success"] = exec_result.get("success", False)
+                    result["kernel_session_id"] = exec_result.get("kernel_session_id")
+                    if not exec_result.get("success"):
+                        result["execution_error"] = exec_result.get("error")
+
             return result
 
         except Exception as e:
@@ -558,6 +605,7 @@ class IntegratedNotebookToolSet(ToolSet):
         cell_id: str,
         content: str,
         old_content: Optional[str] = None,
+        execute: bool = False,
     ) -> dict:
         """
         Update cell content (supports full replacement or partial replacement).
@@ -568,35 +616,47 @@ class IntegratedNotebookToolSet(ToolSet):
             content: New cell content
             old_content: Optional. If provided, will replace old_content with content.
                         If None/empty, will replace entire cell content.
+            execute: Execute the cell after updating.
+                    **RECOMMENDED: Use execute=True for code cells** to run the
+                    updated code immediately. Skipped for non-code cells.
 
         Returns:
             dict with:
             - success: True if cell was updated
             - cell_id: The cell identifier
             - replacements: Number of replacements made (only when old_content provided)
+            - output: Execution output (only when execute=True and cell is code type)
 
         Examples:
-            # Full replacement (replace entire cell)
-            update_cell(notebook_path, cell_id, content="import numpy as np\\nprint('new code')")
+            # Update and execute in one call (recommended)
+            update_cell(notebook_path, cell_id, content="x = 1", execute=True)
 
-            # Partial replacement (replace specific content - more token efficient)
+            # Partial replacement with execution
             update_cell(notebook_path, cell_id, 
                        content="n_neighbors=30",
-                       old_content="n_neighbors=15")
+                       old_content="n_neighbors=15",
+                       execute=True)
+            
+            # Update only (no execution)
+            update_cell(notebook_path, cell_id, content="x = 1")
         """
         session_id = self.get_session_id()
 
         try:
-            # Get context if exists (don't create kernel for simple edit)
+            # NOTE: When execute=False, we don't trigger kernel (lightweight CRUD)
+            # Get context only if exists (don't create kernel for simple edit)
             context = self._get_context(notebook_path, session_id) if session_id else None
+
+            # Read cell data for partial replacement and cell type check
+            cell_index, cell_data = await self._get_cell_by_id(notebook_path, cell_id)
+            if cell_index is None:
+                return {"success": False, "error": f"Cell {cell_id} not found"}
+            
+            cell_type = cell_data.get("cell_type", "code") if cell_data else "code"
+            replacement_count = None
 
             # Partial replacement mode: replace old_content with content
             if old_content:
-                # Read current cell content
-                cell_index, cell_data = await self._get_cell_by_id(notebook_path, cell_id)
-                if cell_index is None:
-                    return {"success": False, "error": f"Cell {cell_id} not found"}
-
                 # Get source
                 source = self.notebook_contents._format_source(cell_data.get("source", ""))
 
@@ -630,8 +690,20 @@ class IntegratedNotebookToolSet(ToolSet):
                 if context:
                     result["kernel_session_id"] = context.kernel_session_id
 
-                if old_content:
+                if replacement_count is not None:
                     result["replacements"] = replacement_count
+
+                # Execute if requested and cell is code type
+                # NOTE: Kernel is started here only when execute=True
+                if execute and cell_type == "code" and session_id:
+                    exec_result = await self._execute_cell_internal(
+                        notebook_path, cell_id, session_id
+                    )
+                    result["output"] = exec_result.get("output")
+                    result["execution_success"] = exec_result.get("success", False)
+                    result["kernel_session_id"] = exec_result.get("kernel_session_id")
+                    if not exec_result.get("success"):
+                        result["execution_error"] = exec_result.get("error")
 
             return result
 

@@ -490,6 +490,9 @@ class ReplUI:
             "[dim][bold purple]/tokens  [/bold purple][/dim] - Token usage analysis"
         )
         self.console.print(
+            "[dim][bold purple]/compress[/bold purple][/dim] - Force context compression"
+        )
+        self.console.print(
             "[dim][bold purple]/save    [/bold purple][/dim] - Save conversation to (json) file"
         )
         self.console.print(

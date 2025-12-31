@@ -213,8 +213,14 @@ async def get_detailed_token_stats(chatroom, chat_id, team, fallback: dict) -> d
             if hasattr(chatroom, 'memory_manager'):
                 memory = chatroom.memory_manager.get_memory(chat_id)
                 if memory:
-                    raw_messages = memory.get_messages() or []
+                    # ✅ Get root agent messages for token/context statistics
+                    # This prevents context% from being inflated by sub-agent calls
+                    raw_messages = memory.get_messages(execution_context_id=None) or []
                     messages = process_messages_for_model(raw_messages, model)
+                    
+                    # ✅ Get ALL messages for cost calculation (including sub-agents)
+                    # Cost should include all LLM calls, not just root agent
+                    all_messages_for_cost = memory.get_messages() or []
         except Exception as e:
             logger.warning(f"Failed to get messages for token stats: {e}")
 
@@ -225,11 +231,24 @@ async def get_detailed_token_stats(chatroom, chat_id, team, fallback: dict) -> d
 
     if messages:
         try:
+            # Calculate token statistics (root agent only)
             info = count_tokens_in_messages(
                 messages,
                 model,
                 tools=tools
             )
+            
+        
+            # ✅ Recalculate total_cost from ALL messages (including compressed)
+            # Use for_llm=False to get full message history
+            all_messages_for_cost = memory.get_messages(for_llm=False)
+            
+            from pantheon.utils.llm import calculate_total_cost_from_messages
+            total_cost = calculate_total_cost_from_messages(all_messages_for_cost)
+            
+            # Override the cost from count_tokens_in_messages
+            info["total_cost"] = total_cost
+            
             info["model"] = model
             return info
         except Exception as e:

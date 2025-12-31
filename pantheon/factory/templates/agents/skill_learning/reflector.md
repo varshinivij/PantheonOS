@@ -104,7 +104,7 @@ Extract from ACTUAL EXECUTION, not theoretical principles:
 | skill_type | sources | Section |
 |------------|---------|---------|
 | **ATOMIC** | `null` | strategies, patterns, mistakes |
-| **SYSTEMATIC** | **必须创建文件** | patterns, workflows, **guidelines** |
+| **SYSTEMATIC** | **Must create sources files to store skill** | patterns, workflows, **guidelines** |
 
 ### ATOMIC Skill (Inline)
 

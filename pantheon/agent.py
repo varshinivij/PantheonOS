@@ -1110,15 +1110,29 @@ class Agent:
             "end_timestamp": end_timestamp,
         })
 
-        # Step 9: Log timing and tokens
-        timings = tracker.get_all()
-        # Collect token statistics with actual cost from assistant message
-        token_info = count_tokens_in_messages(
-            messages, model, tools=tools, assistant_message=message
+        # Step 9: Collect stats and log timing
+        # ✅ Use lightweight collection for Write mode (O(1))
+        from pantheon.utils.llm import collect_message_stats_lightweight
+        
+        collect_message_stats_lightweight(
+            message=message,
+            messages=messages,
+            model=model,
         )
-        # Format visual token breakdown and warning (if needed)
-        bar_line, summary_line, warning_line = format_token_visualization(token_info)
-        # Log combined timing and token metrics
+        
+        # ✅ Simplified logging using only required metadata fields
+        timings = tracker.get_all()
+        meta = message.get("_metadata", {})
+        
+        # Extract required fields
+        total_tokens = meta.get("total_tokens", 0)
+        max_tokens = meta.get("max_tokens", 200000)
+        current_cost = meta.get("current_cost", 0)
+        
+        # Calculate usage percentage
+        usage_pct = (total_tokens / max_tokens * 100) if max_tokens > 0 else 0
+        
+        # Format log message
         timing_log = (
             f"📊 [Agent:{self.name}][{model}] \n"
             f"⏳ Timing: Total: {total_time:.3f}s | "
@@ -1126,10 +1140,17 @@ class Agent:
             f"Begin: {timings.get('begin_chunk', 0):.3f}s | "
             f"LLM: {timings['llm_api']:.3f}s | "
             f"Tool: {timings.get('tools_conversion', 0):.3f}s for {len(tools or [])} tools \n"
-            f"{bar_line}\n"
-            f"{summary_line}\n"
-            f"{warning_line}"
+            f"💬 Tokens: {total_tokens:,} | "
+            f"Usage: {usage_pct:.1f}% | "
+            f"Cost: ${current_cost:.4f}"
         )
+        
+        # Add warning if usage is high
+        if usage_pct >= 95:
+            timing_log += "\n⚠️  WARNING: Context usage ≥95%"
+        elif usage_pct >= 90:
+            timing_log += "\n⚠️  Warning: Context usage ≥90%"
+        
         logger.info(timing_log)
 
         return message
@@ -1144,7 +1165,14 @@ class Agent:
         model: str | list[str] | None = None,
         context_variables: dict | None = None,
     ):
-        error_count = 0
+        """Try multiple models with fallback, with retry for rate limits."""
+        from pantheon.utils.retry import (
+            retry_on_condition,
+            is_rate_limit_error,
+            RATE_LIMIT_RETRY_CONFIG,
+        )
+        
+        # Prepare model list
         if model is None:
             models = self.models
         else:
@@ -1152,32 +1180,60 @@ class Agent:
                 models = [model] + self.models
             else:
                 models = model + self.models
+        
         if not models:
             raise RuntimeError(f"No model is available. models: {models}")
-        for model in models:
+        
+        error_count = 0
+        last_error = None
+        
+        for model_name in models:
             if error_count > 0:
                 logger.warning(
-                    f"Try to use {model}, because of the error of the previous model."
+                    f"Trying {model_name} due to previous model failure"
                 )
+            
             try:
-                message = await self._acompletion(
-                    history,
-                    model=model,
-                    tool_use=tool_use,
-                    response_format=response_format,
-                    process_chunk=process_chunk,
-                    allow_transfer=allow_transfer,
-                    context_variables=context_variables,
+                # Define completion function for retry
+                async def _do_completion():
+                    return await self._acompletion(
+                        history,
+                        model=model_name,
+                        tool_use=tool_use,
+                        response_format=response_format,
+                        process_chunk=process_chunk,
+                        allow_transfer=allow_transfer,
+                        context_variables=context_variables,
+                    )
+                
+                # Use retry utility for rate limit errors
+                message = await retry_on_condition(
+                    _do_completion,
+                    config=RATE_LIMIT_RETRY_CONFIG,
+                    should_retry=is_rate_limit_error,
+                    log_prefix=f"[{model_name}] ",
                 )
+                
                 return message
+                
             except StopRunning:
                 raise
             except Exception as e:
-                logger.error(f"Error completing with model {model}: {e}")
+                last_error = e
+                if is_rate_limit_error(e):
+                    logger.error(
+                        f"Rate limit exceeded for {model_name} after retries: {e}"
+                    )
+                else:
+                    logger.error(f"Error completing with model {model_name}: {e}")
                 error_count += 1
                 continue
-        else:
-            return {}
+        
+        # All models failed - raise exception instead of returning empty dict
+        raise RuntimeError(
+            f"All {len(models)} model(s) failed after {error_count} attempts. "
+            f"Models tried: {models}. Last error: {last_error}"
+        )
 
     def _render_system_prompt(self, prompt: str, context_variables: dict) -> str:
         """Render system prompt with context variables.
@@ -1617,6 +1673,14 @@ class Agent:
 
         # ============ Unified message processing: Always detect attachments ============
         async def _process_step_message(step_message: dict):
+            # Validate message before processing (prevent empty messages in memory)
+            role = step_message.get("role")
+            if role is None or (isinstance(role, str) and not role.strip()):
+                logger.warning(
+                    f"Dropping invalid message without role: {step_message}"
+                )
+                return  # Skip invalid message
+            
             # Get execution_context_id from ExecutionContext
             if (
                 exec_context.execution_context_id is not None

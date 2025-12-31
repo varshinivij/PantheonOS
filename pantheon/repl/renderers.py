@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.table import Table
+from rich.markup import escape
 
 
 class DisplayMode(Enum):
@@ -264,8 +265,9 @@ class ToolCallRenderer:
 
         if not diff_lines:
             # No unified diff, show simple comparison
-            old_display = old_string[:200] + "..." if len(old_string) > 200 else old_string
-            new_display = new_string[:200] + "..." if len(new_string) > 200 else new_string
+            # Escape dynamic content to prevent Rich tag mismatch errors
+            old_display = escape(old_string[:200] + "..." if len(old_string) > 200 else old_string)
+            new_display = escape(new_string[:200] + "..." if len(new_string) > 200 else new_string)
             for line in old_display.split('\n'):
                 self.console.print(f"  [red]- {line}[/red]")
             for line in new_display.split('\n'):
@@ -278,14 +280,16 @@ class ToolCallRenderer:
             line = line.rstrip('\n')
             if line.startswith('+++') or line.startswith('---'):
                 continue
-            elif line.startswith('@@'):
-                diff_formatted.append(f"[cyan]{line}[/cyan]")
+            # Escape line content to prevent Rich tag errors from dynamic content
+            safe_line = escape(line)
+            if line.startswith('@@'):
+                diff_formatted.append(f"[cyan]{safe_line}[/cyan]")
             elif line.startswith('+'):
-                diff_formatted.append(f"[green]{line}[/green]")
+                diff_formatted.append(f"[green]{safe_line}[/green]")
             elif line.startswith('-'):
-                diff_formatted.append(f"[red]{line}[/red]")
+                diff_formatted.append(f"[red]{safe_line}[/red]")
             else:
-                diff_formatted.append(f"[dim]{line}[/dim]")
+                diff_formatted.append(f"[dim]{safe_line}[/dim]")
 
         diff_text = '\n'.join(diff_formatted)
         self.console.print(Panel(
