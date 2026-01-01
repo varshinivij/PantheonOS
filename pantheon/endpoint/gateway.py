@@ -168,7 +168,7 @@ class UnifiedMCPGateway:
         """
         async with self._lock:
             if name in self._mounted_servers:
-                logger.warning(f"Server '{name}' already mounted")
+                logger.debug(f"Server '{name}' already mounted")
                 return False
 
             # Mount to unified endpoint with prefix

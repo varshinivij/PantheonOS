@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Import suppress_aiohttp_warnings (log.py also registers warning filters on import)
-from pantheon.utils.log import suppress_aiohttp_warnings
+from pantheon.utils.log import suppress_aiohttp_warnings, logger
 
 from rich.text import Text
 from rich.live import Live
@@ -145,9 +145,11 @@ class Repl(ReplUI):
 
         # Command handlers
         from .handlers.builtin.view import ViewCommandHandler
+        from .handlers.builtin.mcp import MCPCommandHandler
         self.handlers: list[CommandHandler] = [
             BashCommandHandler(self.console, self),
             ViewCommandHandler(self.console, self),
+            MCPCommandHandler(self.console, self),
         ]
 
         # prompt_toolkit application for enhanced input
@@ -653,6 +655,10 @@ class Repl(ReplUI):
                              await self.prompt_app.run_async()
                          except (EOFError, KeyboardInterrupt):
                              pass # Suppress stack traces on exit
+                         except Exception as e:
+                             # Log unexpected exceptions instead of letting them propagate
+                             # This prevents "Press ENTER to continue..." or similar prompts
+                             logger.warning(f"Prompt app exception: {e}")
                      finally:
                          # Cancel processing loop on exit
                          processing_task.cancel()

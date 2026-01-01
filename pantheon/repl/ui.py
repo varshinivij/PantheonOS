@@ -99,7 +99,7 @@ def print_agent_message_modern_style(
             console.print(
                 Syntax(formatted, "json", theme="monokai", line_numbers=False)
             )
-        except:
+        except Exception:
             console.print(f"[dim]{content}[/dim]")
 
     # Handle assistant messages with markdown
@@ -502,6 +502,9 @@ class ReplUI:
             "[dim][bold purple]!<cmd>   [/bold purple][/dim] - Execute bash command directly (no LLM)"
         )
         self.console.print(
+            "[dim][bold purple]/view    [/bold purple][/dim] - View file in fullscreen: /view <path>"
+        )
+        self.console.print(
             "[dim][bold purple]/exit    [/bold purple][/dim] - Exit cleanly"
         )
         self.console.print()
@@ -550,6 +553,27 @@ class ReplUI:
         )
         self.console.print(
             "[dim][bold purple]/model   [/bold purple][/dim] - Show/set model: /model | /model <name|tag>"
+        )
+        self.console.print()
+
+        self.console.print(
+            "[dim][bold blue]-- MCP SERVERS ------------------------------------------------------[/bold blue][/dim]"
+        )
+        self.console.print()
+        self.console.print(
+            "[dim][bold purple]/mcp     [/bold purple][/dim] - List all MCP servers and status"
+        )
+        self.console.print(
+            "[dim][bold purple]/mcp start[/bold purple][/dim] - Start MCP server: /mcp start <name>"
+        )
+        self.console.print(
+            "[dim][bold purple]/mcp stop [/bold purple][/dim] - Stop MCP server: /mcp stop <name>"
+        )
+        self.console.print(
+            "[dim][bold purple]/mcp add  [/bold purple][/dim] - Add new server: /mcp add <name> <cmd>"
+        )
+        self.console.print(
+            "[dim][bold purple]/mcp rm   [/bold purple][/dim] - Remove server: /mcp remove <name>"
         )
         self.console.print()
 

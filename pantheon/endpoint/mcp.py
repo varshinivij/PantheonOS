@@ -30,14 +30,42 @@ from typing import Any, Dict, List, Optional, TypedDict
 from pantheon.utils.log import logger
 
 
+# Global MCP log directory (can be set by MCPManager)
+_MCP_LOG_DIR: Optional[Path] = None
+
+
+def _get_mcp_log_path(command: str) -> Path:
+    """Get the log file path for a specific MCP server command.
+    
+    Args:
+        command: The server command string (e.g., "uvx context7")
+        
+    Returns:
+        Path to the server's log file
+    """
+    import hashlib
+    
+    # Use global log dir (set by MCPManager) or default to /tmp
+    log_dir = _MCP_LOG_DIR or Path("/tmp/mcp")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Sanitize command for filename (replace spaces and special chars)
+    # Use hash suffix to avoid collisions
+    safe_name = command.replace(" ", "_").replace("/", "_").replace("\\", "_")[:50]
+    cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
+    
+    return log_dir / f"{safe_name}_{cmd_hash}.log"
+
+
 def _patch_stdio_client_errlog():
-    """Patch MCP SDK's stdio_client to redirect subprocess stderr to log file.
+    """Patch MCP SDK's stdio_client to redirect subprocess stderr to per-server log files.
 
-    This redirects STDIO MCP server stderr (welcome messages, logs) to a dedicated
-    log file instead of Python's sys.stderr, preventing noise in REPL interface
-    while keeping logs accessible for debugging.
-
-    Log file location: {pantheon_dir}/logs/mcp_stdio.log
+    Each STDIO MCP server gets its own log file: {pantheon_dir}/logs/mcp/{server_name}.log
+    
+    This makes it easy to:
+    1. Debug individual servers
+    2. Display server-specific errors in REPL
+    3. Avoid log mixing between servers
 
     Must be called before any STDIO MCP servers are started.
     """
@@ -51,31 +79,39 @@ def _patch_stdio_client_errlog():
         # Store original function
         original_stdio_client = stdio_module.stdio_client
 
-        # Prepare log file
-        from pantheon.settings import get_settings
-
-        log_dir = get_settings().pantheon_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        mcp_log_file = log_dir / "mcp_stdio.log"
-
-        # Open log file in append mode (shared across all STDIO servers)
-        _mcp_errlog = open(mcp_log_file, "a", buffering=1)  # Line buffered
-
-        # Store file handle to prevent GC
-        stdio_module._mcp_errlog_file = _mcp_errlog
+        # Store open log files to prevent GC
+        if not hasattr(stdio_module, "_mcp_log_files"):
+            stdio_module._mcp_log_files = {}
 
         # Create patched version
         def patched_stdio_client(server, errlog=None):
-            # Default to log file instead of sys.stderr
             if errlog is None:
-                errlog = _mcp_errlog
+                # Build full command string for log file identification
+                cmd_str = f"{server.command} {' '.join(server.args)}" if server.args else server.command
+                
+                # Get or create log file for this command
+                log_path = _get_mcp_log_path(cmd_str)
+                
+                # Open in append mode, line buffered
+                log_file = open(log_path, "a", buffering=1)
+                stdio_module._mcp_log_files[cmd_str] = log_file
+                
+                # Write session separator
+                from datetime import datetime
+                log_file.write(f"\n{'='*60}\n")
+                log_file.write(f"Session started at {datetime.now().isoformat()}\n")
+                log_file.write(f"{'='*60}\n")
+                log_file.flush()
+                
+                errlog = log_file
+            
             return original_stdio_client(server, errlog=errlog)
 
         # Apply patch
         stdio_module.stdio_client = patched_stdio_client
         stdio_module._errlog_patched = True
 
-        logger.debug(f"Patched MCP stdio_client to redirect stderr to {mcp_log_file}")
+        logger.debug("Patched MCP stdio_client to use per-server log files")
     except Exception as e:
         logger.warning(f"Failed to patch MCP stdio_client: {e}")
 
@@ -142,34 +178,72 @@ class MCPServerInstance:
 
     config: MCPServerConfig
 
-    # Runtime state
-    status: str = "stopped"  # "running", "stopped", "error"
-    error_message: Optional[str] = None
+    # Runtime state (backing field)
+    _status: str = "stopped"  # "running", "starting", "stopped", "error"
     started_at: Optional[datetime] = None
 
     # STDIO server lifecycle (FastMCP managed)
-    # StdioTransport handles process creation/termination automatically
     stdio_transport: Optional[Any] = None  # StdioTransport instance
     stdio_client: Optional[Any] = None  # FastMCP Client wrapping transport
 
-    # HTTP endpoint for STDIO servers
+    # HTTP server lifecycle
+    http_client: Optional[Any] = None  # FastMCP Client for remote HTTP server
     http_port: Optional[int] = None  # Allocated port number
     http_server_task: Optional[asyncio.Task] = None  # proxy_mcp.run() async task
     fastmcp_proxy: Optional[Any] = None  # FastMCP proxy server
+    
+    @property
+    def status(self) -> str:
+        """Get current status.
+        
+        Status is managed by:
+        - start(): sets to 'starting'
+        - _prewarm_server(): sets to 'running' on success, 'error' on failure
+        - stop(): sets to 'stopped' (preserves 'error')
+        
+        Note: is_connected() is only True during active async with context,
+        so we rely on _status as the source of truth.
+        """
+        return self._status
+    
+    @status.setter
+    def status(self, value: str) -> None:
+        """Set status backing field."""
+        self._status = value
+    
+    @property
+    def logs(self) -> List[str]:
+        """Get recent stderr log lines from this server's log file.
+        
+        Log file is identified by command string (e.g., "uvx context7").
+        """
+        try:
+            # Use command string to find log file
+            log_path = _get_mcp_log_path(self.config.command or "")
+            if not log_path.exists():
+                return []
+            
+            # Read last 50 lines
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()[-50:]
+            
+            # Return non-empty lines (stripped)
+            return [line.rstrip() for line in lines if line.strip()]
+        except Exception:
+            return []
 
-    async def start(self, log_dir: Optional[str] = None) -> bool:
+    async def start(self) -> bool:
         """Start the MCP server
 
         For HTTP type: just mark as running (no process management)
         For STDIO type: create StdioTransport and Client (FastMCP manages process)
-
-        Args:
-            log_dir: Directory for stdout/stderr logging (currently unused for STDIO)
+        
+        Logs are automatically written to per-server files via stdio_client patch.
 
         Returns:
             True if started successfully, False otherwise
         """
-        if self.status == "running":
+        if self.status in ("running", "starting"):
             return True
 
         try:
@@ -198,18 +272,17 @@ class MCPServerInstance:
                 # Create FastMCP client wrapping the transport
                 self.stdio_client = FastMCPClient(self.stdio_transport)
 
-                self.status = "running"
+                # Set to 'starting' - will become 'running' after pre-warm succeeds
+                self.status = "starting"
                 self.started_at = datetime.now()
-                self.error_message = None
 
                 logger.info(
-                    f"Started STDIO MCP server '{self.config.name}' (process managed by FastMCP)"
+                    f"Starting STDIO MCP server '{self.config.name}'..."
                 )
                 return True
 
         except Exception as e:
             self.status = "error"
-            self.error_message = str(e)
             logger.error(f"Failed to start MCP server '{self.config.name}': {e}")
             return False
 
@@ -230,8 +303,10 @@ class MCPServerInstance:
 
         try:
             if self.config.type == MCPServerType.HTTP:
-                # HTTP type: no process to stop
-                self.status = "stopped"
+                # HTTP type: no process to stop, preserve error status
+                if self._status != "error":
+                    self.status = "stopped"
+                self.http_client = None
                 logger.info(f"HTTP MCP server '{self.config.name}' disconnected")
                 return True
 
@@ -255,14 +330,15 @@ class MCPServerInstance:
                         self.stdio_transport = None
                         self.stdio_client = None
 
-                self.status = "stopped"
+                # Preserve error status if it was set (e.g., from failed pre-warm)
+                if self._status != "error":
+                    self.status = "stopped"
                 logger.info(f"STDIO MCP server '{self.config.name}' stopped")
 
             return True
 
         except Exception as e:
             self.status = "error"
-            self.error_message = str(e)
             logger.error(f"Failed to stop MCP server '{self.config.name}': {e}")
             return False
 
@@ -300,7 +376,7 @@ class MCPServerInstance:
                         env[key] = resolved_value
                     else:
                         logger.warning(
-                            f"Environment variable '{env_var_name}' not found"
+                            f"Environment variable '{env_var_name}' not found for '{self.config.name}'"
                         )
                 else:
                     env[key] = value
@@ -327,30 +403,103 @@ class MCPManager:
         log_dir: Optional[str] = None,
         port: int = 3100,
         host: str = "127.0.0.1",
+        config_path: Optional[Path] = None,
     ):
         """Initialize MCP Manager with unified gateway.
 
         Args:
-            log_dir: Directory for server logs
+            log_dir: Directory for MCP server logs (default: {pantheon_dir}/logs/mcp)
             port: Port for unified gateway (default: 3100)
             host: Host address to bind to (default: 127.0.0.1)
+            config_path: Path to mcp.json for config persistence (optional)
         """
         from pantheon.endpoint.gateway import UnifiedMCPGateway
+        global _MCP_LOG_DIR
 
         self.instances: Dict[str, MCPServerInstance] = {}
         self._lock = asyncio.Lock()
-        self.log_dir = log_dir
         self.host = host
         self.port = port
+        self._config_path = config_path
+
+        # Set global log directory for _get_mcp_log_path
+        if log_dir:
+            _MCP_LOG_DIR = Path(log_dir)
+            _MCP_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"MCP log directory: {_MCP_LOG_DIR}")
 
         # Unified gateway replaces multi-port architecture
         self._gateway = UnifiedMCPGateway(port=port, host=host)
 
-        if log_dir:
-            Path(log_dir).mkdir(parents=True, exist_ok=True)
-            logger.info(f"MCP servers log directory: {log_dir}")
-
         logger.info(f"MCP Manager initialized with unified gateway at {host}:{port}")
+
+    def _save_config(self, auto_start_add: Optional[str] = None, auto_start_remove: Optional[str] = None) -> bool:
+        """Save current server configs to mcp.json.
+        
+        Writes to project-level config (.pantheon/mcp.json).
+        Preserves existing settings (host, port) and updates servers + auto_start.
+        
+        Args:
+            auto_start_add: Server name to add to auto_start list
+            auto_start_remove: Server name to remove from auto_start list
+        
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if not self._config_path:
+            logger.warning("No config path set, cannot persist MCP config")
+            return False
+        
+        try:
+            import json
+            from pantheon.settings import load_jsonc
+            
+            # Load existing config to preserve other settings
+            existing = load_jsonc(self._config_path) if self._config_path.exists() else {}
+            
+            # Build servers dict from current instances
+            servers = {}
+            for name, instance in self.instances.items():
+                cfg = instance.config
+                server_entry: Dict[str, Any] = {"type": cfg.type}
+                
+                if cfg.type == MCPServerType.STDIO:
+                    server_entry["command"] = cfg.command
+                    if cfg.env:
+                        server_entry["env"] = cfg.env
+                elif cfg.type == MCPServerType.HTTP:
+                    server_entry["uri"] = cfg.uri
+                
+                if cfg.description:
+                    server_entry["description"] = cfg.description
+                if cfg.mount_prefix and cfg.mount_prefix != name:
+                    server_entry["mount_prefix"] = cfg.mount_prefix
+                
+                servers[name] = server_entry
+            
+            # Update servers section
+            existing["servers"] = servers
+            
+            # Update auto_start list if requested
+            auto_start = existing.get("auto_start", [])
+            if auto_start_add and auto_start_add not in auto_start:
+                auto_start.append(auto_start_add)
+                existing["auto_start"] = auto_start
+            if auto_start_remove and auto_start_remove in auto_start:
+                auto_start.remove(auto_start_remove)
+                existing["auto_start"] = auto_start
+            
+            # Write back as formatted JSON
+            self._config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._config_path, 'w', encoding='utf-8') as f:
+                json.dump(existing, f, indent=4, ensure_ascii=False)
+            
+            logger.info(f"Saved MCP config to {self._config_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save MCP config: {e}")
+            return False
 
     async def load_config(self, config: MCPPoolConfig) -> Dict[str, Any]:
         """Load MCP server configurations from config dictionary
@@ -412,11 +561,13 @@ class MCPManager:
 
         return results
 
-    async def add_config(self, config: MCPServerConfig) -> Dict[str, Any]:
+    async def add_config(self, config: MCPServerConfig, persist: bool = False, auto_start: bool = False) -> Dict[str, Any]:
         """Add a new MCP server configuration
 
         Args:
             config: MCPServerConfig instance
+            persist: If True, save to mcp.json (default: False)
+            auto_start: If True, add to auto_start list in mcp.json (default: False)
 
         Returns:
             Result dict with success status
@@ -432,17 +583,26 @@ class MCPManager:
             self.instances[config.name] = instance
             logger.info(f"Added MCP server configuration: {config.name}")
 
-            return {
+            result = {
                 "success": True,
                 "message": f"MCP server '{config.name}' added successfully",
                 "name": config.name,
+                "persisted": False,
+                "auto_start": auto_start,
             }
+            
+            if persist:
+                auto_start_add = config.name if auto_start else None
+                result["persisted"] = self._save_config(auto_start_add=auto_start_add)
+            
+            return result
 
-    async def remove_config(self, name: str) -> Dict[str, Any]:
+    async def remove_config(self, name: str, persist: bool = False) -> Dict[str, Any]:
         """Remove an MCP server configuration
 
         Args:
             name: Server name
+            persist: If True, save to mcp.json (default: False)
 
         Returns:
             Result dict with success status
@@ -460,10 +620,17 @@ class MCPManager:
             del self.instances[name]
             logger.info(f"Removed MCP server: {name}")
 
-            return {
+            result = {
                 "success": True,
                 "message": f"MCP server '{name}' removed successfully",
+                "persisted": False,
             }
+            
+            if persist:
+                # Also remove from auto_start list
+                result["persisted"] = self._save_config(auto_start_remove=name)
+            
+            return result
 
     async def update_config(self, name: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update an MCP server configuration
@@ -535,26 +702,27 @@ class MCPManager:
 
             instance = self.instances[name]
 
-            # For stdio servers, pass log directory
-            log_dir = (
-                self.log_dir if instance.config.type == MCPServerType.STDIO else None
-            )
-
-            if await instance.start(log_dir=log_dir):
+            if await instance.start():
                 # Mount to unified gateway
                 try:
                     await self._mount_to_gateway(name, instance)
                     results["started"].append(name)
+                    
+                    # Background pre-warm MCP to verify it's working
+                    # Status will be updated async: starting -> running | error
+                    asyncio.create_task(self._prewarm_server(name, instance))
+                        
                 except Exception as e:
                     logger.error(f"Failed to mount '{name}' to gateway: {e}")
                     instance.status = "error"
-                    instance.error_message = f"Gateway mount failed: {str(e)}"
                     await instance.stop()
                     results["errors"].append(f"Failed to mount '{name}': {str(e)}")
                     results["success"] = False
             else:
+                # Get error from logs
+                error_info = "\n".join(instance.logs[-3:]) if instance.logs else "Unknown error"
                 results["errors"].append(
-                    f"Failed to start '{name}': {instance.error_message}"
+                    f"Failed to start '{name}': {error_info}"
                 )
                 results["success"] = False
 
@@ -595,9 +763,22 @@ class MCPManager:
 
         elif instance.config.type == MCPServerType.HTTP:
             from fastmcp import Client
+            import asyncio as _asyncio
 
             # Create client for remote HTTP server
             remote_client = Client(instance.config.uri)
+            instance.http_client = remote_client  # Store for status checks
+            
+            # Validate connection before mounting
+            try:
+                async with _asyncio.timeout(10):  # 10 second timeout
+                    async with remote_client:
+                        # Try to list tools to verify connection
+                        await remote_client.list_tools()
+            except _asyncio.TimeoutError:
+                raise RuntimeError(f"Connection timeout: {instance.config.uri} (10s)")
+            except Exception as e:
+                raise RuntimeError(f"Cannot connect to {instance.config.uri}: {e}")
 
             # Create proxy wrapping the remote client
             proxy = FastMCP.as_proxy(remote_client, name=name)
@@ -610,6 +791,45 @@ class MCPManager:
             logger.debug(
                 f"Mounted HTTP server '{name}' to gateway with prefix '{prefix}'"
             )
+
+    async def _prewarm_server(self, name: str, instance: MCPServerInstance) -> None:
+        """Pre-warm an MCP server by calling list_tools.
+        
+        This triggers internal initialization (loading dependencies, etc.)
+        early in background, reducing first-call latency for agents.
+        
+        Also serves as health check - updates status:
+        - Success: 'starting' -> 'running'
+        - Failure: 'starting' -> 'error'
+        """
+        try:
+            import asyncio as _asyncio
+            
+            # Give the client a moment to initialize
+            await _asyncio.sleep(0.1)
+            
+            if instance.stdio_client:
+                async with _asyncio.timeout(30):  # 30 second timeout for startup
+                    async with instance.stdio_client:
+                        await instance.stdio_client.list_tools()
+            
+            # Success - update status to running
+            instance.status = "running"
+            logger.info(f"MCP server '{name}' started successfully")
+            
+        except Exception as e:
+            logger.warning(f"[PREWARM] MCP '{name}' pre-warm failed: {str(e)}")
+            
+            # Mark server as error since it failed to start properly
+            # Detailed error info is available via instance.logs property
+            instance.status = "error"
+            
+            # Try to stop the failed process
+            try:
+                await instance.stop()
+            except Exception:
+                pass
+    
 
     async def stop_services(self, names: List[str]) -> Dict[str, Any]:
         """Stop specified MCP services.
@@ -640,8 +860,9 @@ class MCPManager:
             if await instance.stop():
                 results["stopped"].append(name)
             else:
+                error_info = "\n".join(instance.logs[-3:]) if instance.logs else "Unknown error"
                 results["errors"].append(
-                    f"Failed to stop '{name}': {instance.error_message}"
+                    f"Failed to stop '{name}': {error_info}"
                 )
                 results["success"] = False
 
@@ -699,13 +920,20 @@ class MCPManager:
         Returns:
             Service info dict
         """
-        uri = self._get_service_uri(instance)
+        # Gateway URI (where this service is mounted on the gateway)
+        gateway_uri = self._get_service_uri(instance)
+        
+        # For HTTP type, also include the original remote URI from config
+        remote_uri = None
+        if instance.config.type == MCPServerType.HTTP:
+            remote_uri = instance.config.uri
 
         return {
             "name": name,
             "type": instance.config.type,
             "status": instance.status,
-            "uri": uri,  # Per-server independent URI
+            "uri": gateway_uri,  # Gateway mount point
+            "remote_uri": remote_uri,  # Original HTTP server URI (for HTTP type)
             "http_port": instance.http_port
             if instance.config.type == MCPServerType.STDIO
             else None,
@@ -713,7 +941,7 @@ class MCPManager:
             if instance.config.type == MCPServerType.STDIO
             else None,
             "description": instance.config.description,
-            "error_message": instance.error_message,
+            "logs": instance.logs,  # Recent stderr log lines
             "started_at": instance.started_at.isoformat()
             if instance.started_at
             else None,

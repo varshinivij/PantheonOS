@@ -51,3 +51,10 @@ If there are some packages not installed, you should install them.
 
 When installing python packages, you should prioritizing using `uv` to install packages if `uv` is available in the environment.
 You can check if `uv` is available by running `uv --version`, and use `uv pip install <package_name>` to install the package.
+
+# CLI Tools
+
+The following CLI tools may be required by other agents. Install them if requested:
+
+- `monolith` - bundles HTML reports with embedded images into a single file (https://github.com/Y2Z/monolith)
+- `tectonic` - lightweight LaTeX compiler, alternative to pdflatex (https://tectonic-typesetting.github.io)

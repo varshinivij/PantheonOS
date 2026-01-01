@@ -108,9 +108,13 @@ you should go back to the step 2 and repeat the process with new hypotheses.
 (The number of loops depends on the work intensity, see the "Work intensity control" section below)
 
 6. Summary: call `reporter` agent to summarize the results and conclusions.
-In this step, you should pass the all the results and paths to the report file from all the sub-agents
-(especially the results/figures/tables/bib files/... from the `biologist` and `analysis_expert` agents) to the `reporter` agent.
-Let reporter agent generate a PDF report file(`report.pdf` in the workdir, NOTE: not a markdown file).
+In this step, you should pass the following information to the `reporter` agent:
+
+- **Summary of user's original research questions and hypotheses** - so reporter can organize content around the research goals
+- **Path to todolist.md** - contains the analysis plan and hypotheses
+- **All analysis results paths** - especially results/figures/tables/bib files from `biologist` and `analysis_expert` agents
+
+Let reporter agent generate both PDF report and HTML report in the workdir.
 When give the instruction to the reporter agent, you just pass the high-level instruction and all necessary information,
 not need to specify the content of the report(Important!).
 

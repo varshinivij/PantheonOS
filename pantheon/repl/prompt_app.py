@@ -45,6 +45,7 @@ from prompt_toolkit.formatted_text import HTML
 
 from .utils import get_animation_frames, get_separator, get_wave_color
 from pantheon.constant import FILE_COMPLETION_IGNORED, PROJECT_ROOT
+from pantheon.utils.log import logger
 
 if TYPE_CHECKING:
     from .core import Repl
@@ -184,6 +185,9 @@ class ReplCompleter(Completer):
         ("/agents", "Show agents in team"),
         ("/agent", "Switch to specific agent"),
         ("/team", "Switch team: /team list | /team <id>"),
+        ("/model", "Show/set model: /model [name|tag]"),
+        # MCP server management
+        ("/mcp", "MCP servers: /mcp [start|stop|add|remove]"),
         # Display modes
         ("/verbose", "Verbose output mode"),
         ("/v", "Verbose (short)"),
@@ -525,14 +529,19 @@ def create_key_bindings(app_instance: "PantheonInputApp") -> KeyBindings:
         """Enter to submit or accept completion."""
         buffer = event.current_buffer
 
-        # If completion menu is open, accept the selected completion
+        # If completion menu is open
         if buffer.complete_state:
             completion = buffer.complete_state.current_completion
             if completion:
+                # Accept the selected completion
                 buffer.apply_completion(completion)
-            return
+                return
+            else:
+                # No completion selected - close menu and submit input
+                buffer.cancel_completion()
+                # Fall through to submit
 
-        # Otherwise submit the input
+        # Submit the input
         text = buffer.text
         if text.strip():
             app_instance.accept_input(buffer)
@@ -764,6 +773,8 @@ class PantheonInputApp:
         )
 
         # Initialize Application
+        # Exception handling: set_exception_handler=False in run_async() suppresses
+        # "Press ENTER to continue..." prompts. Additional catch in core.py logs exceptions.
         self.app = Application(
             layout=self.layout,
             style=self.style,
@@ -931,7 +942,9 @@ class PantheonInputApp:
             self.app.renderer.reset()
         except Exception:
             pass
-        await self.app.run_async()
+        # set_exception_handler=False prevents "Press ENTER to continue..." prompts
+        # when unhandled exceptions occur in the event loop
+        await self.app.run_async(set_exception_handler=False)
 
     def get_processing_formatted_text(self) -> HTML:
         """Generate processing status line content (above input) with wave animation."""

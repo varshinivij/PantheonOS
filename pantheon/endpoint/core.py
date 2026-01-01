@@ -86,15 +86,18 @@ class Endpoint(FileTransferToolSet):
             log_dir=self.log_dir,
         )
 
-        # Initialize MCP Pool with log directory and hostname
-        mcp_log_dir = str(self.log_dir / "mcp-servers")
+        # Initialize MCP Pool with log directory
         # Get MCP config directly from settings (not mixed into EndpointConfig)
         settings = get_settings()
+        mcp_log_dir = str(settings.pantheon_dir / "logs" / "mcp")
         mcp_config = settings.get_mcp_config()
+        # Config path for persistence (project-level .pantheon/mcp.json)
+        mcp_config_path = settings.pantheon_dir / "mcp.json"
         self.mcp_manager: MCPManager = MCPManager(
             log_dir=mcp_log_dir,
             port=mcp_config.get("port", 3100),
             host=mcp_config.get("host", "localhost"),
+            config_path=mcp_config_path,
         )
 
         super().__init__(
