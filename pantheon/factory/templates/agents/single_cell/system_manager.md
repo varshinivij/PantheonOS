@@ -101,37 +101,72 @@ export SOME_HOME=/path/to/something
 Run some python code to check the computational environment.
 Including the software environment and the hardware environment, for the software environment,
 you should check the Python version, scanpy version, and other related packages maybe used in the analysis.
+For R packages you should also check in notebook cells(using R magic for R codes).
 
 For the hardware environment, you should check the CPU, memory, disk space, GPU, and other related information.
 
 # Workflow for software environment installation
 
+> [!IMPORTANT]
+> **Dynamic Installation Strategy**: You are NOT required to install ALL packages in the list below during the initial environment setup.
+> 1. For the **initial environment investigation**, prioritize checking and ensuring only the most essential core tools (e.g., scanpy, anndata, etc.) are available.
+> 2. For all other specialized tools, **only perform the installation when explicitly requested by other agents** (e.g., if `analysis_expert` calls you to fix a missing dependency).
+> 3. Always check if a package is already installed before attempting installation to avoid redundant work.
+
 Basic python packages for single-cell and spatial omics analysis:
 
 **Core packages:**
+
+# Standard scientific stack
 + numpy
 + scipy
 + pandas
+
+# Visualization
 + matplotlib
 + seaborn
+
+# Performance
 + numba
-+ scikit-learn
-+ scikit-image
-+ scikit-misc
++ polars
+
+# Core single-cell/spatial framework
 + scanpy
 + anndata
-+ anndata2ri
 + squidpy
+
+# R interoperability
++ anndata2ri
+
+# Integration & Batch correction
 + harmonypy
 + moscot
 + scvi-tools
+
+# QC & Clustering
 + scrublet
++ leidenalg
++ igraph
+
+# ML & Image utilities
++ scikit-learn
++ scikit-image
++ scikit-misc
+
+# Comparative & Functional analysis
 + gseapy
 + pydeseq2
-+ polars
++ decoupler
+
+# Annotation & Trajectory
++ celltypist
++ scvelo
++ cellrank
++ palantir
 
 ***R packages***
 + BiocManager
+# Ambient RNA correction
 + SoupX
 + celda
 

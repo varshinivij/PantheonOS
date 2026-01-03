@@ -1089,6 +1089,9 @@ class IntegratedNotebookToolSet(ToolSet):
                 - "status": Get kernel status information
                 - "variables": Get current kernel variables
                 - "shutdown": Shutdown kernel (context preserved, can restart later)
+                          **Memory best practice**: Shutdown kernels for completed notebooks
+                          to free memory. Running notebooks with loaded data (e.g., AnnData)
+                          consume significant memory. Too many open notebooks can exhaust memory.
                 - "delete": Delete context completely (shutdown kernel + remove from memory)
 
         Returns:

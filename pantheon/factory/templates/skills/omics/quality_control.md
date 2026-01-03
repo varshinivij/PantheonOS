@@ -25,11 +25,14 @@ Standard workflow for quality control of single-cell RNA-seq data using Scanpy.
 
 These steps MUST be performed on RAW data BEFORE any filtering or normalization.
 
-- [ ] **Step 1**: � **Ambient RNA Assessment** (CONDITIONAL)
-      - Input: Raw counts including empty droplets (if available)
+- [ ] **Step 1**: 🧪 **Ambient RNA Assessment** (REQUIRED if raw matrix exists)
+      - Input: Raw counts including empty droplets
       - Tool: SoupX (if raw matrix available) or DecontX (fallback)
-      - ⚠️ Must be done FIRST if applicable
-      - Skip if: Only filtered matrix available OR contamination < 10%
+      - ⚠️ Must be done FIRST before any other QC steps
+      - **Decision rule**: 
+        - If `raw_feature_bc_matrix/` exists → MUST run SoupX
+        - If only `filtered_feature_bc_matrix/` exists → Run DecontX OR document skip reason
+      - **You MUST document your decision** (see Decision Documentation below)
       
 - [ ] **Step 2**: Calculate QC metrics (MT%, counts, genes)
       - Based on: Corrected counts from Step 1 (or raw counts if Step 1 skipped)
@@ -89,18 +92,19 @@ n_genes_before = 0
 ```
 
 
-## Step 1: � Ambient RNA Assessment (CONDITIONAL - FIRST IF APPLICABLE)
+## Step 1: 🧪 Ambient RNA Assessment (REQUIRED if raw matrix exists)
 
-> [!IMPORTANT]
-> **THIS STEP SHOULD BE DONE FIRST IF DATA IS AVAILABLE**
+> [!CAUTION]
+> **YOU MUST CHECK FOR RAW MATRIX AND DOCUMENT YOUR DECISION**
 > 
-> - This is Step 1 of QC - run it BEFORE calculating QC metrics
-> - SoupX requires both `raw_feature_bc_matrix/` AND `filtered_feature_bc_matrix/`
-> - **When to run**: Raw matrix available AND estimated contamination > 10%
-> - **When to skip**: Only filtered matrix available, OR contamination < 10%
-> - If average contamination > 10%, correction **SHOULD** be applied
+> This step is **conditionally required**:
+> - If `raw_feature_bc_matrix/` exists → **MUST run SoupX**
+> - If only `filtered_feature_bc_matrix/` exists → Attempt DecontX OR document skip reason
+> - This step MUST be done FIRST, before any other QC metrics calculation
 > 
-> ⚠️ If running this step, it MUST be on raw data before any filtering.
+> **Silently skipping this step is not allowed.** Add a markdown cell documenting your decision per the Decision Documentation Principle.
+
+---
 
 ### Background
 When cells break during sample preparation, their RNA is released into the droplet suspension.
@@ -141,21 +145,66 @@ print(f"SoupX available: {use_soupx}")
 %%R -i cellranger_dir -o contamination_rate -o corrected_counts
 
 library(SoupX)
+library(Seurat)
+library(dplyr)
 
-# Load 10X data (automatically finds raw and filtered matrices)
-sc <- load10X(cellranger_dir)
+# 1. Load Data
+# 🚨 CRITICAL: We use load10X by default to ensure clusters are loaded.
+tryCatch({
+    sc <- load10X(cellranger_dir)
+}, error = function(e) {
+    # Fallback if load10X fails (e.g., non-standard folder structure)
+    cat("Standard load10X failed, attempting manual load...\n")
+})
+
+# 2. 🚨 CRITICAL: Ensure Clusters Exist 🚨
+# autoEstCont() WILL FAIL without clusters. 
+# Even if 'analysis' files exist on disk, loading methods often miss them.
+# We MUST perform a check and run quick clustering if needed.
+
+if (!exists("sc")) {
+    stop("Failed to load input data.")
+}
+
+# Check if clusters were loaded successfully
+if (is.null(sc$metaData$clusters)) {
+    cat("ℹ️ Clusters not found in metadata (or .h5 loaded without analysis).\n")
+    cat("🚀 Running quick Seurat clustering for SoupX background estimation...\n")
+    
+    # Create a temporary Seurat object
+    srat <- CreateSeuratObject(counts = sc$toc)
+    
+    # Quick standard pipeline (Fast settings for QC only)
+    srat <- srat %>% 
+        NormalizeData(verbose = FALSE) %>%
+        FindVariableFeatures(nfeatures = 2000, verbose = FALSE) %>%
+        ScaleData(verbose = FALSE) %>%
+        RunPCA(verbose = FALSE) %>%
+        FindNeighbors(dims = 1:10, verbose = FALSE) %>%
+        FindClusters(resolution = 0.5, verbose = FALSE)
+    
+    # Assign clusters to SoupX object
+    sc <- setClusters(sc, setNames(as.character(srat@meta.data$seurat_clusters), colnames(srat)))
+    cat("✓ Quick clustering complete. Clusters assigned.\n")
+} else {
+    cat("✓ Existing clusters detected and loaded.\n")
+}
+
+# 3. Estimate Contamination
 sc <- autoEstCont(sc)
 
 contamination_rate <- sc$fit$rhoEst
-cat("Estimated contamination:", round(contamination_rate * 100, 1), "%\n")
+cat(sprintf("Estimated contamination: %.1f%%\n", contamination_rate * 100))
 
-# Apply correction if > 10%
-if (contamination_rate > 0.10) {
+# 4. Apply Correction
+if (contamination_rate > 0.01 && contamination_rate < 0.5) { 
+    # Apply correction if contamination is reasonable (>1% and <50%)
     corrected_counts <- adjustCounts(sc)
     cat("✓ SoupX correction applied\n")
 } else {
+    # If <1% (clean) or >50% (failed experiment/error), stick to raw
     corrected_counts <- NULL
-    cat("✓ Contamination acceptable, no correction needed\n")
+    cat("✓ No correction applied (Rate too low or suspiciously high)\n")
 }
 ```
 

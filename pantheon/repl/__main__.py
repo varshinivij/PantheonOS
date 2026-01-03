@@ -44,6 +44,7 @@ def start(
     chat_id: str = None,
     log_level: str = None,
     quiet: bool = None,
+    resync: bool = False,
 ):
     """Start Pantheon REPL.
 
@@ -54,11 +55,27 @@ def start(
         chat_id: Resume specific chat by ID.
         log_level: Log level (DEBUG, INFO, WARNING, ERROR). Default: ERROR.
         quiet: Disable all logging. Use --quiet to enable. (default: False)
+        resync: Force resync templates by deleting skills/agents/teams directories. (default: False)
     """
     # Load settings for defaults (CLI > Settings > code defaults)
     from pantheon.settings import get_settings
+    import shutil
 
     settings = get_settings()
+
+    # Resync: delete template directories to force re-copy from package defaults
+    if resync:
+        dirs_to_clean = [
+            settings.skills_dir,
+            settings.agents_dir,
+            settings.teams_dir,
+            settings.prompts_dir,
+        ]
+        for dir_path in dirs_to_clean:
+            if dir_path.exists():
+                shutil.rmtree(dir_path)
+                print(f"🗑️  Cleaned: {dir_path}")
+        print("✅ Template directories cleaned. Will resync from package defaults.")
 
     # Apply defaults: CLI > Settings > code defaults
     memory_dir = memory_dir or settings.get(
