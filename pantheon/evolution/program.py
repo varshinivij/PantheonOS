@@ -312,14 +312,32 @@ class Program:
         Returns:
             Dict mapping feature names to values (0.0 to 1.0)
         """
-        # Combine all file contents for analysis
-        combined_code = "\n\n".join(self.snapshot.files.values())
-        return compute_features(
-            combined_code,
-            feature_dimensions,
-            reference_codes,
-            language="python",
-        )
+        # First check if dimensions are in metrics (evaluation-based features)
+        features: Dict[str, float] = {}
+        code_dimensions = []
+
+        for dim in feature_dimensions:
+            if dim in self.metrics:
+                # Use metric value directly (already in 0-1 range for scores)
+                value = self.metrics[dim]
+                # Clamp to 0-1 range
+                features[dim] = max(0.0, min(1.0, float(value)))
+            else:
+                # Will compute from code
+                code_dimensions.append(dim)
+
+        # Compute remaining dimensions from code
+        if code_dimensions:
+            combined_code = "\n\n".join(self.snapshot.files.values())
+            code_features = compute_features(
+                combined_code,
+                code_dimensions,
+                reference_codes,
+                language="python",
+            )
+            features.update(code_features)
+
+        return features
 
     def feature_bin(
         self,

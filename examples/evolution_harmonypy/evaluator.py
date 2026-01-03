@@ -11,12 +11,14 @@ The combined score balances these metrics for evolution.
 """
 
 import numpy as np
+import pandas as pd
 import time
 import sys
 import importlib.util
 from pathlib import Path
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import silhouette_score
+from sklearn.cluster import KMeans
 from typing import Dict, Any, Tuple
 
 
@@ -79,6 +81,52 @@ def generate_test_data(
     true_labels = np.array(label_list)
 
     return X, batch_labels, true_labels
+
+
+def load_pbmc_data(
+    data_dir: Path,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Load real PBMC data from CSV files.
+
+    Args:
+        data_dir: Directory containing the data files
+
+    Returns:
+        X_train: Training features (n_train x 30)
+        batch_train: Training batch labels
+        X_val: Validation features (n_val x 30)
+        batch_val: Validation batch labels
+    """
+    # Read train data
+    train_df = pd.read_csv(data_dir / "pbmc_3500_full_train.csv")
+    X_train = train_df.iloc[:, :30].values  # PC1-PC30
+    batch_train = train_df["donor"].values
+
+    # Read val data
+    val_df = pd.read_csv(data_dir / "pbmc_3500_full_val.csv")
+    X_val = val_df.iloc[:, :30].values
+    batch_val = val_df["donor"].values
+
+    return X_train, batch_train, X_val, batch_val
+
+
+def generate_pseudo_labels(X: np.ndarray, n_clusters: int = 5) -> np.ndarray:
+    """
+    Generate pseudo cell type labels using K-means clustering.
+
+    Clusters the original (uncorrected) data to create reference labels
+    for evaluating biological structure preservation.
+
+    Args:
+        X: Data matrix (n_cells x n_features)
+        n_clusters: Number of clusters
+
+    Returns:
+        Cluster labels for each cell
+    """
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    return kmeans.fit_predict(X)
 
 
 def compute_batch_mixing_score(
@@ -233,21 +281,38 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
             "error": f"Failed to load harmony.py: {e}",
         }
 
-    # Generate test data
-    X, batch_labels, true_labels = generate_test_data(
-        n_cells=2000,
-        n_features=50,
-        n_batches=3,
-        n_clusters=5,
-        random_state=42,
-    )
+    # Load real PBMC data
+    # Note: Use absolute path because when run via Evolution, __file__ points to temp location
+    import os
+    data_dir = Path(os.environ.get(
+        "HARMONY_DATA_DIR",
+        r"C:\Users\wzxu\Desktop\Pantheon\pantheon-agents\examples\evolution_harmonypy\data"
+    ))
+
+    try:
+        X_train, batch_train, X_val, batch_val = load_pbmc_data(data_dir)
+    except Exception as e:
+        return {
+            "combined_score": 0.0,
+            "error": f"Failed to load PBMC data: {e}",
+        }
+
+    n_train = len(X_train)
+    n_val = len(X_val)
+
+    # Generate pseudo labels on original (uncorrected) train data
+    pseudo_labels_train = generate_pseudo_labels(X_train, n_clusters=5)
+
+    # Merge train + val for Harmony
+    X_all = np.vstack([X_train, X_val])
+    batch_all = np.concatenate([batch_train, batch_val])
 
     # Run harmony and measure time
     try:
         start_time = time.time()
         hm = harmony_module.run_harmony(
-            X,
-            batch_labels,
+            X_all,
+            batch_all,
             n_clusters=50,
             max_iter=10,
             random_state=42,
@@ -263,13 +328,18 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
             "error": f"Harmony execution failed: {e}",
         }
 
+    # Split corrected data back to train and val
+    X_corr_train = X_corrected[:n_train]
+    X_corr_val = X_corrected[n_train:]
+
     # Compute metrics
     try:
-        # Batch mixing (higher = better, weight: 0.4)
-        mixing_score = compute_batch_mixing_score(X_corrected, batch_labels)
+        # Batch mixing on val data (higher = better, weight: 0.4)
+        mixing_score = compute_batch_mixing_score(X_corr_val, batch_val)
 
-        # Biological conservation (higher = better, weight: 0.3)
-        bio_score = compute_bio_conservation_score(X_corrected, X, true_labels)
+        # Biological conservation on train data (higher = better, weight: 0.3)
+        # Using pseudo labels from clustering on original train data
+        bio_score = compute_bio_conservation_score(X_corr_train, X_train, pseudo_labels_train)
 
         # Speed score (faster = better, weight: 0.2)
         # Baseline ~1 second, reward sub-second
@@ -294,6 +364,8 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
             "convergence_score": conv_score,
             "execution_time": execution_time,
             "iterations": len(objectives),
+            "n_train": n_train,
+            "n_val": n_val,
         }
 
     except Exception as e:
@@ -309,12 +381,21 @@ if __name__ == "__main__":
 
     # Use current directory as workspace
     workspace = os.path.dirname(os.path.abspath(__file__))
+
+    print("=" * 50)
+    print("Harmony Evaluator Test (Real PBMC Data)")
+    print("=" * 50)
+    print(f"Workspace: {workspace}")
+    print()
+
     result = evaluate(workspace)
 
     print("Evaluation Results:")
-    print("-" * 40)
+    print("-" * 50)
     for key, value in result.items():
         if isinstance(value, float):
             print(f"  {key}: {value:.4f}")
+        elif isinstance(value, int):
+            print(f"  {key}: {value}")
         else:
             print(f"  {key}: {value}")

@@ -40,6 +40,9 @@ pygments_dark_style = 'github-dark'
 # Generate autosummary pages
 autosummary_generate = True
 
+# Mock imports for modules that may not be available during doc build
+autodoc_mock_imports = ['diff_match_patch', 'frontmatter']
+
 templates_path = ['_templates']
 exclude_patterns = []
 
@@ -68,8 +71,7 @@ html_theme_options = {
     "path_to_docs": "pantheon-agents/docs/source",
     "repository_branch": "main",
     "home_page_in_toc": True,
-    "show_navbar_depth": 1,
-    "collapse_navigation": True,  # Collapse navigation by default
+    "show_navbar_depth": 1,  # Show 2 levels, deeper levels collapsed
     "logo": {
         "image_light": "_static/pantheon.png",
         "image_dark": "_static/pantheon.png",

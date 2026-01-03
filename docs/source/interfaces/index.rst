@@ -93,9 +93,11 @@ Python API
    agent = Agent(
        name="assistant",
        instructions="You are helpful.",
-       model="gpt-4o-mini",
-       tools=[FileManagerToolSet()]
+       model="gpt-4o-mini"
    )
+
+   # Add toolsets at runtime
+   await agent.toolset(FileManagerToolSet("files"))
 
    # Single query
    response = await agent.run("Hello!")
@@ -129,3 +131,11 @@ Choosing an Interface
 - You're building a custom application
 - You need to integrate with other code
 - You want maximum flexibility
+
+.. toctree::
+   :hidden:
+   :maxdepth: 2
+
+   repl/index
+   ui/index
+   api/index

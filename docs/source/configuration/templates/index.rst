@@ -127,3 +127,11 @@ Next Steps
 
 - :doc:`agents` - Agent template reference
 - :doc:`teams` - Team template reference
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   agents
+   teams
+

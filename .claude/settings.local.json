@@ -28,7 +28,18 @@
       "Bash(for file in *.json)",
       "Bash(do echo \"=== $file ===\")",
       "Bash(cat:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "WebFetch(domain:pydata-sphinx-theme.readthedocs.io)",
+      "WebFetch(domain:sphinx-book-theme.readthedocs.io)",
+      "Bash(git -C \"C:\\\\Users\\\\wzxu\\\\Desktop\\\\Pantheon\\\\pantheon-agents\" log --oneline -10)",
+      "Bash(git -C \"C:\\\\Users\\\\wzxu\\\\Desktop\\\\Pantheon\\\\pantheon-agents\" remote -v)",
+      "Bash(start \"\" \"C:\\\\Users\\\\wzxu\\\\Desktop\\\\Pantheon\\\\pantheon-agents\\\\examples\\\\evolution_harmonypy\\\\results\\\\evolution_report.html\")",
+      "Bash(start \"\" \"C:\\\\Users\\\\wzxu\\\\Desktop\\\\Pantheon\\\\pantheon-agents\\\\examples\\\\evolution_harmonypy\\\\results\\\\evolution_report_v3.html\")",
+      "Bash(start \"\" \"C:\\\\Users\\\\wzxu\\\\Desktop\\\\Pantheon\\\\pantheon-agents\\\\examples\\\\evolution_harmonypy\\\\results_new\\\\evolution_report.html\")",
+      "Bash(tasklist:*)",
+      "Bash(git diff:*)",
+      "Bash(git restore:*)",
+      "WebFetch(domain:pantheonos.stanford.edu)"
     ],
     "deny": [],
     "ask": []

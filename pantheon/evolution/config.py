@@ -60,6 +60,7 @@ class EvolutionConfig:
     max_diff_size: int = 5000  # Max diff size bytes
     temperature: float = 0.7  # LLM temperature for mutation
     max_retries: int = 3  # Retries for failed mutations
+    mutation_timeout: int = 120  # Timeout for LLM mutation call (seconds)
 
     # === Model Configuration ===
     mutator_model: str = "normal"
@@ -146,6 +147,7 @@ class EvolutionConfig:
             "max_diff_size": self.max_diff_size,
             "temperature": self.temperature,
             "max_retries": self.max_retries,
+            "mutation_timeout": self.mutation_timeout,
             "mutator_model": self.mutator_model,
             "feedback_model": self.feedback_model,
             "db_path": self.db_path,
@@ -186,6 +188,7 @@ class EvolutionConfig:
             "max_diff_size",
             "temperature",
             "max_retries",
+            "mutation_timeout",
             "mutator_model",
             "feedback_model",
             "db_path",

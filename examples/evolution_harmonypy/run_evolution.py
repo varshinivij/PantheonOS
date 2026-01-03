@@ -34,6 +34,7 @@ async def run_evolution(
     iterations: int = 50,
     output_dir: str = None,
     verbose: bool = False,
+    resume: str = None,
 ):
     """
     Run the evolution process.
@@ -42,6 +43,7 @@ async def run_evolution(
         iterations: Maximum number of evolution iterations
         output_dir: Directory to save results
         verbose: Enable verbose logging
+        resume: Path to resume evolution from
     """
     from pantheon.evolution import EvolutionTeam, EvolutionConfig
     from pantheon.evolution.program import CodebaseSnapshot
@@ -64,6 +66,8 @@ async def run_evolution(
         num_top_programs=3,
         max_parallel_evaluations=2,
         evaluation_timeout=120,
+        feature_dimensions=["mixing_score", "speed_score"],  # Use evaluation metrics as features
+        early_stop_generations=200,  # Don't stop early, run full iterations
         # Use system default model (configured via environment)
         log_level="DEBUG" if verbose else "INFO",
         log_iterations=True,
@@ -111,6 +115,8 @@ Constraints:
     print(f"Evaluator: {evaluator_path}")
     print(f"Iterations: {iterations}")
     print(f"Output: {output_dir or 'None (results not saved)'}")
+    if resume:
+        print(f"Resume from: {resume}")
     print("\n" + "-" * 60)
     print("Starting evolution...\n")
 
@@ -120,6 +126,7 @@ Constraints:
         initial_code=initial_code,
         evaluator_code=evaluator_code,
         objective=objective,
+        resume_from=resume,
     )
 
     # Print results
@@ -161,6 +168,9 @@ Examples:
 
   # Verbose mode
   python run_evolution.py --iterations 50 --verbose
+
+  # Resume from checkpoint
+  python run_evolution.py --iterations 100 --output results/ --resume results/
         """,
     )
 
@@ -181,6 +191,12 @@ Examples:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--resume", "-r",
+        type=str,
+        default=None,
+        help="Resume evolution from checkpoint directory",
+    )
 
     args = parser.parse_args()
 
@@ -189,6 +205,7 @@ Examples:
             iterations=args.iterations,
             output_dir=args.output,
             verbose=args.verbose,
+            resume=args.resume,
         ))
         print(f"\nFinal best score: {result.best_score:.4f}")
     except KeyboardInterrupt:

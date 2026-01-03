@@ -80,8 +80,12 @@ Extend agent capabilities with tools.
 
    agent = Agent(
        name="dev",
-       tools=[FileManagerToolSet()]
+       instructions="You are a developer.",
+       model="gpt-4o"
    )
+
+   # Add toolsets at runtime
+   await agent.toolset(FileManagerToolSet("files"))
 
 See :doc:`toolsets` for available toolsets.
 
@@ -141,3 +145,13 @@ Next Steps
 - :doc:`team` - Team patterns
 - :doc:`toolsets` - Available toolsets
 - :doc:`advanced` - Advanced patterns
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   quickstart
+   agent
+   team
+   toolsets
+   advanced
