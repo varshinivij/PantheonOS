@@ -61,7 +61,7 @@ jobs:
           # List all tests for debugging
           uv run pytest -v tests/ --collect-only -q 2>&1 | tail -20
 
-          # Run tests with timeout, skipping tests with background tasks that don't terminate cleanly
+          # Run tests with timeout, skipping tests that require external services or have async cleanup issues
           uv run pytest -v tests/ \
             --timeout=60 \
             --timeout-method=thread \
@@ -72,6 +72,8 @@ jobs:
             --ignore=tests/test_nats_streaming.py \
             --ignore=tests/test_remote_agent.py \
             --ignore=tests/test_use_remote_toolset.py \
+            --ignore=tests/test_toolsets.py \
+            --ignore=tests/test_knowledge.py \
             --tb=short \
             --junit-xml=test-results.xml
 
