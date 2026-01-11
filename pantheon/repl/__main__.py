@@ -12,7 +12,11 @@ import asyncio
 import os
 import sys
 import logging
+import warnings
 from pathlib import Path
+
+# Warning filters and litellm config are already set in pantheon/__init__.py
+# which runs before this __main__.py
 
 import fire
 from dotenv import load_dotenv

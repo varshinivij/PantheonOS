@@ -6,6 +6,20 @@ from pathlib import Path
 
 from pantheon.toolsets.code import CodeToolSet
 
+# Check if tree-sitter is available
+try:
+    import tree_sitter
+    import tree_sitter_python
+    import tree_sitter_javascript
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not TREE_SITTER_AVAILABLE,
+    reason="tree-sitter not installed"
+)
+
 
 @pytest.fixture
 def temp_toolset():

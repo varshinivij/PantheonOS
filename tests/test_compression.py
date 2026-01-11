@@ -315,11 +315,12 @@ class TestFormatMessagesToText:
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi!"},
         ]
-        
+
         details_path = f"{temp_dir}/test_details.json"
         result = format_messages_to_text(messages, save_details_to=details_path)
-        
-        assert result.details_path == details_path
+
+        # Compare paths using Path for cross-platform compatibility
+        assert Path(result.details_path) == Path(details_path)
         assert os.path.exists(details_path)
         
         with open(details_path) as f:
@@ -346,7 +347,8 @@ class TestFormatMessagesToText:
         assert "... [1000 chars]" in result.text
         # Should have unified note at end
         assert "[NOTE: Some content was truncated." in result.text
-        assert details_path in result.text
+        # Check path is in text (normalize for cross-platform)
+        assert str(Path(details_path)) in result.text or details_path in result.text
 
     def test_no_note_without_details_path(self):
         """Test that no note is added when no details_path."""
@@ -560,18 +562,24 @@ class TestMemoryIntegration:
         assert result[1]["role"] == "user"
         assert result[2]["role"] == "assistant"
 
-    def test_get_messages_removes_metadata(self):
-        """Test that _metadata is removed before LLM."""
+    def test_get_messages_preserves_metadata_for_cost_tracking(self):
+        """Test that _metadata is preserved for cost tracking.
+
+        Note: _metadata is removed later by call_llm_provider before sending to API.
+        Memory.get_messages keeps it for cost tracking purposes.
+        """
         memory = Memory("test")
         memory._messages = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi!", "_metadata": {"cost": 0.01}},
         ]
-        
+
         result = memory.get_messages(for_llm=True)
-        
-        assert "_metadata" not in result[0]
-        assert "_metadata" not in result[1]
+
+        # _metadata is preserved for cost tracking (removed later by call_llm_provider)
+        assert "_metadata" not in result[0]  # User message has no metadata
+        assert "_metadata" in result[1]  # Assistant metadata preserved
+        assert result[1]["_metadata"]["cost"] == 0.01
 
     def test_get_messages_skips_system_in_history(self):
         """Test that system messages in history are skipped."""

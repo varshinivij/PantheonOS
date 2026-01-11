@@ -65,7 +65,7 @@ def _get_parser(lang: str):
     except ImportError:
         raise ImportError(
             "tree-sitter is required for code outline tools. "
-            "Install with: pip install 'pantheon-agents[toolsets]'"
+            "Install with: pip install tree-sitter tree-sitter-python tree-sitter-javascript"
         )
     
     # Load language grammar

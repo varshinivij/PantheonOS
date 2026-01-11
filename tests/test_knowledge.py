@@ -29,6 +29,18 @@ from pathlib import Path
 
 import pytest
 
+# Check if llama_index is available
+try:
+    import llama_index.core
+    LLAMA_INDEX_AVAILABLE = True
+except ImportError:
+    LLAMA_INDEX_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not LLAMA_INDEX_AVAILABLE,
+    reason="llama_index.core not installed"
+)
+
 # 加载环境变量
 from dotenv import load_dotenv
 

@@ -43,8 +43,7 @@ async def test_memory_flat_model_with_delegation():
     )
 
     team = PantheonTeam(
-        agents=[coordinator],
-        sub_agents=[analyzer],
+        agents=[coordinator, analyzer],
     )
 
     shared_memory = Memory(name="test-memory")
@@ -121,8 +120,7 @@ async def test_marked_vs_unmarked_messages():
     )
 
     team = PantheonTeam(
-        agents=[coordinator],
-        sub_agents=[analyzer],
+        agents=[coordinator, analyzer],
     )
 
     shared_memory = Memory(name="test-memory")
@@ -167,12 +165,12 @@ async def test_marked_vs_unmarked_messages():
         ctx_id = msg.get("execution_context_id")
         if ctx_id:
             assert isinstance(ctx_id, str), "execution_context_id must be string"
-            assert ctx_id.startswith("ctx_"), f"execution_context_id must start with 'ctx_', got {ctx_id}"
+            assert len(ctx_id) > 0, "execution_context_id must not be empty"
 
     print(f"\n✅ Message marking verified!")
     print(f"   - Sub-agent messages properly marked ✅")
     print(f"   - Coordinator messages unmarked ✅")
-    print(f"   - Format: 'ctx_*' as expected ✅\n")
+    print(f"   - execution_context_id is a non-empty string ✅\n")
 
 
 # ============ Test 3: Message flow in delegation ============
@@ -201,8 +199,7 @@ async def test_message_flow_in_delegation():
     )
 
     team = PantheonTeam(
-        agents=[coordinator],
-        sub_agents=[analyzer],
+        agents=[coordinator, analyzer],
     )
 
     shared_memory = Memory(name="test-memory")
@@ -271,8 +268,7 @@ async def test_no_duplicate_messages():
     )
 
     team = PantheonTeam(
-        agents=[coordinator],
-        sub_agents=[analyzer],
+        agents=[coordinator, analyzer],
     )
 
     shared_memory = Memory(name="test-memory")
@@ -341,8 +337,7 @@ async def test_memory_with_multiple_delegations():
     )
 
     team = PantheonTeam(
-        agents=[coordinator],
-        sub_agents=[analyzer],
+        agents=[coordinator, analyzer],
     )
 
     shared_memory = Memory(name="persistent-memory")

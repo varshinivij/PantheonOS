@@ -132,6 +132,7 @@ def import_litellm():
     import litellm
 
     litellm.suppress_debug_info = True
+    litellm.set_verbose = False
     return litellm
 
 

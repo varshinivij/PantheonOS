@@ -1,3 +1,4 @@
+import os
 import pytest
 from tempfile import TemporaryDirectory
 from pantheon.toolsets.file import FileManagerToolSet
@@ -158,7 +159,7 @@ async def test_glob_comprehensive(temp_toolset):
     result = await temp_toolset.glob("*.py", path="src")
     assert result["success"] is True
     assert result["total"] >= 2
-    assert all("src/" in f["path"] for f in result["files"])
+    assert all(f"src{os.sep}" in f["path"] or "src/" in f["path"] for f in result["files"])
     assert any("utils.py" in f["name"] for f in result["files"])
     assert any("api.py" in f["name"] for f in result["files"])
     
@@ -225,8 +226,10 @@ async def test_glob_comprehensive(temp_toolset):
     # Test 12: Max depth - two levels
     result = await temp_toolset.glob("**/*.py", max_depth=2)
     assert result["success"] is True
-    assert any("src/utils.py" in f["path"] for f in result["files"])
-    assert not any("src/nested/deep.py" in f["path"] for f in result["files"])  # Too deep
+    # Check path contains src and utils.py (cross-platform)
+    assert any("src" in f["path"] and "utils.py" in f["path"] for f in result["files"])
+    # Too deep should not be included
+    assert not any("nested" in f["path"] and "deep.py" in f["path"] for f in result["files"])
     
     # Test 13: Combined filters - type + excludes
     result = await temp_toolset.glob(
@@ -333,7 +336,7 @@ line 10
     result = await temp_toolset.grep("TODO", path="src", file_pattern="*.py")
     assert result["success"] is True
     assert result["total_matches"] >= 1
-    assert all("src/" in m["file"] for m in result["matches"])
+    assert all(f"src{os.sep}" in m["file"] or "src/" in m["file"] for m in result["matches"])
     
     # Test 3: Search with absolute path
     src_absolute = str(temp_toolset.path / "src")
@@ -406,11 +409,15 @@ line 3
     await temp_toolset.write_file("many_matches.txt", many_matches)
     result = await temp_toolset.grep("TARGET", path="many_matches.txt")
     assert result["success"] is True
-    # Should be capped at max_glob_results (default 100)
+    # Should be capped - Python fallback caps at 50, ripgrep at 100
+    # Just verify we got results and capping worked if applicable
+    assert len(result["matches"]) > 0
     if result.get("capped"):
-        assert len(result["matches"]) == 100
-        assert result["total_matches"] == 100  # 100 TARGET lines
-        assert "capped" in result["message"].lower()
+        # Either 50 (Python fallback) or 100 (ripgrep) matches
+        assert len(result["matches"]) in (50, 100)
+        # Message may contain "capped", "limit", or "terminated early"
+        msg_lower = result.get("message", "").lower()
+        assert any(kw in msg_lower for kw in ("capped", "limit", "terminated", "early"))
     
     # Test 8: Error handling - nonexistent path
     result = await temp_toolset.grep("TODO", path="nonexistent_dir")

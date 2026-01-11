@@ -86,6 +86,25 @@ from pantheon.remote import (
 )
 from pantheon.toolsets.notebook import IntegratedNotebookToolSet
 
+# Check if NATS server is available
+def _check_nats_available():
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 4222))
+        sock.close()
+        return result == 0
+    except:
+        return False
+
+NATS_AVAILABLE = _check_nats_available()
+
+pytestmark = pytest.mark.skipif(
+    not NATS_AVAILABLE,
+    reason="NATS server not running on localhost:4222"
+)
+
 
 @pytest_asyncio.fixture
 async def nats_backend():
@@ -137,7 +156,8 @@ async def notebook_session(notebook_toolset):
     """Notebook session fixture"""
     notebook_path = f"test_streaming_{uuid.uuid4().hex[:8]}.ipynb"
 
-    session_result = await notebook_toolset.create_notebook_session(notebook_path)
+    # Use kernel_toolset for session management
+    session_result = await notebook_toolset.kernel_toolset.create_session()
     assert session_result["success"], f"Failed to create session: {session_result.get('error')}"
 
     session_id = session_result["session_id"]
@@ -145,7 +165,7 @@ async def notebook_session(notebook_toolset):
     yield session_id, notebook_path
 
     # Cleanup
-    await notebook_toolset.shutdown_notebook_session(session_id)
+    await notebook_toolset.kernel_toolset.shutdown_session(session_id)
     # Remove test notebook file
     try:
         Path(notebook_path).unlink(missing_ok=True)

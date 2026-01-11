@@ -260,7 +260,12 @@ class MCPServerInstance:
                 from fastmcp.client.transports import StdioTransport
                 from fastmcp import Client as FastMCPClient
 
-                cmd = shlex.split(self.config.command)
+                # Use posix=False on Windows to handle backslashes correctly
+                import os
+                cmd = shlex.split(self.config.command, posix=(os.name != 'nt'))
+                # On Windows with posix=False, quotes are preserved - strip them
+                if os.name == 'nt':
+                    cmd = [arg.strip('"').strip("'") for arg in cmd]
 
                 # Create StdioTransport - it will manage subprocess lifecycle
                 # Note: subprocess stderr (welcome messages) is handled by FastMCP
@@ -792,11 +797,13 @@ class MCPManager:
             instance.http_client = remote_client  # Store for status checks
             
             # Validate connection before mounting
+            async def _validate_connection():
+                async with remote_client:
+                    # Try to list tools to verify connection
+                    await remote_client.list_tools()
+
             try:
-                async with _asyncio.timeout(10):  # 10 second timeout
-                    async with remote_client:
-                        # Try to list tools to verify connection
-                        await remote_client.list_tools()
+                await _asyncio.wait_for(_validate_connection(), timeout=10)  # 10 second timeout
             except _asyncio.TimeoutError:
                 raise RuntimeError(f"Connection timeout: {instance.config.uri} (10s)")
             except Exception as e:
@@ -826,19 +833,22 @@ class MCPManager:
         """
         try:
             import asyncio as _asyncio
-            
+
             # Give the client a moment to initialize
             await _asyncio.sleep(0.1)
-            
+
             if instance.stdio_client:
-                async with _asyncio.timeout(30):  # 30 second timeout for startup
+                # Python 3.10 compatible timeout
+                async def _prewarm_client():
                     async with instance.stdio_client:
                         await instance.stdio_client.list_tools()
-            
+
+                await _asyncio.wait_for(_prewarm_client(), timeout=30)  # 30 second timeout for startup
+
             # Success - update status to running
             instance.status = "running"
             logger.info(f"MCP server '{name}' started successfully")
-            
+
         except Exception as e:
             logger.warning(f"[PREWARM] MCP '{name}' pre-warm failed: {str(e)}")
             

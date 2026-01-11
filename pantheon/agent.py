@@ -519,6 +519,7 @@ class Agent:
         if max_tool_content_length is not None:
             self.max_tool_content_length = max_tool_content_length
         else:
+            from .settings import get_settings
             self.max_tool_content_length = get_settings().max_tool_content_length
 
         # Provider management (MCP, ToolSet, etc.)
@@ -1489,6 +1490,16 @@ class Agent:
                     await run_func(process_step_message, msg)
 
             if transfer_message:
+                # Add the transfer tool result to history so the next agent sees it
+                # This ensures every tool_call has a corresponding tool response
+                # Without this, OpenAI API will reject: "tool_calls must be followed by tool messages"
+                transfer_tool_result = {
+                    "role": "tool",
+                    "tool_call_id": transfer_message.get("tool_call_id"),
+                    "content": f"Transferred to {transfer_message['content']}",
+                }
+                history.append(transfer_tool_result)
+
                 transfer = AgentTransfer(
                     from_agent=self.name,
                     to_agent=transfer_message["content"],

@@ -60,10 +60,12 @@ class TestRpy2Initialization:
         
         exec_result = await notebook_toolset.execute_cell(notebook_path, add_result["cell_id"])
         assert exec_result["success"]
-        
+
         # Get context and verify rpy2 is not initialized
-        context = notebook_toolset._get_context(notebook_path, "default")
-        assert context is not None
+        # Use the same session_id that execute_cell uses
+        session_id = notebook_toolset.get_session_id()
+        context = notebook_toolset._get_context(notebook_path, session_id)
+        assert context is not None, f"Context not found for {notebook_path} @ {session_id}"
         assert context.rpy2_initialized is False
 
     @pytest.mark.asyncio
@@ -85,7 +87,7 @@ class TestRpy2Initialization:
         exec_result = await notebook_toolset.execute_cell(notebook_path, add_result["cell_id"])
         
         # Check if rpy2_initialized flag is set
-        context = notebook_toolset._get_context(notebook_path, "default")
+        context = notebook_toolset._get_context(notebook_path, notebook_toolset.get_session_id())
         assert context is not None
         # Note: If rpy2 is not installed, initialization will fail but flag remains False
         # This is expected behavior - the test verifies the detection logic works
@@ -141,7 +143,7 @@ class TestRCodeExecution:
         # Execute - should detect %R and initialize rpy2
         exec_result = await notebook_toolset.execute_cell(notebook_path, add_result["cell_id"])
         
-        context = notebook_toolset._get_context(notebook_path, "default")
+        context = notebook_toolset._get_context(notebook_path, notebook_toolset.get_session_id())
         assert context is not None
 
 
@@ -164,7 +166,7 @@ class TestKernelRestartResetRpy2:
         assert exec_result["success"]
         
         # Verify rpy2 was initialized
-        context = notebook_toolset._get_context(notebook_path, "default")
+        context = notebook_toolset._get_context(notebook_path, notebook_toolset.get_session_id())
         assert context is not None
         assert context.rpy2_initialized is True
         
@@ -173,7 +175,7 @@ class TestKernelRestartResetRpy2:
         assert restart_result["success"]
         
         # Verify rpy2_initialized is reset
-        context = notebook_toolset._get_context(notebook_path, "default")
+        context = notebook_toolset._get_context(notebook_path, notebook_toolset.get_session_id())
         assert context is not None
         assert context.rpy2_initialized is False
 

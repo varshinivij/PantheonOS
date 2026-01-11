@@ -4,8 +4,33 @@ These tests verify real server startup, connection, and tool discovery.
 """
 
 import asyncio
+import os
+import shlex
+import sys
 import pytest
 from pathlib import Path
+
+# Check if fastmcp is available
+try:
+    import fastmcp
+    FASTMCP_AVAILABLE = True
+except ImportError:
+    FASTMCP_AVAILABLE = False
+
+# Skip if fastmcp not installed
+pytestmark = pytest.mark.skipif(
+    not FASTMCP_AVAILABLE,
+    reason="fastmcp not installed"
+)
+
+
+def quote_path(path: str) -> str:
+    """Cross-platform path quoting for shell commands."""
+    if os.name == 'nt':  # Windows
+        # Windows uses double quotes
+        return f'"{path}"'
+    else:
+        return quote_path(path)
 
 
 class TestGatewayE2E:
@@ -121,7 +146,7 @@ if __name__ == "__main__":
             "servers": {
                 "echo": {
                     "type": "stdio",
-                    "command": f"python {echo_server_script}",
+                    "command": f"{sys.executable} {quote_path(echo_server_script)}",
                     "description": "Test echo server"
                 }
             }
@@ -134,18 +159,20 @@ if __name__ == "__main__":
         assert result["success"]
         assert "echo" in result["started"]
         
-        # Wait a moment for server to fully initialize
-        await asyncio.sleep(0.5)
-        
-        # Connect to unified gateway and verify tools
+        # Wait for server to fully initialize with retry
+        tool_names = []
         try:
-            async with Client(manager.get_unified_uri()) as client:
-                tools = await client.list_tools()
-                tool_names = [t.name for t in tools]
-                
-                # Should have prefixed tools
-                assert "echo_echo" in tool_names
-                assert "echo_reverse" in tool_names
+            for attempt in range(10):  # Retry up to 10 times
+                await asyncio.sleep(1.0)  # Wait 1 second between attempts
+                async with Client(manager.get_unified_uri()) as client:
+                    tools = await client.list_tools()
+                    tool_names = [t.name for t in tools]
+                    if "echo_echo" in tool_names:
+                        break  # Server is ready
+
+            # Should have prefixed tools
+            assert "echo_echo" in tool_names, f"Expected 'echo_echo' in {tool_names}"
+            assert "echo_reverse" in tool_names, f"Expected 'echo_reverse' in {tool_names}"
         finally:
             # Cleanup
             await manager.stop_services(["echo"])
@@ -165,22 +192,26 @@ if __name__ == "__main__":
             "servers": {
                 "test": {
                     "type": "stdio", 
-                    "command": f"python {echo_server_script}",
+                    "command": f"{sys.executable} {quote_path(echo_server_script)}",
                 }
             }
         }
         await manager.load_config(config)
         await manager.start_services(["test"])
-        await asyncio.sleep(0.5)
-        
+
         try:
-            # Use MCPProvider (like real code does)
+            # Use MCPProvider with retry (like real code does)
             provider = MCPProvider.get_instance(manager.get_unified_uri())
-            tools = await provider.list_tools()
-            
-            assert len(tools) >= 2  # echo and reverse
-            tool_names = [t.name for t in tools]
-            assert "test_echo" in tool_names
+            tool_names = []
+            for attempt in range(10):  # Retry up to 10 times
+                await asyncio.sleep(1.0)
+                tools = await provider.list_tools()
+                tool_names = [t.name for t in tools]
+                if "test_echo" in tool_names:
+                    break
+
+            assert len(tools) >= 2, f"Expected at least 2 tools, got {len(tools)}"
+            assert "test_echo" in tool_names, f"Expected 'test_echo' in {tool_names}"
         finally:
             await manager.stop_services(["test"])
             await manager._gateway.stop_gateway()
@@ -224,14 +255,16 @@ if __name__ == "__main__":
             "servers": {
                 "pkgtest": {
                     "type": "stdio",
-                    "command": f"python {sample_mcp_server}",
+                    "command": f"{sys.executable} {quote_path(sample_mcp_server)}",
                 }
             }
         }
         await manager.load_config(config)
         await manager.start_services(["pkgtest"])
-        await asyncio.sleep(0.5)
-        
+
+        # Wait for server to be ready
+        await asyncio.sleep(2.0)
+
         # Set env var for Package Runtime
         monkeypatch.setenv("ENDPOINT_MCP_URI", manager.get_unified_uri())
         

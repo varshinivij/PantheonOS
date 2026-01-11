@@ -6,6 +6,10 @@ Supports both text-only models (DALL-E, Imagen) and multimodal models (Gemini Fl
 """
 
 import litellm
+
+# Suppress litellm debug output (Provider List message)
+litellm.suppress_debug_info = True
+litellm.set_verbose = False
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.vision import (
     ImageStore,

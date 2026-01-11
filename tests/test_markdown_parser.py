@@ -593,11 +593,6 @@ def test_parse_agent_preserves_prompts_until_prepare_team(tmp_path):
         """,
     )
 
-    # Use custom resolver for this test
-    from pantheon.factory import template_io
-    original_resolver = template_io._prompt_resolver
-    template_io._prompt_resolver = PromptResolver(prompts_dir)
-
     try:
         parser = UnifiedMarkdownParser()
         agent = parser.parse_file(agent_path)
@@ -607,6 +602,12 @@ def test_parse_agent_preserves_prompts_until_prepare_team(tmp_path):
         assert "## Custom Strategy" not in agent.instructions
 
         manager = TemplateManager(work_dir=tmp_path)
+
+        # Use custom resolver for this test - must be set AFTER TemplateManager init
+        # because TemplateManager.__init__ calls init_prompt_resolver which overwrites it
+        from pantheon.factory import template_io
+        original_resolver = template_io._prompt_resolver
+        template_io._prompt_resolver = PromptResolver(prompts_dir)
         team = TeamConfig(
             id="team",
             name="Team",
@@ -891,11 +892,6 @@ def test_parse_agent_with_parameterized_prompt(tmp_path):
         """,
     )
 
-    # Use custom resolver for this test
-    from pantheon.factory import template_io
-    original_resolver = template_io._prompt_resolver
-    template_io._prompt_resolver = PromptResolver(prompts_dir)
-
     try:
         parser = UnifiedMarkdownParser()
         agent = parser.parse_file(agent_path)
@@ -903,6 +899,11 @@ def test_parse_agent_with_parameterized_prompt(tmp_path):
         assert "{{skills_param" in agent.instructions
 
         manager = TemplateManager(work_dir=tmp_path)
+
+        # Use custom resolver for this test - must be set AFTER TemplateManager init
+        from pantheon.factory import template_io
+        original_resolver = template_io._prompt_resolver
+        template_io._prompt_resolver = PromptResolver(prompts_dir)
         team = TeamConfig(
             id="team",
             name="Team",

@@ -2,8 +2,29 @@
 name = "pantheon-agents"
 description = "A framework for building distributed evolvable multi-agent system."
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Weize Xu"},
+    {name = "Quan Zhong"},
+    {name = "Zehua Zeng"},
+    {name = "Xuehai Wang"},
+]
+keywords = ["multi-agent", "llm", "ai", "distributed", "mcp", "autonomous-agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
+    # Core
     "tomli>=2.0.1; python_version < '3.11'",
     "diff-match-patch>=20241021",
     "executor-engine>=0.3.3",
@@ -21,10 +42,31 @@ dependencies = [
     "diskcache",
     "python-frontmatter>=1.1.0",
     "prompt-toolkit>=3.0.50",
+    # Toolsets
+    "ddgs>=9.5.2",
+    "crawl4ai>=0.5.0",
+    "matplotlib>=3.10.3",
+    "pandas",
+    "cloudpickle>=3.0.0",
+    "PyMuPDF>=1.25.5",
+    "lancedb>=0.20.0",
+    "jupyter-client>=8.0.0",
+    "ipykernel>=6.25.0",
+    "nbformat>=5.10.0",
+    "jedi>=0.19.0",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-python>=0.24.0",
+    "tree-sitter-javascript>=0.24.0",
+    # Server
+    "nats-server-bin>=2.10.0",
 ]
 dynamic = ["version"]
 
-# CLI entry removed - now in separate pantheon-cli package
+[project.urls]
+Homepage = "https://github.com/aristoteleo/pantheon-agents"
+Repository = "https://github.com/aristoteleo/pantheon-agents"
+Issues = "https://github.com/aristoteleo/pantheon-agents/issues"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -42,28 +84,9 @@ slack = [
     "slack-sdk",
     "slack-bolt",
 ]
-toolsets = [
-    "ddgs>=9.5.2",
-    "crawl4ai>=0.5.0",
-    "matplotlib>=3.10.3",
-    "pandas",
-    "cloudpickle>=3.0.0",
-    "aiofiles>=24.0.0",
-    "PyMuPDF>=1.25.5",
-    "lancedb>=0.20.0",
-    "jupyter-client>=8.0.0",
-    "ipykernel>=6.25.0",
-    "nbformat>=5.10.0",
-    "jedi>=0.19.0",
-    # Code outline tools (tree-sitter)
-    "tree-sitter>=0.24.0",
-    "tree-sitter-python>=0.24.0",
-    "tree-sitter-javascript>=0.24.0",
-    # R language support for notebooks
+r = [
+    # R language support for notebooks (requires R installed on system)
     "rpy2>=3.5.0",
-]
-server = [
-    "nats-server-bin>=2.10.0",
 ]
 knowledge = [
     "llama-index-core>=0.11.0",
@@ -76,7 +99,6 @@ knowledge = [
     "fastembed>=0.2.0",
     "llama-index-postprocessor-flashrank-rerank>=0.2.0",
     "llama-index-postprocessor-cohere-rerank",
-    "nbconvert"
 ]
 
 [dependency-groups]
@@ -85,8 +107,6 @@ dev = [
     "ipython>=8.30.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.0",
-    "crawl4ai>=0.5.0",
-    "duckduckgo-search>=7.1.1",
     "pip>=24.3.1",
     "textual-dev>=1.7.0",
     "build>=1.2.2.post1",
@@ -95,7 +115,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = {find = {}}
+packages = {find = {where = ["."], exclude = ["tests*", "examples*", "tmp*", "try*", "docs*"]}}
 
 [tool.setuptools.package-data]
 "pantheon.factory" = [
@@ -103,9 +123,13 @@ packages = {find = {}}
     "templates/**/*.json",
     "templates/*.json",
 ]
+"pantheon.toolsets.database_api" = [
+    "schemas/*.json",
+]
 
 [tool.setuptools.dynamic]
-version = {attr = "pantheon.__version__"} 
+version = {attr = "pantheon.__version__"}
 
-[behavior]
-venv-mark-sync-ignore = true
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

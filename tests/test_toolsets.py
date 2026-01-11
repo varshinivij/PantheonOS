@@ -1,4 +1,7 @@
+import socket
 import sys
+
+import pytest
 
 from pantheon.toolset import tool, ToolSet, run_toolsets
 from pantheon.remote import connect_remote
@@ -9,7 +12,23 @@ from pantheon.toolsets.julia.julia_interpreter import JuliaInterpreterToolSet
 from pantheon.toolsets.shell import ShellToolSet
 from executor.engine import Engine, ProcessJob
 
-import pytest
+# Check if NATS server is available
+def _check_nats_available():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 4222))
+        sock.close()
+        return result == 0
+    except:
+        return False
+
+NATS_AVAILABLE = _check_nats_available()
+
+pytestmark = pytest.mark.skipif(
+    not NATS_AVAILABLE,
+    reason="NATS server not running on localhost:4222"
+)
 
 
 async def test_remote_toolset():

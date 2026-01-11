@@ -12,6 +12,7 @@ Covers:
 
 import asyncio
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -22,6 +23,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 os.environ["PANTHEON_REMOTE_BACKEND"] = "nats"
 os.environ["NATS_SERVERS"] = "nats://localhost:4222"
+
+# Check if NATS server is available
+def _check_nats_available():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 4222))
+        sock.close()
+        return result == 0
+    except:
+        return False
+
+NATS_AVAILABLE = _check_nats_available()
+
+pytestmark = pytest.mark.skipif(
+    not NATS_AVAILABLE,
+    reason="NATS server not running on localhost:4222"
+)
 
 from pantheon.remote import RemoteBackendFactory, RemoteConfig
 

@@ -142,9 +142,11 @@ class UnifiedMCPGateway:
             # Cancel the task
             self._server_task.cancel()
             try:
-                # Wait for task to finish cleanup
-                async with asyncio.timeout(5.0):
-                    await self._server_task
+                # Wait for task to finish cleanup (Python 3.10 compatible)
+                await asyncio.wait_for(
+                    asyncio.shield(self._server_task),
+                    timeout=5.0
+                )
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             except Exception as e:

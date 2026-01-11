@@ -41,13 +41,13 @@ class VisionInput(BaseModel):
 
 
 def vision_input(
-    prompt: str, image_paths: list[str] | str, from_path: bool = False
+    prompt: str, image_paths: list[str] | list[Path] | str | Path, from_path: bool = False
 ) -> VisionInput:
     """Create a VisionInput from prompt and image paths/URLs.
 
     Args:
         prompt: Text prompt
-        image_paths: Image paths or URLs
+        image_paths: Image paths or URLs (can be str, Path, or list of either)
         from_path: If True, use file:// paths (will be expanded to Base64 before LLM call)
 
     Returns:
@@ -58,7 +58,7 @@ def vision_input(
         conversion happens in expand_image_references_for_llm() just before the
         LLM API call, ensuring efficient Memory storage.
     """
-    if isinstance(image_paths, str):
+    if isinstance(image_paths, (str, Path)):
         image_paths = [image_paths]
 
     if from_path:

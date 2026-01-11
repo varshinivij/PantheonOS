@@ -41,7 +41,18 @@
       "Bash(git restore:*)",
       "WebFetch(domain:pantheonos.stanford.edu)",
       "Bash(open:*)",
-      "Bash(timeout 60 python:*)"
+      "Bash(timeout 60 python:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout 5 python:*)",
+      "Bash(tar:*)",
+      "Bash(pip show:*)",
+      "Bash(conda create:*)",
+      "Bash(conda activate:*)",
+      "Bash(conda run:*)",
+      "Bash(C:/Users/wzxu/miniconda3/envs/pantheon-test/python.exe:*)",
+      "Bash(timeout 10 C:/Users/wzxu/miniconda3/envs/pantheon-test/python.exe -m pantheon.repl:*)",
+      "Bash(echo:*)",
+      "Bash(conda env remove:*)"
     ],
     "deny": [],
     "ask": []

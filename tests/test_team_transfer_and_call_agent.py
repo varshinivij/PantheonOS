@@ -69,10 +69,10 @@ Explain what financial metrics mean for investors.""",
         model=TEST_MODEL,
     )
 
-    # Create team with these team agents
+    # Create team with these team agents (allow_transfer=True enables transfer_to_agent tool)
     team = PantheonTeam(
         agents=[general_assistant, financial_analyst],
-        sub_agents=[],
+        allow_transfer=True,
     )
 
     # Run team with a question that should trigger transfer
@@ -160,10 +160,9 @@ You have access to data analysis tools and statistical methods.""",
         model=TEST_MODEL,
     )
 
-    # Create team with team agent and sub-agent
+    # Create team with all agents (call_agent works between any agents)
     team = PantheonTeam(
-        agents=[research_coordinator],
-        sub_agents=[data_analyzer],
+        agents=[research_coordinator, data_analyzer],
     )
 
     # Run team with a question that should trigger call_agent
@@ -238,9 +237,10 @@ calculate metrics, identify trends, and provide data-driven insights.""",
         model=TEST_MODEL,
     )
 
+    # Create team with all agents (allow_transfer=True for transfer + call_agent)
     team = PantheonTeam(
-        agents=[general_coordinator, decision_specialist],
-        sub_agents=[data_analyzer],
+        agents=[general_coordinator, decision_specialist, data_analyzer],
+        allow_transfer=True,
     )
 
     response = await team.run(

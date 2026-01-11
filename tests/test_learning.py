@@ -397,22 +397,22 @@ This is the full content body that stays in the file only.
 """)
 
         skill = parse_skill_from_file(skill_file, skills_dir)
-        
+
         assert skill is not None
         assert skill.id == "my-workflow"
-        # For file-based skills: content = description (short summary)
-        # Full content stays in file only, accessed via sources
-        assert skill.content == "A workflow for doing X"
+        # For file-based skills: content = None (full content stays in source file)
+        # description from front matter is used for display
+        assert skill.content is None
         assert skill.description == "A workflow for doing X"
         assert skill.section == "workflows"
         assert skill.tags == ["example"]
         assert skill.is_user_defined()
 
     def test_parse_skill_from_file_missing_required_fields(self, skills_dir):
-        """Test that files without id or description are skipped."""
+        """Test that files without id are skipped (description is optional)."""
         from pantheon.internal.learning.skill_loader import parse_skill_from_file
 
-        # Create file without description
+        # Create file without description - should still work (description optional)
         no_desc = skills_dir / "no-desc.md"
         no_desc.write_text("""---
 id: no-desc
@@ -421,9 +421,11 @@ id: no-desc
 """)
 
         skill = parse_skill_from_file(no_desc, skills_dir)
-        assert skill is None
+        assert skill is not None  # description is optional
+        assert skill.id == "no-desc"
+        assert skill.description is None
 
-        # Create file without id
+        # Create file without id - should be skipped (id is required)
         no_id = skills_dir / "no-id.md"
         no_id.write_text("""---
 description: No id here
@@ -463,7 +465,8 @@ description: Second workflow
         assert loaded == 2
         assert skillbook.get_skill("workflow1") is not None
         assert skillbook.get_skill("workflow2") is not None
-        assert "First workflow" in skillbook.get_skill("workflow1").content
+        # File-based skills have content=None, check description instead
+        assert skillbook.get_skill("workflow1").description == "First workflow"
 
     def test_skill_loader_preserves_ratings(self, skills_dir):
         """Test that SkillLoader preserves existing ratings when updating."""
@@ -495,12 +498,12 @@ section: strategies
         loader = SkillLoader(skills_dir, skillbook)
         loader.load_and_merge(cleanup_orphans=False)
 
-        # Verify content was updated but ratings preserved
-        # For file-based skills: content = description
+        # Verify description was updated but ratings preserved
         skill = skillbook.get_skill("existing-skill")
         assert skill is not None
-        assert skill.content == "Updated content"
+        # Description should be updated from file front matter
         assert skill.description == "Updated content"
+        # Ratings should be preserved from existing skill
         assert skill.helpful == 10
         assert skill.harmful == 2
 
@@ -1508,13 +1511,13 @@ Please acknowledge that you understand this rule and will apply it.
         if final_skill_count > initial_skill_count:
             print("\n✅ SUCCESS: New skill(s) learned!")
             
-            # Check if type hints are mentioned in any skill
-            type_hint_mentioned = any(
-                "type" in skill.content.lower() or 
-                "hint" in skill.content.lower() or
-                "parameter" in skill.content.lower()
-                for skill in new_skills
-            )
+            # Check if type hints are mentioned in any skill (content or description)
+            def check_skill_text(skill):
+                text = (skill.content or "") + " " + (skill.description or "")
+                text_lower = text.lower()
+                return "type" in text_lower or "hint" in text_lower or "parameter" in text_lower
+
+            type_hint_mentioned = any(check_skill_text(skill) for skill in new_skills)
             print(f"Type hints mentioned in skills: {type_hint_mentioned}")
         else:
             print("\n⚠️ No new skills added (LLM may not have extracted learnable pattern)")

@@ -162,6 +162,10 @@ def setup_file_logging(
 warnings.filterwarnings("ignore", message="Unclosed client session", category=ResourceWarning)
 warnings.filterwarnings("ignore", message="Unclosed connector", category=ResourceWarning)
 
+# Suppress websockets deprecation warnings from uvicorn
+warnings.filterwarnings("ignore", message="websockets.legacy is deprecated", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="websockets.server.WebSocketServerProtocol is deprecated", category=DeprecationWarning)
+
 
 def suppress_aiohttp_warnings(loop, context) -> None:
     """Custom asyncio exception handler to suppress aiohttp cleanup warnings.
