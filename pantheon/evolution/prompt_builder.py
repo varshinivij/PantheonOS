@@ -10,7 +10,9 @@ Constructs prompts for the mutator agent with:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import math
+import random
+from typing import Any, Dict, List, Optional, Tuple
 
 from .program import Program
 
@@ -129,6 +131,82 @@ Do NOT output SEARCH/REPLACE blocks - just describe what should be changed.
 """
 
 
+# Exploration direction section (algorithm-level improvements)
+ANALYZER_EXPLORATION_SECTION = """
+## Optimization Direction: Algorithm-Level Exploration
+
+You are in the **EXPLORATION** phase. Focus on **fundamental algorithmic changes**, NOT code-level optimizations.
+
+### IMPORTANT: What IS vs IS NOT Algorithm-Level
+
+**IS Algorithm-Level (what you should propose):**
+- Changing the objective function or loss function
+- Replacing the optimization method (e.g., EM → gradient descent, coordinate descent → Newton)
+- Modifying the mathematical model (e.g., soft clustering → hard clustering, different distance metrics)
+- Adding/removing regularization terms or constraints
+- Changing convergence criteria fundamentally
+- Introducing new algorithmic components (e.g., momentum, adaptive learning rates)
+- Reformulating the problem mathematically
+
+**IS NOT Algorithm-Level (avoid these - save for exploitation phase):**
+- Vectorizing loops
+- Caching intermediate results
+- Memory optimization
+- Using faster library functions
+- Numerical stability tricks (log-sum-exp, etc.)
+- Code refactoring without changing the math
+
+### How to Think
+
+1. **Understand the Problem First**: What is this algorithm trying to solve? What is the objective?
+2. **Question Core Assumptions**: Why this particular formulation? Are there alternatives in the literature?
+3. **Consider Trade-offs**: Could a different approach achieve better quality even if slower?
+
+### Example Algorithmic Changes (for inspiration)
+
+- Replace one optimization method with another (e.g., iterative → closed-form, greedy → global)
+- Change the objective function (add/remove/modify terms)
+- Use a different mathematical formulation for the same problem
+- Introduce adaptive or learnable parameters where fixed constants exist
+- Change hard constraints to soft penalties or vice versa
+- Replace a heuristic with a principled approach, or simplify an over-engineered solution
+
+### Your Task
+
+Propose **1-2 bold algorithmic changes** that modify the mathematical formulation or optimization strategy. Do NOT propose code optimizations like "vectorize this loop" or "cache this computation".
+"""
+
+
+# Exploitation direction section (implementation-level improvements)
+ANALYZER_EXPLOITATION_SECTION = """
+## Optimization Direction: Implementation-Level Exploitation
+
+You are in the **EXPLOITATION** phase. Focus on fine-grained, code-level improvements.
+
+### What to Analyze
+1. **Computational Efficiency**:
+   - Redundant calculations that can be cached or eliminated
+   - Operations that can be better vectorized or parallelized
+   - Unnecessary memory allocations or copies
+2. **Numerical Details**:
+   - Numerical stability issues (overflow, underflow, precision loss)
+   - Convergence threshold tuning
+   - Better numerical methods for specific operations (e.g., log-sum-exp trick)
+3. **Code Structure**:
+   - Loop optimizations (fusion, unrolling, early termination)
+   - Better use of library functions (numpy, torch operations)
+   - Memory access patterns and cache efficiency
+
+### What to Propose
+- **Targeted, surgical changes** to specific lines or functions
+- Optimizations that preserve the algorithm's logic but improve execution
+- Parameter tuning and threshold adjustments
+
+### Mindset
+Think like a performance engineer. The algorithm is sound; your job is to make the implementation as efficient as possible. Ask "How can I compute the same result faster?" rather than "Is there a different approach?"
+"""
+
+
 class EvolutionPromptBuilder:
     """
     Builds prompts for the mutation agent.
@@ -164,6 +242,82 @@ class EvolutionPromptBuilder:
     def get_system_prompt(self, is_codebase: bool = True) -> str:
         """Get the appropriate system prompt."""
         return MUTATION_SYSTEM_PROMPT_CODEBASE if is_codebase else MUTATION_SYSTEM_PROMPT
+
+    def compute_exploration_probability(
+        self,
+        generation: int,
+        initial_prob: float = 0.9,
+        final_prob: float = 0.1,
+        decay_generations: int = 10,
+    ) -> float:
+        """
+        Compute exploration probability based on generation.
+
+        Uses exponential decay: P(t) = final + (initial - final) * exp(-t / tau)
+        where tau is calibrated so P(decay_generations) ≈ final + 0.1 * (initial - final)
+
+        Args:
+            generation: Current generation number
+            initial_prob: Exploration probability at generation 0
+            final_prob: Minimum exploration probability
+            decay_generations: Generations to decay to near-final probability
+
+        Returns:
+            Exploration probability in [final_prob, initial_prob]
+        """
+        if generation <= 0:
+            return initial_prob
+
+        # Exponential decay with tau = decay_generations / 2.3
+        # At t = decay_generations, we're at ~10% of the way from final to initial
+        tau = decay_generations / 2.3
+        prob = final_prob + (initial_prob - final_prob) * math.exp(-generation / tau)
+
+        return max(final_prob, min(initial_prob, prob))
+
+    def get_analyzer_system_prompt(
+        self,
+        generation: int,
+        initial_prob: float = 0.9,
+        final_prob: float = 0.1,
+        decay_generations: int = 10,
+    ) -> Tuple[str, str, float]:
+        """
+        Get analyzer system prompt with generation-appropriate optimization direction.
+
+        The base ANALYZER_SYSTEM_PROMPT is always included. Based on generation,
+        either ANALYZER_EXPLORATION_SECTION or ANALYZER_EXPLOITATION_SECTION is
+        appended with probability determined by exponential decay.
+
+        Args:
+            generation: Current program generation
+            initial_prob: Initial exploration probability (at generation 0)
+            final_prob: Final exploration probability (asymptotic)
+            decay_generations: Generations to decay to near-final probability
+
+        Returns:
+            Tuple of (full_prompt, direction, exploration_probability) where:
+            - full_prompt: Complete system prompt for analyzer
+            - direction: "exploration" or "exploitation"
+            - exploration_probability: The probability used for this decision
+        """
+        # Compute probability and sample direction
+        exploration_prob = self.compute_exploration_probability(
+            generation, initial_prob, final_prob, decay_generations
+        )
+
+        use_exploration = random.random() < exploration_prob
+        direction = "exploration" if use_exploration else "exploitation"
+
+        # Build full prompt: base rules + direction section
+        direction_section = (
+            ANALYZER_EXPLORATION_SECTION if use_exploration
+            else ANALYZER_EXPLOITATION_SECTION
+        )
+
+        full_prompt = ANALYZER_SYSTEM_PROMPT + "\n" + direction_section
+
+        return full_prompt, direction, exploration_prob
 
     def build_mutation_prompt(
         self,

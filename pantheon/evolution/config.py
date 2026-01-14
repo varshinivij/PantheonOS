@@ -73,6 +73,14 @@ class EvolutionConfig:
     top_programs_probability: float = 0.5  # Probability of including top programs in prompt
     inspirations_probability: float = 0.2  # Probability of including inspirations in prompt
 
+    # === Analyzer Strategy Parameters ===
+    # Controls exploration vs exploitation balance based on generation
+    # Exploration: algorithm-level, mathematical, architectural improvements
+    # Exploitation: code-level, implementation, fine-grained optimizations
+    analyzer_exploration_initial: float = 0.9  # Exploration probability at generation 0
+    analyzer_exploration_final: float = 0.1  # Minimum exploration probability
+    analyzer_exploration_decay_generations: int = 10  # Generations to decay to final probability
+
     # === Model Configuration ===
     mutator_model: str = "normal"
     feedback_model: str = "normal"
@@ -168,6 +176,9 @@ class EvolutionConfig:
             "analyzer_timeout": self.analyzer_timeout,
             "top_programs_probability": self.top_programs_probability,
             "inspirations_probability": self.inspirations_probability,
+            "analyzer_exploration_initial": self.analyzer_exploration_initial,
+            "analyzer_exploration_final": self.analyzer_exploration_final,
+            "analyzer_exploration_decay_generations": self.analyzer_exploration_decay_generations,
             "mutator_model": self.mutator_model,
             "feedback_model": self.feedback_model,
             "db_path": self.db_path,
@@ -218,6 +229,9 @@ class EvolutionConfig:
             "analyzer_timeout",
             "top_programs_probability",
             "inspirations_probability",
+            "analyzer_exploration_initial",
+            "analyzer_exploration_final",
+            "analyzer_exploration_decay_generations",
             "mutator_model",
             "feedback_model",
             "db_path",

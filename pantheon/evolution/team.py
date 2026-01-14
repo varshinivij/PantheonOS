@@ -27,7 +27,6 @@ from .prompt_builder import (
     EvolutionPromptBuilder,
     MUTATION_SYSTEM_PROMPT_CODEBASE,
     MUTATION_SYSTEM_PROMPT_SIMPLE,
-    ANALYZER_SYSTEM_PROMPT,
 )
 from .result import EvolutionResult, IterationResult
 from .utils.diff import parse_diff, apply_diff
@@ -147,21 +146,47 @@ class EvolutionTeam:
                 raise RuntimeError("Pantheon Agent not available for mutation")
         return self._mutator
 
-    async def _ensure_analyzer(self):
-        """Ensure analyzer agent is initialized."""
-        if self._analyzer is None:
-            try:
-                from pantheon.agent import Agent
-                self._analyzer = Agent(
-                    name="code-analyzer",
-                    instructions=ANALYZER_SYSTEM_PROMPT,
-                    model=self.config.analyzer_model,
-                    tools=[think],  # Add thinking tool for deeper reasoning
-                    use_memory=False,  # Prevent context accumulation across iterations
-                )
-            except ImportError:
-                raise RuntimeError("Pantheon Agent not available for analysis")
-        return self._analyzer
+    def _create_analyzer(self, generation: int):
+        """
+        Create analyzer agent with generation-appropriate system prompt.
+
+        The analyzer's optimization direction (exploration vs exploitation) is
+        probabilistically determined based on generation. Early generations favor
+        algorithm-level exploration; later generations favor implementation-level
+        exploitation.
+
+        If user provided a custom analyzer at init time, returns that instead
+        (with direction="custom" and probability=0.0).
+
+        Args:
+            generation: Current program generation for adaptive prompt selection
+
+        Returns:
+            Tuple of (analyzer_agent, direction, exploration_probability)
+        """
+        # If user provided custom analyzer, use it without adaptive prompts
+        if self._analyzer is not None:
+            return self._analyzer, "custom", 0.0
+
+        from pantheon.agent import Agent
+
+        # Get adaptive system prompt based on generation
+        system_prompt, direction, exploration_prob = self.prompt_builder.get_analyzer_system_prompt(
+            generation=generation,
+            initial_prob=self.config.analyzer_exploration_initial,
+            final_prob=self.config.analyzer_exploration_final,
+            decay_generations=self.config.analyzer_exploration_decay_generations,
+        )
+
+        analyzer = Agent(
+            name="code-analyzer",
+            instructions=system_prompt,
+            model=self.config.analyzer_model,
+            tools=[think],  # Add thinking tool for deeper reasoning
+            use_memory=False,  # Prevent context accumulation across iterations
+        )
+
+        return analyzer, direction, exploration_prob
 
     async def _ensure_evaluator(self):
         """Ensure evaluator is initialized."""
@@ -548,12 +573,16 @@ class EvolutionTeam:
 
         # Build prompt (with or without analyzer)
         analysis_text = ""  # Store analyzer output for program record
+        analyzer_direction = ""  # Track exploration vs exploitation direction
         iteration_cost = 0.0  # Track LLM cost for this iteration
         if self.config.use_analyzer:
             # === Analyzer Phase (full context) ===
             analysis_start = time.time()
             try:
-                analyzer = await self._ensure_analyzer()
+                # Create analyzer with generation-adaptive prompt
+                analyzer, analyzer_direction, exploration_prob = self._create_analyzer(
+                    generation=parent.generation
+                )
                 analysis_prompt = self.prompt_builder.build_analysis_prompt(
                     parent=parent,
                     objective=self.objective,
@@ -569,7 +598,10 @@ class EvolutionTeam:
                 analysis_text = analysis_response.content
                 iteration_cost += extract_cost_from_response(analysis_response)
                 analysis_time = time.time() - analysis_start
-                logger.info(f"{log_prefix} Analysis: {analysis_time:.1f}s (${iteration_cost:.4f})")
+                logger.info(
+                    f"{log_prefix} Analysis ({analyzer_direction}, p={exploration_prob:.2f}): "
+                    f"{analysis_time:.1f}s (${iteration_cost:.4f})"
+                )
             except asyncio.TimeoutError:
                 analysis_time = time.time() - analysis_start
                 logger.warning(f"{log_prefix} Analyzer timeout after {analysis_time:.1f}s, skipping iteration")

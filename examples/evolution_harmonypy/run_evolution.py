@@ -80,6 +80,7 @@ async def run_evolution(
             num_top_programs=3,
             max_parallel_evaluations=2,
             evaluation_timeout=120,
+            analyzer_timeout=120,  # Increased timeout for analyzer (uses think tool)
             feature_dimensions=["mixing_score", "speed_score", "bio_conservation_score"],
             early_stop_generations=200,
             function_weight=1.0,
