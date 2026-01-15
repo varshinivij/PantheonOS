@@ -1,4 +1,4 @@
-max_iterations: 5
+max_iterations: 10
 checkpoint_interval: 10
 early_stop_generations: 200
 num_workers: 8

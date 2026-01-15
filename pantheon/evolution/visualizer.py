@@ -123,14 +123,6 @@ class EvolutionVisualizer:
             # Check for evaluation error
             has_error = bool(prog.artifacts.get("evaluation_error"))
 
-            # Build display_metrics with dynamically computed function_score
-            display_metrics = {k: v for k, v in prog.metrics.items() if k != "fitness_weights"}
-            fitness_weights = prog.metrics.get("fitness_weights")
-            if fitness_weights and isinstance(fitness_weights, dict):
-                display_metrics["function_score"] = self.database.compute_function_score(
-                    prog.metrics, fitness_weights
-                )
-
             # Use dynamic fitness_score calculation with current metric_ranges
             score = prog.fitness_score(
                 self.database.config.feature_dimensions,
@@ -138,6 +130,16 @@ class EvolutionVisualizer:
                 self.database.config.function_weight,
                 self.database.config.llm_weight,
             )
+
+            # Build display_metrics with dynamically computed function_score and fitness_score
+            display_metrics = {k: v for k, v in prog.metrics.items() if k != "fitness_weights"}
+            fitness_weights = prog.metrics.get("fitness_weights")
+            if fitness_weights and isinstance(fitness_weights, dict):
+                display_metrics["function_score"] = self.database.compute_function_score(
+                    prog.metrics, fitness_weights
+                )
+            # Add fitness_score to display metrics
+            display_metrics["fitness_score"] = score
 
             # Use program.order if available, otherwise fall back to -1
             order = prog.order if prog.order is not None else -1
@@ -234,6 +236,19 @@ class EvolutionVisualizer:
                     best_scores["function_score"] = function_score
                 entry["best_function_score"] = best_scores.get("function_score", 0.0)
 
+            # Dynamically compute fitness_score (weighted combination of function_score and llm_score)
+            fitness_score = prog.fitness_score(
+                self.database.config.feature_dimensions,
+                metric_ranges,
+                self.database.config.function_weight,
+                self.database.config.llm_weight,
+            )
+            entry["fitness_score"] = fitness_score
+            # Update best fitness_score
+            if "fitness_score" not in best_scores or fitness_score > best_scores["fitness_score"]:
+                best_scores["fitness_score"] = fitness_score
+            entry["best_fitness_score"] = best_scores.get("fitness_score", 0.0)
+
             # Add all other metrics and their best values
             for key in all_metric_keys:
                 if key == "function_score":
@@ -262,6 +277,9 @@ class EvolutionVisualizer:
         all_metric_keys = set()
         for prog in self.programs.values():
             all_metric_keys.update(prog.metrics.keys())
+        # Add dynamically computed scores
+        all_metric_keys.add("fitness_score")
+        all_metric_keys.add("best_fitness_score")
         return sorted(all_metric_keys)
 
     def get_programs_data(self) -> Dict[str, Dict[str, Any]]:
@@ -302,13 +320,15 @@ class EvolutionVisualizer:
                 fitness_delta = None
                 metrics_delta = {}
 
-            # Build metrics with dynamically computed function_score
+            # Build metrics with dynamically computed function_score and fitness_score
             display_metrics = {k: v for k, v in prog.metrics.items() if k != "fitness_weights"}
             fitness_weights = prog.metrics.get("fitness_weights")
             if fitness_weights and isinstance(fitness_weights, dict):
                 display_metrics["function_score"] = self.database.compute_function_score(
                     prog.metrics, fitness_weights
                 )
+            # Add fitness_score to display metrics
+            display_metrics["fitness_score"] = prog_fitness
 
             programs_data[prog_id] = {
                 "id": prog_id,
@@ -1729,7 +1749,8 @@ class EvolutionVisualizer:
 
         // Color palette for metrics
         const metricColors = {{
-            'function_score': '#58a6ff',
+            'fitness_score': '#58a6ff',
+            'function_score': '#e3b341',
             'llm_score': '#a371f7',
             'mixing_score': '#f778ba',
             'bio_conservation_score': '#3fb950',
@@ -1747,10 +1768,10 @@ class EvolutionVisualizer:
         }}
 
         // Track which metrics are visible
-        const visibleMetrics = new Set(['function_score', 'best_function_score']);
+        const visibleMetrics = new Set(['fitness_score', 'best_fitness_score']);
 
         // Currently selected metric for coloring
-        let selectedMetric = 'function_score';
+        let selectedMetric = 'fitness_score';
 
         // Store tree root for ancestry path lookup
         let treeRoot = null;
@@ -1851,7 +1872,7 @@ class EvolutionVisualizer:
                 const option = document.createElement('option');
                 option.value = metric;
                 option.textContent = metric.replace(/_/g, ' ');
-                if (metric === 'function_score') {{
+                if (metric === 'fitness_score') {{
                     option.selected = true;
                 }}
                 select.appendChild(option);
@@ -2319,7 +2340,7 @@ class EvolutionVisualizer:
             }}
 
             // Track visible metrics for this chart (default to function_score only)
-            const pathVisibleMetrics = new Set(scoreMetrics.includes('function_score') ? ['function_score'] : scoreMetrics.slice(0, 1));
+            const pathVisibleMetrics = new Set(scoreMetrics.includes('fitness_score') ? ['fitness_score'] : (scoreMetrics.includes('function_score') ? ['function_score'] : scoreMetrics.slice(0, 1)));
 
             // Chart dimensions
             const width = container.clientWidth || 400;
@@ -3700,7 +3721,7 @@ class EvolutionVisualizer:
             }}
 
             // Track visible metrics for this chart (default to function_score only)
-            const pathVisibleMetrics = new Set(scoreMetrics.includes('function_score') ? ['function_score'] : scoreMetrics.slice(0, 1));
+            const pathVisibleMetrics = new Set(scoreMetrics.includes('fitness_score') ? ['fitness_score'] : (scoreMetrics.includes('function_score') ? ['function_score'] : scoreMetrics.slice(0, 1)));
 
             // Chart dimensions
             const width = container.clientWidth || 400;

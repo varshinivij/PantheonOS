@@ -347,11 +347,11 @@ def compute_fitness_score(
     if fitness_weights and isinstance(fitness_weights, dict):
         function_score = compute_function_score(metrics, fitness_weights, metric_ranges)
     else:
-        # Fallback: average all numeric metrics (excluding feature dimensions)
+        # Fallback: average all numeric metrics (excluding feature dimensions and derived scores)
         fitness_metrics = {
             k: v for k, v in metrics.items()
             if k not in feature_dimensions
-            and k not in ("fitness_weights", "llm_score")
+            and k not in ("fitness_weights", "llm_score", "function_score")
             and isinstance(v, (int, float))
         }
         if fitness_metrics:

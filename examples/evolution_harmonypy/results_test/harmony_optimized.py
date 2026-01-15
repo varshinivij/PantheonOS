@@ -468,55 +468,58 @@ class Harmony:
         self.objective_harmony.append(self.objective_kmeans[-1])
 
     def update_R(self):
-        # Compute scaled distances
-        self._scale_dist = -self._dist_mat / self._sigma[:, None]
-        self._scale_dist = torch.exp(self._scale_dist)
-        self._scale_dist = self._scale_dist / self._scale_dist.sum(dim=0)
+        """Update soft assignments R using a global entropic OT / Sinkhorn-style solver.
 
-        # Create shuffled update order
-        update_order = torch.randperm(self.N, device=self.device)
+        Replaces the previous heuristic block-coordinate updates with a stable,
+        order-invariant global scaling procedure.
 
-        # Process in blocks
-        n_blocks = int(np.ceil(1.0 / self.block_size))
-        cells_per_block = int(self.N * self.block_size)
+        We compute a kernel:
+            K[k,i] = exp(-dist[k,i] / sigma[k])
+        then enforce:
+            - columns sum to 1 (each cell distributes probability over clusters)
+            - batch mixing pressure via a global batch factor derived from current O/E
+              (Harmony-style diversity term, applied globally instead of per-block)
 
-        # Permute matrices
-        R_perm = self._R[:, update_order]
-        scale_perm = self._scale_dist[:, update_order]
-        Phi_perm = self._Phi[:, update_order]
+        After convergence, update O and E once (no subtract/add bookkeeping).
+        """
+        # Base affinity kernel (K x N)
+        K = torch.exp(-self._dist_mat / self._sigma[:, None])
+        K = torch.clamp(K, min=1e-20)
 
-        for blk in range(n_blocks):
-            idx_min = blk * cells_per_block
-            idx_max = self.N if blk == n_blocks - 1 else (blk + 1) * cells_per_block
+        # Global batch-mixing adjustment based on current state (K x B).
+        # Using the same ratio form as the Harmony objective, but applied globally.
+        O_clamped = torch.clamp(self._O, min=1e-8)
+        E_clamped = torch.clamp(self._E, min=1e-8)
+        ratio = E_clamped / torch.clamp(O_clamped + E_clamped, min=1e-8)
+        ratio = torch.clamp(ratio, min=1e-8, max=1.0)
+        ratio_powered = harmony_pow_torch(ratio, self._theta)  # (K x B)
+        batch_factor = ratio_powered @ self._Phi  # (K x N)
+        batch_factor = torch.clamp(batch_factor, min=1e-8)
 
-            R_block = R_perm[:, idx_min:idx_max]
-            scale_block = scale_perm[:, idx_min:idx_max]
-            Phi_block = Phi_perm[:, idx_min:idx_max]
+        # Combine kernel with batch factor; normalize via Sinkhorn-style iterations.
+        M = K * batch_factor  # (K x N)
 
-            # Remove cells from statistics
-            self._E -= torch.outer(R_block.sum(dim=1), self._Pr_b)
-            self._O -= R_block @ Phi_block.T
+        # Sinkhorn iterations enforcing column stochasticity, with gentle row balancing.
+        # Row balancing prevents degenerate empty clusters without imposing hard sizes.
+        sinkhorn_iters = 25
+        eps = 1e-8
 
-            # Recompute R for this block (R package formula) with numerical stability
-            O_E_sum = self._O + self._E
-            O_E_sum = torch.clamp(O_E_sum, min=1e-8)
-            ratio = self._E / O_E_sum
-            ratio = torch.clamp(ratio, min=1e-8, max=1.0)
-            ratio_powered = harmony_pow_torch(ratio, self._theta)
-            R_block_new = scale_block * (ratio_powered @ Phi_block)
-            R_block_sum = R_block_new.sum(dim=0)
-            R_block_sum = torch.clamp(R_block_sum, min=1e-8)
-            R_block_new = R_block_new / R_block_sum
+        R = M
+        for _ in range(sinkhorn_iters):
+            # Column normalization: each cell sums to 1
+            R = R / torch.clamp(R.sum(dim=0, keepdim=True), min=eps)
 
-            # Put cells back
-            self._E += torch.outer(R_block_new.sum(dim=1), self._Pr_b)
-            self._O += R_block_new @ Phi_block.T
+            # Soft row balancing: keep cluster masses near previous masses
+            row_mass = torch.clamp(R.sum(dim=1, keepdim=True), min=eps)  # (K x 1)
+            target_mass = torch.clamp(self._R.sum(dim=1, keepdim=True), min=eps)  # (K x 1)
+            R = R * (target_mass / row_mass)
 
-            R_perm[:, idx_min:idx_max] = R_block_new
+        # Final column normalization
+        self._R = R / torch.clamp(R.sum(dim=0, keepdim=True), min=eps)
 
-        # Restore original order
-        inverse_order = torch.argsort(update_order)
-        self._R = R_perm[:, inverse_order]
+        # Update batch diversity statistics globally
+        self._E = torch.outer(self._R.sum(dim=1), self._Pr_b)
+        self._O = self._R @ self._Phi.T
 
     def check_convergence(self, i_type):
         if i_type == 0:
@@ -539,37 +542,60 @@ class Harmony:
         return True
 
     def moe_correct_ridge(self):
-        """Ridge regression correction for batch effects."""
+        """Batch correction with shared + cluster-deviation ridge regression.
+
+        Replaces independent per-cluster regressions with a hierarchical model:
+            (W0 shared across all cells) + (Vk deviation per cluster, strongly regularized)
+
+        This reduces overfitting of batch effects to imperfect/soft clusters while
+        retaining the ability to model state-dependent batch shifts.
+        """
         self._Z_corr = self._Z_orig.clone()
 
-        for k in range(self.K):
-            # Compute lambda if estimating
-            if self.lambda_estimation:
-                lamb_vec = find_lambda_torch(self.alpha, self._E[k, :], self.device)
-            else:
-                lamb_vec = self._lamb
+        # Choose penalties:
+        # - shared term: use base lamb (or dynamic estimate from global E)
+        # - deviations: much stronger ridge to limit cluster-specific drift
+        if self.lambda_estimation:
+            # Global expected batch counts for estimating shared lambda
+            global_E = torch.sum(self._E, dim=0)
+            lamb0 = find_lambda_torch(self.alpha, global_E, self.device)
+        else:
+            lamb0 = self._lamb
 
-            # Phi_Rk = Phi_moe scaled by R[k,:]
+        # Stronger penalty for deviations (lambda_1 >> lambda_0)
+        lamb1 = lamb0 * 10.0
+
+        # ---- 1) Solve shared coefficients W0 using all cells (ridge) ----
+        # Using the normal equations with Phi_moe.
+        cov0 = self._Phi_moe @ self._Phi_moe.T + torch.diag(lamb0)
+        inv_cov0 = torch.linalg.inv(cov0)
+
+        # Cross term: Phi_moe @ Z.T  ( (B+1) x d )
+        cross0 = self._Phi_moe @ self._Z_orig.T
+        W0 = inv_cov0 @ cross0
+        W0[0, :] = 0  # Do not remove intercept
+
+        # ---- 2) Solve deviations Vk per cluster with strong ridge ----
+        # And apply correction as sum_k R_k * (W0 + Vk) Phi
+        for k in range(self.K):
+            # Weighted design
             Phi_Rk = self._Phi_moe * self._R[k, :]
 
-            # Compute covariance
-            cov_mat = Phi_Rk @ self._Phi_moe.T + torch.diag(lamb_vec)
+            # Weighted residual after removing shared effect
+            shared_effect = (W0.T @ self._Phi_moe)
+            Z_res = self._Z_orig - shared_effect
+            Z_tmp = Z_res * self._R[k, :]
 
-            # Invert
-            inv_cov = torch.linalg.inv(cov_mat)
+            cov_k = Phi_Rk @ self._Phi_moe.T + torch.diag(lamb1)
+            inv_cov_k = torch.linalg.inv(cov_k)
 
-            # Calculate R-scaled PCs
-            Z_tmp = self._Z_orig * self._R[k, :]
+            # Cross term for deviation
+            cross_k = Phi_Rk @ Z_res.T  # (B+1) x d
+            Vk = inv_cov_k @ cross_k
+            Vk[0, :] = 0  # Do not remove intercept
 
-            # Generate betas using the batch index
-            W = inv_cov[:, 0:1] @ Z_tmp.sum(dim=1, keepdim=True).T
-
-            for b in range(self.B):
-                batch_sum = Z_tmp[:, self._batch_index[b]].sum(dim=1, keepdim=True)
-                W = W + inv_cov[:, b+1:b+2] @ batch_sum.T
-
-            W[0, :] = 0  # Do not remove intercept
-            self._Z_corr = self._Z_corr - W.T @ Phi_Rk
+            Wk = W0 + Vk
+            self._Z_corr = self._Z_corr - Wk.T @ Phi_Rk
 
         # Update Z_cos
         self._Z_cos = self._Z_corr / torch.linalg.norm(self._Z_corr, ord=2, dim=0)
