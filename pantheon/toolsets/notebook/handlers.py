@@ -168,7 +168,7 @@ class FileLogHandler:
     def _write_log(log_file: Path, entry: dict) -> None:
         """Write log entry to file (blocking)"""
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\\n")
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     
     async def __call__(
         self, session_id: str, message: "JupyterMessage", metadata: dict

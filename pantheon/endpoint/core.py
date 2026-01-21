@@ -37,6 +37,9 @@ class EndpointConfig(TypedDict, total=False):
     # Local toolset execution settings
     local_toolset_timeout: int  # Timeout in seconds (default: 60)
     local_toolset_execution_mode: str  # "thread" | "direct" (default: "direct")
+    # IntegratedNotebook streaming control
+    enable_notebook_streaming: bool  # Enable NATS streaming for integrated_notebook (default: False)
+
 
 
 
@@ -48,9 +51,12 @@ class Endpoint(FileTransferToolSet):
         workspace_path: str | None = None,
         **kwargs,
     ):
-        if config is None:
-            config = self.default_config()
-        self.config = config
+        # Load default config first, then merge with user-provided config
+        default_config = self.default_config()
+        if config is not None:
+            # Merge user config with defaults (user config takes precedence)
+            default_config.update(config)
+        self.config = default_config
         name = self.config.get("service_name", "pantheon-chatroom-endpoint")
 
         # Priority: parameter > config > default
@@ -84,6 +90,7 @@ class Endpoint(FileTransferToolSet):
             id_hash=self.id_hash,
             endpoint_path=Path(workspace_path),
             log_dir=self.log_dir,
+            endpoint=self,  # Pass self for remote backend status checking
         )
 
         # Initialize MCP Pool with log directory

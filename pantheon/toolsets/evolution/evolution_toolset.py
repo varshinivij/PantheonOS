@@ -52,7 +52,8 @@ class EvolutionSession:
         self.mutator_model: str = config_dict.get("mutator_model", "normal")
         
         # === Unified File Storage ===
-        self.files: Dict[str, str] = {}  # File path -> Content (Unified)
+        self.files: Dict[str, str] = {}  # File path -> Content (Current/Final)
+        self.initial_files: Dict[str, str] = {}  # Original input files (Immutable)
         
         # === Codebase Specific ===
         self.codebase_path: Optional[str] = None
@@ -131,6 +132,7 @@ class EvolutionSession:
             "mutator_model": self.mutator_model,
             # Unified file storage
             "files": self.files,
+            "initial_files": self.initial_files,  # Original input files
             # Codebase-specific
             "codebase_path": self.codebase_path,
             "include_patterns": self.include_patterns,
@@ -171,6 +173,7 @@ class EvolutionSession:
         session.mutator_model = data.get("mutator_model", "normal")
         # Unified file storage
         session.files = data.get("files", {})
+        session.initial_files = data.get("initial_files", {})
         # Codebase-specific
         session.codebase_path = data.get("codebase_path")
         session.include_patterns = data.get("include_patterns")
@@ -184,6 +187,52 @@ class EvolutionSession:
         session.improvement = data.get("improvement")
         session.summary = data.get("summary")
         return session
+    
+    def to_status_dict(self) -> Dict[str, Any]:
+        """Build status dictionary for API responses"""
+        return {
+            "evolution_id": self.evolution_id,
+            "evolution_type": self.evolution_type,
+            "status": self.status,
+            "objective": self.objective,
+            "iteration": self.current_iter,
+            "max_iterations": self.max_iter,
+            "best_score": self.best_score,
+            "initial_score": self.initial_score,
+            "improvement": self.improvement,
+            "file_count": len(self.files),
+            "islands": self.num_islands,
+            "model": self.mutator_model,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+        }
+    
+    def to_config_dict(self) -> Dict[str, Any]:
+        """Build config dictionary for API responses"""
+        return {
+            "objective": self.objective,
+            "iterations": self.max_iter,
+            "islands": self.num_islands,
+            "model": self.mutator_model,
+        }
+    
+    def to_stats_dict(self, db, stats: Dict[str, Any]) -> Dict[str, Any]:
+        """Build stats dictionary from database and session data"""
+        return {
+            "total_programs": stats.get("total_programs", 0),
+            "total_iterations": self.current_iter,
+            "improvements": db.total_improved,
+            "best_score": self.best_score,
+            "initial_score": self.initial_score or 0,
+            "improvement_pct": self.improvement or 0,
+            "avg_score": stats.get("avg_fitness", 0),
+            "num_islands": self.num_islands,
+            "archive_size": stats.get("archive_size", 0),
+            "feature_dimensions": list(db.config.feature_dimensions) if db.config.feature_dimensions else [],
+            "feature_ranges": stats.get("feature_ranges", {}),
+            "config": self.to_config_dict(),
+        }
     
     def save(self) -> None:
         """Save session state to disk"""
@@ -302,6 +351,33 @@ class EvolutionManager:
         
         if restored_count > 0:
             logger.info(f"Restored {restored_count} Evolution session(s)")
+
+
+def success_response(data: Any) -> Dict[str, Any]:
+    """Create a successful API response with unified format"""
+    return {
+        "success": True,
+        "data": data
+    }
+
+
+def error_response(
+    code: str,
+    message: str,
+    details: Any = None
+) -> Dict[str, Any]:
+    """Create an error API response with unified format"""
+    error = {
+        "code": code,
+        "message": message
+    }
+    if details is not None:
+        error["details"] = details
+    
+    return {
+        "success": False,
+        "error": error
+    }
 
 
 class EvolutionToolSet(ToolSet):
@@ -463,6 +539,7 @@ class EvolutionToolSet(ToolSet):
         # Save input data (unified model)
         session.evolution_type = "code"  # ✅ Set type
         session.files = {"main.py": code}  # ✅ Unified file storage
+        session.initial_files = {"main.py": code}  # ✅ Save original input
         session.evaluator_code = evaluator_code
         session.objective = objective
         session.save()
@@ -562,7 +639,7 @@ class EvolutionToolSet(ToolSet):
         # Load codebase
         codebase_path = Path(codebase_path).expanduser().resolve()
         if not codebase_path.is_dir():
-            return {"success": False, "error": f"Codebase path not found: {codebase_path}"}
+            return error_response("INVALID_INPUT", f"Codebase path not found: {codebase_path}")
         
         try:
             initial_snapshot = CodebaseSnapshot.from_directory(
@@ -570,7 +647,7 @@ class EvolutionToolSet(ToolSet):
                 include_patterns=include_patterns,
             )
         except Exception as e:
-            return {"success": False, "error": f"Failed to load codebase: {e}"}
+            return error_response("INTERNAL_ERROR", f"Failed to load codebase: {e}")
         
         logger.info(
             f"Loaded codebase: {initial_snapshot.file_count()} files, "
@@ -595,6 +672,7 @@ class EvolutionToolSet(ToolSet):
         # Set type and data (unified model)
         session.evolution_type = "codebase"  # ✅ Set type
         session.files = initial_snapshot.files  # ✅ Unified file storage
+        session.initial_files = dict(initial_snapshot.files)  # ✅ Save original input (deep copy)
         session.codebase_path = str(codebase_path)  # ✅ Codebase-specific metadata
         session.include_patterns = include_patterns
         session.output_path = output_path
@@ -915,7 +993,7 @@ class EvolutionToolSet(ToolSet):
         if include_code:
             response["input"] = {
                 "evaluator_code": session.evaluator_code,
-                "files": session.files,  # ✅ Unified: return all files
+                "files": session.initial_files if session.initial_files else session.files,  # Use initial_files for display
             }
             
             # Codebase-specific metadata
@@ -929,6 +1007,7 @@ class EvolutionToolSet(ToolSet):
                     "initial_score": session.initial_score,
                     "improvement": session.improvement,
                     "summary": session.summary,
+                    "files": session.files  # Add optimized code files
                 }
                 
                 # Codebase-specific result
@@ -936,6 +1015,84 @@ class EvolutionToolSet(ToolSet):
                     response["result"]["output_path"] = session.output_path
         
         return response
+    
+    @tool(exclude=True)
+    async def get_evolution_monitor_data(
+        self,
+        evolution_id: str,
+        include_history_limit: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Get all data needed for Evolution Monitor (aggregated API).
+        
+        This combines status, stats, and recent history into a single request
+        to reduce HTTP overhead and improve data consistency.
+        
+        Args:
+            evolution_id: Evolution ID
+            include_history_limit: Number of recent history points to include (default: 20)
+        
+        Returns:
+            Unified response with status, stats, and recent history
+        """
+        session = self.manager.get_session(evolution_id)
+        
+        if not session:
+            return error_response(
+                "NOT_FOUND",
+                f"Evolution {evolution_id} not found"
+            )
+        
+        try:
+            # Build status data using helper method + extra fields
+            status_data = session.to_status_dict()
+            status_data.update({
+                "score_history": session.score_history,
+                "improvements_found": len([
+                    s for i, s in enumerate(session.score_history)
+                    if i > 0 and s > session.score_history[i-1]
+                ]) if session.score_history else 0,
+                "config": session.to_config_dict(),
+            })
+            
+            # Get stats data
+            stats_data = None
+            recent_history = []
+            
+            db = session.get_database()
+            if db:
+                # Build stats using helper method
+                stats = db.get_statistics()
+                stats_data = session.to_stats_dict(db, stats)
+                
+                # Get recent history
+                if db.programs:
+                    programs = sorted(
+                        db.programs.values(),
+                        key=lambda p: p.generation
+                    )[-include_history_limit:]
+                    
+                    for prog in programs:
+                        history_point = {
+                            "order": prog.generation,
+                            "program_id": prog.id,
+                        }
+                        # Add all metrics
+                        history_point.update(prog.metrics)
+                        recent_history.append(history_point)
+            
+            return success_response({
+                "status": status_data,
+                "stats": stats_data,
+                "recent_history": recent_history
+            })
+        except Exception as e:
+            logger.error(f"Failed to get monitor data for {evolution_id}: {e}")
+            return error_response(
+                "INTERNAL_ERROR",
+                "Failed to get monitor data",
+                details=str(e)
+            )
     
     @tool
     async def cancel_evolution(
@@ -953,10 +1110,10 @@ class EvolutionToolSet(ToolSet):
         """
         session = self.manager.get_session(evolution_id)
         if not session:
-            return {
-                "success": False,
-                "error": f"Evolution {evolution_id} not found",
-            }
+            return error_response(
+                "NOT_FOUND",
+                f"Evolution {evolution_id} not found"
+            )
         
         if session.task and not session.task.done():
             session.task.cancel()
@@ -967,55 +1124,74 @@ class EvolutionToolSet(ToolSet):
                 "message": "Evolution cancelled",
             }
         else:
-            return {
-                "success": False,
-                "error": "Evolution not running or already finished",
-                "status": session.status,
-            }
+            return error_response(
+                "INVALID_STATE",
+                "Evolution not running or already finished",
+                details={"status": session.status}
+            )
     
     @tool(exclude=True)
     async def list_evolutions(
         self,
-        status: Optional[str] = None,
-        limit: int = 10,
+        limit: int = 50,
+        offset: int = 0,
+        status_filter: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc"
     ) -> Dict[str, Any]:
         """
-        List evolution sessions.
-
+        List evolution sessions with pagination and filtering.
+        
         Args:
-            status: Optional status filter ("running", "completed",  "failed")
-            limit: Maximum number of results
-
+            limit: Maximum number of results to return (default: 50)
+            offset: Number of results to skip (default: 0)
+            status_filter: Filter by status (optional)
+            sort_by: Field to sort by (default: "created_at")
+            sort_order: Sort order "asc" or "desc" (default: "desc")
+        
         Returns:
-            dict: List of evolution sessions
+            Unified response with paginated evolution list
         """
-        sessions = self.manager.list_sessions(status_filter=status, limit=limit)
-        
-        evolutions = []
-        for s in sessions:
-            evolutions.append({
-                "evolution_id": s.evolution_id,
-                "evolution_type": s.evolution_type,  # ✅ New: type indicator
-                "status": s.status,
-                "objective": s.objective,
-                "iteration": s.current_iter,
-                "max_iterations": s.max_iter,
-                "best_score": s.best_score,
-                "initial_score": s.initial_score,
-                "improvement": s.improvement,
-                "file_count": len(s.files),  # ✅ New: file count
-                "islands": s.num_islands,
-                "model": s.mutator_model,
-                "created_at": s.created_at,
-                "started_at": s.started_at,
-                "completed_at": s.completed_at,
+        try:
+            all_sessions = list(self.manager._sessions.values())
+            
+            # Filter by status if specified
+            if status_filter:
+                all_sessions = [s for s in all_sessions if s.status == status_filter]
+            
+            # Sort
+            reverse = (sort_order == "desc")
+            try:
+                all_sessions.sort(
+                    key=lambda s: getattr(s, sort_by, 0),
+                    reverse=reverse
+                )
+            except Exception:
+                # Fallback to created_at if sort_by field doesn't exist
+                all_sessions.sort(key=lambda s: s.created_at, reverse=True)
+            
+            # Pagination
+            total = len(all_sessions)
+            paginated = all_sessions[offset:offset + limit]
+            
+            evolutions = []
+            for s in paginated:
+                evolutions.append(s.to_status_dict())
+            
+            return success_response({
+                "evolutions": evolutions,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": (offset + limit) < total
             })
-        
-        return {
-            "success": True,
-            "evolutions": evolutions,
-            "total": len(evolutions),
-        }
+        except Exception as e:
+            logger.error(f"Failed to list evolutions: {e}")
+            return error_response(
+                "INTERNAL_ERROR",
+                "Failed to list evolutions",
+                details=str(e)
+            )
     
     @tool(exclude=True)
     async def get_evolution_html_report(
@@ -1147,7 +1323,12 @@ class EvolutionToolSet(ToolSet):
                 # Always return full tree structure to ensure D3.js can render correctly.
                 # Incremental tree updates are tricky because we need the parent structure.
                 # Given typical tree sizes, sending the full tree JSON is acceptable.
-                data = visualizer.build_tree_data()
+                tree_data = visualizer.build_tree_data()
+                # Include best_program_id for frontend to locate best node
+                data = {
+                    "tree": tree_data,
+                    "best_program_id": session.best_program_id if hasattr(session, 'best_program_id') else None
+                }
             elif data_type == "history":
                 data = visualizer.get_score_history()
             elif data_type == "heatmap":

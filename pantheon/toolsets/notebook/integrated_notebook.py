@@ -113,10 +113,13 @@ class IntegratedNotebookToolSet(ToolSet):
         settings = get_settings()
 
         # Decide whether streaming should be active for this toolset
+        logger.debug(f"IntegratedNotebook: streaming_mode={self.streaming_mode}, remote_backend={self.remote_backend}")
         if self.streaming_mode == "local":
             allow_streaming = False
+            logger.debug("IntegratedNotebook: streaming disabled (mode=local)")
         else:  # auto/remote both allow streaming unless explicitly disabled
             allow_streaming = True
+            logger.debug(f"IntegratedNotebook: streaming allowed (mode={self.streaming_mode})")
 
         # Initialize remote backend only when streaming is allowed
         if allow_streaming and self.remote_backend is None:
@@ -131,11 +134,14 @@ class IntegratedNotebookToolSet(ToolSet):
         await self.notebook_contents.run_setup()
 
         # Register NATS stream handler (if remote backend exists)
+        logger.debug(f"IntegratedNotebook: allow_streaming={allow_streaming}, remote_backend={self.remote_backend}")
         if allow_streaming and self.remote_backend:
             self.nats_handler = NatsStreamHandler(self.remote_backend)
             await self.kernel_toolset.subscribe("nats_stream", self.nats_handler)
             self.streaming_enabled = True
             logger.info("Registered NatsStreamHandler")
+        else:
+            logger.info(f"NATS streaming NOT enabled (allow_streaming={allow_streaming}, has_backend={self.remote_backend is not None})")
 
         # Register file log handler (if enabled via settings)
         if settings.enable_notebook_execution_logging:
@@ -1357,54 +1363,25 @@ class IntegratedNotebookToolSet(ToolSet):
         # For now, default to 'user' (can be enhanced with context tracking)
         return "user"
 
-    async def _gc_and_check_memory(
-        self, kernel_session_id: str, notebook_path: str = None, cell_id: str = None
-    ) -> float | None:
+    async def _check_memory_usage(self) -> float | None:
         """
-        Run gc.collect() and return current memory usage percentage.
-        Combined into one kernel call for efficiency.
+        Check system memory usage from backend process (non-intrusive).
         
-        Args:
-            kernel_session_id: Kernel session ID
-            notebook_path: Path to notebook (for logging to correct file)
-            cell_id: Cell ID (for logging context)
+        This method checks memory from the backend process using psutil directly,
+        avoiding kernel execution that would interfere with user code and produce
+        unwanted IOPub messages.
+        
+        Note: GC is intentionally NOT performed. Users should explicitly run
+        `import gc; gc.collect()` in their notebook if needed.
+        
+        Returns:
+            Memory usage percentage (0-100), or None if check fails
         """
         try:
-            # Build execution metadata with notebook context
-            execution_metadata = {"operated_by": "system"}
-            if notebook_path:
-                execution_metadata["notebook_path"] = notebook_path
-            if cell_id:
-                execution_metadata["cell_id"] = cell_id
-            
-            result = await self.kernel_toolset.execute_request(
-                "import gc, psutil; gc.collect(); print(psutil.virtual_memory().percent)",
-                kernel_session_id,
-                silent=True,
-                store_history=False,
-                execution_metadata=execution_metadata,
-            )
-            
-            if not result.get("success"):
-                return None
-            
-            # Extract stdout text from nbformat outputs array
-            # outputs = [{"output_type": "stream", "name": "stdout", "text": "42.5\n"}, ...]
-            outputs = result.get("outputs", [])
-            for output in outputs:
-                if output.get("output_type") == "stream" and output.get("name") == "stdout":
-                    text = output.get("text", "")
-                    # text can be string or list of strings
-                    if isinstance(text, list):
-                        text = "".join(text)
-                    try:
-                        return float(text.strip())
-                    except ValueError:
-                        return None
-            
-            return None
+            import psutil
+            return psutil.virtual_memory().percent
         except Exception as e:
-            logger.debug(f"gc_and_check_memory error: {e}")
+            logger.debug(f"Memory check error: {e}")
             return None
 
     async def _execute_and_update(
@@ -1454,16 +1431,14 @@ class IntegratedNotebookToolSet(ToolSet):
             if exec_result.get("success") and code.strip():
                 self.completion_service.update_session_context(kernel_session_id, code)
 
-            # Post-execution: gc + memory check in one call
-            logger.info(f"Calling _gc_and_check_memory for session {kernel_session_id[:8]}")
-            mem_pct = await self._gc_and_check_memory(
-                kernel_session_id, notebook_path=notebook_path, cell_id=cell_id
-            )
+            # Post-execution: check system memory (non-intrusive)
+            logger.info(f"Checking system memory usage")
+            mem_pct = await self._check_memory_usage()
             logger.info(f"Memory check result: {mem_pct}")
             if mem_pct is not None and mem_pct > 75:
                 exec_result["memory_hint"] = (
-                    f"⚠️ Memory at {mem_pct:.0f}%. Consider: "
-                    "`del unused_var; gc.collect()` or `manage_kernel(action='restart')`"
+                    f"⚠️ System memory at {mem_pct:.0f}%. Consider: "
+                    "`import gc; gc.collect()` or `manage_kernel(action='restart')`"
                 )
 
             # Add notebook-specific fields

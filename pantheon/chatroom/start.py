@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -162,10 +163,13 @@ async def _start_endpoint_embedded(
     logger.info(f"Starting Endpoint in embedded mode with id_hash={endpoint_id_hash}")
 
     endpoint = Endpoint(
-        config=None, workspace_path=workspace_path, id_hash=endpoint_id_hash
+        config={"enable_notebook_streaming": True},  # Enable streaming for chatroom
+        workspace_path=workspace_path,
+        id_hash=endpoint_id_hash
     )
     # Start endpoint in background with remote=False (only setup, no worker)
     asyncio.create_task(endpoint.run(remote=False, log_level=log_level))
+
 
     # Wait for endpoint to be ready
     logger.info("Waiting for Endpoint to be ready (embedded mode)")

@@ -182,7 +182,6 @@ async def run_benchmark(
     learning_config: dict = None,
     team: str = "default",
     injection_mode: str = "auto",
-    injection_mode: str = "auto",
     model_name: str = "gemini/gemini-3-flash-preview",
     capsules_filter: str = None,
 ):

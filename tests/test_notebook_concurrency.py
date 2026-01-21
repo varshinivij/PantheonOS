@@ -6,63 +6,8 @@ import tempfile
 import os
 
 
-class TestExecutionBufferLimits:
-    """Test ExecutionMessageBuffer size limits and cleanup (no kernel needed)."""
 
-    @pytest.mark.asyncio
-    async def test_buffer_max_executions_limit(self):
-        """Test that buffer respects max_executions limit."""
-        from pantheon.toolsets.notebook.jupyter_kernel import ExecutionMessageBuffer
-        
-        buffer = ExecutionMessageBuffer(max_executions=3)
-        
-        # Register 5 executions
-        for i in range(5):
-            buffer.register(f"msg_{i}")
-        
-        # Should only have 3 (oldest evicted)
-        assert len(buffer._buffers) == 3
-        # Oldest should be evicted
-        assert "msg_0" not in buffer._buffers
-        assert "msg_1" not in buffer._buffers
-        assert "msg_2" in buffer._buffers
-        assert "msg_3" in buffer._buffers
-        assert "msg_4" in buffer._buffers
 
-    @pytest.mark.asyncio 
-    async def test_buffer_cleanup_removes_entry(self):
-        """Test that cleanup properly removes buffer entries."""
-        from pantheon.toolsets.notebook.jupyter_kernel import ExecutionMessageBuffer
-        
-        buffer = ExecutionMessageBuffer()
-        buffer.register("test_msg")
-        assert "test_msg" in buffer._buffers
-        
-        buffer.cleanup("test_msg")
-        assert "test_msg" not in buffer._buffers
-
-    @pytest.mark.asyncio
-    async def test_buffer_message_limit(self):
-        """Test that buffer respects max messages per execution."""
-        from pantheon.toolsets.notebook.jupyter_kernel import (
-            ExecutionMessageBuffer, 
-            JupyterMessage
-        )
-        
-        buffer = ExecutionMessageBuffer(max_messages_per_execution=5)
-        buffer.register("test")
-        
-        # Add 10 messages
-        for i in range(10):
-            msg = JupyterMessage(
-                msg_type="stream",
-                content={"text": f"msg_{i}"},
-                header={},
-            )
-            buffer.add_message("test", msg)
-        
-        # Should only have 5
-        assert len(buffer._buffers["test"].messages) == 5
 
 
 class TestExecutionLockBehavior:

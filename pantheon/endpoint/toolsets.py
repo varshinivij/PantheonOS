@@ -47,6 +47,7 @@ class ToolSetManager:
         id_hash: str,
         endpoint_path: Path,
         log_dir: Path,
+        endpoint: "Endpoint" = None,
     ):
         """Initialize ToolSet Manager.
 
@@ -56,9 +57,11 @@ class ToolSetManager:
                 - local_toolset_timeout: int - timeout in seconds (default: 60)
                 - local_toolset_execution_mode: str - "thread" | "direct" (default: "direct")
                 - redirect_log: bool - whether to redirect logs (default: False)
+                - enable_notebook_streaming: bool - enable NATS streaming for integrated_notebook (default: False)
             id_hash: Unique endpoint identifier
             endpoint_path: Path to endpoint workspace
             log_dir: Path to log directory
+            endpoint: Reference to parent Endpoint instance (for checking remote backend status)
         """
         # Service registry (service_id -> service_info)
         self.services: Dict[str, Dict] = {}
@@ -73,6 +76,7 @@ class ToolSetManager:
             "local_toolset_execution_mode", "direct"
         )
         self.redirect_log: bool = config.get("redirect_log", False)
+        self.enable_notebook_streaming: bool = config.get("enable_notebook_streaming", False)
 
         # Execution engines (remote_engine is None at init, set later in Endpoint.run())
         self._local_engine: Engine = Engine()
@@ -82,6 +86,9 @@ class ToolSetManager:
         self.id_hash: str = id_hash
         self.path: Path = endpoint_path
         self.log_dir: Path = log_dir
+        
+        # Reference to parent Endpoint (for checking remote backend status)
+        self.endpoint = endpoint
 
         # State tracking
         self._services_to_start: List[str] = []
@@ -586,9 +593,27 @@ class ToolSetManager:
             if workflow_path:
                 args["workflow_path"] = workflow_path
         elif service_type == "integrated_notebook":
-            # Disable NATS streaming in local mode (e.g., REPL)
             args["workdir"] = str(self.path)
-            args["streaming_mode"] = "local"
+            
+            # Check if streaming should be enabled:
+            # 1. Primary: Check if endpoint has remote backend (endpoint._backend exists)
+            # 2. Fallback: Check config enable_notebook_streaming
+            enable_streaming = False
+            
+            if (self.endpoint and 
+                hasattr(self.endpoint, '_backend') and 
+                self.endpoint._backend is not None):
+                # Endpoint has remote backend -> enable streaming
+                enable_streaming = True
+                logger.debug("IntegratedNotebook: streaming enabled (endpoint has remote backend)")
+            elif self.enable_notebook_streaming:
+                # Config explicitly enables streaming
+                enable_streaming = True
+                logger.debug("IntegratedNotebook: streaming enabled (config override)")
+            else:
+                logger.debug("IntegratedNotebook: streaming disabled (no remote backend, no config override)")
+            
+            args["streaming_mode"] = "auto" if enable_streaming else "local"
 
         return args
 
