@@ -27,6 +27,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
+# Print the OpenAI API key
+print("OpenAI API key:", os.getenv("OPENAI_API_KEY"))
+
 # Set GENE_PANEL_DATA_DIR so evaluator can find data when running in temp workspace
 _example_dir = Path(__file__).parent.resolve()
 os.environ.setdefault("GENE_PANEL_DATA_DIR", str(_example_dir / "data"))
@@ -66,12 +69,12 @@ async def run_evolution(
     else:
         config = EvolutionConfig(
             max_iterations=iterations,
-            num_workers=4,              # Fewer workers (heavy GPU training)
+            num_workers=1,              # Fewer workers (heavy GPU training)
             num_islands=2,              # Simpler population structure
             num_inspirations=2,
             num_top_programs=3,
             max_parallel_evaluations=2, # Limited by GPU memory
-            evaluation_timeout=300,     # 5 minutes per evaluation
+            evaluation_timeout=600,     # 10 minutes per evaluation
             analyzer_timeout=180,
             feature_dimensions=["final_ari", "training_speed", "size_score"],
             early_stop_generations=30,

@@ -17,13 +17,15 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict
-
+import logging
 import numpy as np
 
 # Configuration
-EVOLUTION_EPOCHS = 10  # Reduced epochs for faster evolution iterations
+EVOLUTION_EPOCHS = 25  # Reduced epochs for faster evolution iterations
 EVALUATION_TIMEOUT = 600  # 5 minutes max per evaluation
 
+import logging                                                                                                         
+logging.basicConfig(level=logging.INFO, force=True)                                                                      
 
 def _get_data_dir() -> Path:
     """Get the data directory path."""
@@ -172,11 +174,13 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
         Dictionary with metrics and fitness_weights
     """
     workspace = Path(workspace_path)
+    logging.info("=== EVALUATOR CALLED ===")
 
     # Load the module from workspace
     try:
         rl_module = _load_module_from_workspace(workspace_path)
     except Exception as e:
+        logging.error("Failed to load rl_gene_panel.py")
         return {
             "function_score": 0.0,
             "error": f"Failed to load rl_gene_panel.py: {e}",
@@ -187,12 +191,14 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
     try:
         adata, scores_data = _load_data(data_dir)
     except Exception as e:
+        logging.error("Failed to load data")
         return {
             "function_score": 0.0,
             "error": f"Failed to load data: {e}",
         }
 
     # Extract prior subsets and candidate genes
+    logging.info("Started to extract prior subsets...")
     meta = scores_data.get("meta_vote_result", {})
     per_method_topk = scores_data.get("per_method_topk", {})
     gtilde = list(meta.get("G_tilde", adata.var_names.tolist()[:2000]))
@@ -200,7 +206,8 @@ def evaluate(workspace_path: str) -> Dict[str, Any]:
     # Run training with reduced epochs
     try:
         start_time = time.time()
-
+        
+        logging.info("Beginning training run...")
         result = rl_module.train_gene_panel_selector(
             adata=adata,
             gtilde=gtilde,

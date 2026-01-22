@@ -667,7 +667,7 @@ class SmartCurationTrainer:
                 self.best_G = list(genes)
 
             if verbose:
-                print(f"Epoch {epoch + 1}/{epochs} | eps={self.eps:.3f} | |G|={len(genes)} | R={R:.4f} | best={self.best_R:.4f}")
+                logger.info(f"Epoch {epoch + 1}/{epochs} | eps={self.eps:.3f} | |G|={len(genes)} | R={R:.4f} | best={self.best_R:.4f}")
 
             self.optimize(N_optimize)
 

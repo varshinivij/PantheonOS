@@ -348,6 +348,8 @@ def main(downsample_cell_number: int = None):
         print(f"\nDownsampling to {downsample_cell_number} cells...")
         sc.pp.subsample(adata, n_obs=downsample_cell_number, random_state=42)
         print(f"After downsampling: {adata.n_obs} cells x {adata.n_vars} genes")
+        sc.pp.filter_genes(adata, min_cells=1)
+        print(f"After gene filter: {adata.n_obs} cells x {adata.n_vars} genes")
 
     # Normalize
     sc.pp.normalize_total(adata)
