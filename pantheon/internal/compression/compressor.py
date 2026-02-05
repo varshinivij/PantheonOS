@@ -336,18 +336,9 @@ class ContextCompressor:
         return sum(1 for msg in messages if msg.get("role") == "compression")
 
     def _estimate_tokens(self, messages: list[dict]) -> int:
-        """Estimate token count for messages."""
-        # Simple estimation: ~4 chars per token for English, ~1.5 for CJK
-        total_chars = 0
-        for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                total_chars += len(content)
-            elif isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict) and "text" in item:
-                        total_chars += len(item.get("text", ""))
-        return max(1, total_chars // 4)
+        """Estimate token count for messages using litellm/tiktoken when available."""
+        from pantheon.utils.llm import _safe_token_counter
+        return max(1, _safe_token_counter(model=self.model, messages=messages))
 
     def increment_message_count(self):
         """Increment message count since last compression (call after each message)."""

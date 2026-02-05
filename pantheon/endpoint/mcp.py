@@ -267,11 +267,12 @@ class MCPServerInstance:
                 if os.name == 'nt':
                     cmd = [arg.strip('"').strip("'") for arg in cmd]
 
-                # Create StdioTransport - it will manage subprocess lifecycle
-                # Note: subprocess stderr (welcome messages) is handled by FastMCP
-                # and may appear in console. Use FASTMCP_LOG_LEVEL=WARNING to suppress.
+                # Create StdioTransport - redirect subprocess stderr to log file
+                # to prevent MCP server logs from polluting the CLI output
+                log_path = _get_mcp_log_path(self.config.command)
                 self.stdio_transport = StdioTransport(
-                    command=cmd[0], args=cmd[1:], env=self._prepare_env()
+                    command=cmd[0], args=cmd[1:], env=self._prepare_env(),
+                    log_file=log_path,
                 )
 
                 # Create FastMCP client wrapping the transport

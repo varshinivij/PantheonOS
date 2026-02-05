@@ -567,18 +567,66 @@ class Agent:
 
     @staticmethod
     def _sanitize_messages(messages: list[dict]) -> list[dict]:
-        """Drop messages missing a role before sending to the LLM."""
+        """Sanitize messages before sending to the LLM.
+
+        1. Drop messages missing a role.
+        2. Remove orphaned tool messages (tool messages whose tool_call_id
+           doesn't match any preceding assistant message's tool_calls).
+        3. Remove assistant messages with tool_calls that have no following
+           tool responses (would cause LLM to expect results that don't exist).
+        """
         if not messages:
             return []
 
-        cleaned: list[dict] = []
+        # Pass 1: drop messages without a role
+        with_role: list[dict] = []
         for msg in messages:
             role = msg.get("role")
             if role is None or (isinstance(role, str) and not role.strip()):
                 logger.warning("Dropping message without role: %s", msg)
                 continue
+            with_role.append(msg)
 
+        # Pass 2: collect valid tool_call_ids from assistant messages,
+        # then drop orphaned tool messages
+        valid_tool_call_ids: set[str] = set()
+        for msg in with_role:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        valid_tool_call_ids.add(tc_id)
+
+        cleaned: list[dict] = []
+        dropped = 0
+        for msg in with_role:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id and tc_id not in valid_tool_call_ids:
+                    dropped += 1
+                    continue
             cleaned.append(msg)
+
+        if dropped:
+            logger.warning("Dropped %d orphaned tool message(s) without matching tool_calls", dropped)
+
+        # Pass 3: ensure every assistant message with tool_calls has at least
+        # one matching tool response following it; strip tool_calls if not
+        responded_ids: set[str] = set()
+        for msg in cleaned:
+            if msg.get("role") == "tool" and msg.get("tool_call_id"):
+                responded_ids.add(msg["tool_call_id"])
+
+        for msg in cleaned:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                has_response = any(
+                    tc.get("id") in responded_ids for tc in msg["tool_calls"]
+                )
+                if not has_response:
+                    logger.warning(
+                        "Stripping tool_calls from assistant message with no tool responses"
+                    )
+                    del msg["tool_calls"]
 
         return cleaned
 
