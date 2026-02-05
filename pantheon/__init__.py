@@ -24,4 +24,10 @@ import litellm
 litellm.suppress_debug_info = True
 litellm.set_verbose = False
 
+# Suppress MCP SDK INFO logs ("Processing request of type...") that pollute CLI output
+import logging
+logging.getLogger("mcp").setLevel(logging.WARNING)
+logging.getLogger("mcp.server").setLevel(logging.WARNING)
+logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
+
 __version__ = "0.4.2"
