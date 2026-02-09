@@ -267,12 +267,11 @@ class MCPServerInstance:
                 if os.name == 'nt':
                     cmd = [arg.strip('"').strip("'") for arg in cmd]
 
-                # Create StdioTransport - redirect subprocess stderr to log file
-                # to prevent MCP server logs from polluting the CLI output
-                log_path = _get_mcp_log_path(self.config.command)
+                # Create StdioTransport
+                # Note: fastmcp 2.14.4 doesn't support log_file parameter
+                # MCP server logs will be handled by the MCP server itself
                 self.stdio_transport = StdioTransport(
-                    command=cmd[0], args=cmd[1:], env=self._prepare_env(),
-                    log_file=log_path,
+                    command=cmd[0], args=cmd[1:], env=self._prepare_env()
                 )
 
                 # Create FastMCP client wrapping the transport

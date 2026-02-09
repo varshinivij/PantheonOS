@@ -214,6 +214,7 @@ async def start_services(
     speech_to_text_model: str = None,
     endpoint_id_hash: str | None = None,
     endpoint_mode: str = "embedded",
+    nats_servers: str = None,
     **kwargs,
 ):
     """Start the chatroom service.
@@ -228,6 +229,9 @@ async def start_services(
         endpoint_id_hash: Fixed id_hash for endpoint to generate stable service_id. If not provided, auto-generated.
         endpoint_mode: How to start the endpoint. Options: "embedded" (same event loop),
                       "process" (independent subprocess).
+        nats_servers: NATS server URL(s). Supports WebSocket (wss://) and TCP (nats://).
+                     Multiple servers separated by pipe (|). Overrides NATS_SERVERS env var.
+                     Example: "wss://pantheon.aristoteleo.com/nats"
 
     Note:
         API keys should be set via:
@@ -239,6 +243,12 @@ async def start_services(
     """
     # ========== STARTUP ==========
     logger.info("[STARTUP] Starting chatroom service...")
+
+    # Override NATS_SERVERS if explicitly provided via command line
+    if nats_servers:
+        os.environ["NATS_SERVERS"] = nats_servers
+        logger.info(f"[STARTUP] Using NATS servers: {nats_servers}")
+
     from pantheon.settings import get_settings as get_settings_func
 
     # Load settings for defaults (CLI > Settings > code defaults)

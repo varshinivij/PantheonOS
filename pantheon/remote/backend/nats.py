@@ -160,12 +160,6 @@ class NATSBackend(RemoteBackend):
     async def _get_connection(self):
         """Get NATS connection, JetStream only for KV storage"""
         if not self._nc:
-            print(f"DEBUG: NATSBackend connecting with kwargs: {list(self.nats_kwargs.keys())}")
-            if "user_jwt_cb" in self.nats_kwargs:
-                print("DEBUG: user_jwt_cb is present")
-            if "signature_cb" in self.nats_kwargs:
-                print("DEBUG: signature_cb is present")
-            
             self._nc = await nats.connect(servers=self.server_urls, **self.nats_kwargs)
 
             # Initialize JetStream only for KV store
