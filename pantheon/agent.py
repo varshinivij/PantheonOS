@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 from uuid import uuid4
 
+
 from funcdesc import parse_func
 from pydantic import BaseModel, create_model
 
@@ -503,33 +504,54 @@ class Agent:
         self.response_format = response_format
         self.use_memory = use_memory
         self.memory = memory or Memory(str(uuid4()))
-        
-        # Tool timeout: use provided value, or get from settings (unified with ToolSetManager and Kernel)
-        if tool_timeout is not None:
-            self.tool_timeout = tool_timeout
-        else:
-            from .settings import get_settings
-            self.tool_timeout = get_settings().tool_timeout
-        
+
+        # Store user-specified overrides (if provided, these take priority)
+        self._tool_timeout_override = tool_timeout
+        self._max_tool_content_length_override = max_tool_content_length
+
         self.events_queue: asyncio.Queue = asyncio.Queue()
         self.force_litellm = force_litellm
         self.icon = icon
-        
-        # Tool content length: use provided value, or get from settings
-        if max_tool_content_length is not None:
-            self.max_tool_content_length = max_tool_content_length
-        else:
-            from .settings import get_settings
-            self.max_tool_content_length = get_settings().max_tool_content_length
 
         # Provider management (MCP, ToolSet, etc.)
         self.providers: dict[str, ToolProvider] = {}  # name -> ToolProvider instance
         self.not_loaded_toolsets: list[str] = []  # Track which toolsets failed to load
-        
+
         # Context injectors for dynamic content injection
         self.context_injectors: list = []  # List of ContextInjector instances
 
+    def _get_tool_timeout(self) -> int:
+        """Get tool timeout with priority: user override > settings."""
+        if self._tool_timeout_override is not None:
+            return self._tool_timeout_override
+        try:
+            from .settings import get_settings
+            return get_settings().tool_timeout
+        except Exception:
+            return 3600
+
+    def _get_max_tool_content_length(self) -> int:
+        """Get max tool content length with priority: user override > settings."""
+        if self._max_tool_content_length_override is not None:
+            return self._max_tool_content_length_override
+        try:
+            from .settings import get_settings
+            return get_settings().max_tool_content_length
+        except Exception:
+            return 10000
+
+    @property
+    def tool_timeout(self) -> int:
+        """Public API property for backward compatibility and dynamic access."""
+        return self._get_tool_timeout()
+
+    @property
+    def max_tool_content_length(self) -> int:
+        """Public API property for backward compatibility and dynamic access."""
+        return self._get_max_tool_content_length()
+
     @staticmethod
+
     def _filter_messages_by_execution_context(
         messages: list[dict], execution_context_id: str | None
     ) -> list[dict]:
@@ -545,18 +567,66 @@ class Agent:
 
     @staticmethod
     def _sanitize_messages(messages: list[dict]) -> list[dict]:
-        """Drop messages missing a role before sending to the LLM."""
+        """Sanitize messages before sending to the LLM.
+
+        1. Drop messages missing a role.
+        2. Remove orphaned tool messages (tool messages whose tool_call_id
+           doesn't match any preceding assistant message's tool_calls).
+        3. Remove assistant messages with tool_calls that have no following
+           tool responses (would cause LLM to expect results that don't exist).
+        """
         if not messages:
             return []
 
-        cleaned: list[dict] = []
+        # Pass 1: drop messages without a role
+        with_role: list[dict] = []
         for msg in messages:
             role = msg.get("role")
             if role is None or (isinstance(role, str) and not role.strip()):
                 logger.warning("Dropping message without role: %s", msg)
                 continue
+            with_role.append(msg)
 
+        # Pass 2: collect valid tool_call_ids from assistant messages,
+        # then drop orphaned tool messages
+        valid_tool_call_ids: set[str] = set()
+        for msg in with_role:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        valid_tool_call_ids.add(tc_id)
+
+        cleaned: list[dict] = []
+        dropped = 0
+        for msg in with_role:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id")
+                if tc_id and tc_id not in valid_tool_call_ids:
+                    dropped += 1
+                    continue
             cleaned.append(msg)
+
+        if dropped:
+            logger.warning("Dropped %d orphaned tool message(s) without matching tool_calls", dropped)
+
+        # Pass 3: ensure every assistant message with tool_calls has at least
+        # one matching tool response following it; strip tool_calls if not
+        responded_ids: set[str] = set()
+        for msg in cleaned:
+            if msg.get("role") == "tool" and msg.get("tool_call_id"):
+                responded_ids.add(msg["tool_call_id"])
+
+        for msg in cleaned:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                has_response = any(
+                    tc.get("id") in responded_ids for tc in msg["tool_calls"]
+                )
+                if not has_response:
+                    logger.warning(
+                        "Stripping tool_calls from assistant message with no tool responses"
+                    )
+                    del msg["tool_calls"]
 
         return cleaned
 
@@ -1041,10 +1111,10 @@ class Agent:
                     tool_metadata = result.pop("_metadata", {})
                     # Merge instead of overwrite to preserve all metadata fields
                     tool_message["_metadata"].update(tool_metadata)
-                
+
                 # Process and truncate tool result in one step
                 content = process_tool_result(
-                    result, 
+                    result,
                     max_length=self.max_tool_content_length
                 )
                 

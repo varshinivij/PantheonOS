@@ -109,7 +109,7 @@ def main() -> int:
     args = parser.parse_args()
 
     payload_path = Path(args.payload).expanduser()
-    payload = json.loads(payload_path.read_text())
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
 
     model_name = payload["model_name"]
     task = payload["task"]

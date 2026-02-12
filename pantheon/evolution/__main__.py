@@ -160,7 +160,7 @@ def cmd_run(args):
         initial_code = CodebaseSnapshot.from_directory(str(initial_path))
         print(f"Loaded {initial_code.file_count()} files from {initial_path}")
     elif initial_path.is_file():
-        initial_code = initial_path.read_text()
+        initial_code = initial_path.read_text(encoding="utf-8")
         print(f"Loaded {len(initial_code)} bytes from {initial_path}")
     else:
         print(f"Error: {initial_path} not found", file=sys.stderr)
@@ -171,7 +171,7 @@ def cmd_run(args):
     if not evaluator_path.is_file():
         print(f"Error: evaluator file {evaluator_path} not found", file=sys.stderr)
         sys.exit(1)
-    evaluator_code = evaluator_path.read_text()
+    evaluator_code = evaluator_path.read_text(encoding="utf-8")
 
     # Run evolution
     print(f"\nStarting evolution:")

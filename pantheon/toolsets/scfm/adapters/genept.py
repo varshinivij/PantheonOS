@@ -307,7 +307,7 @@ class GenePTAdapter(BaseAdapter):
 
         # Load gene names
         if names_file is not None:
-            with open(names_file, "r") as f:
+            with open(names_file, "r", encoding="utf-8") as f:
                 gene_names = [line.strip() for line in f]
         else:
             # Try to load from npz if it contains both

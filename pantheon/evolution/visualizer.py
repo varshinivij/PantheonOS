@@ -83,7 +83,7 @@ class EvolutionVisualizer:
         state_path = Path(db_path) / "evolution_state.json"
         if state_path.exists():
             try:
-                with open(state_path, "r") as f:
+                with open(state_path, "r", encoding="utf-8") as f:
                     state = json.load(f)
                     objective = state.get("objective", "")
             except Exception:

@@ -38,6 +38,20 @@ class NATSMessage:
     correlation_id: Optional[str] = None
 
 
+def _format_subject(prefix: str, suffix: str) -> str:
+    """Format NATS subject with optional prefix"""
+    if prefix:
+        return f"{prefix}.{suffix}"
+    return suffix
+
+
+def _format_bucket(prefix: str, bucket_name: str) -> str:
+    """Format KV bucket name with optional prefix"""
+    if prefix:
+        safe_prefix = prefix.replace(".", "-")
+        return f"{safe_prefix}-{bucket_name}"
+    return bucket_name
+
 class NATSStreamChannel(StreamChannel):
     """NATS Core stream channel implementation using native pub/sub for high performance and low latency"""
 
@@ -46,7 +60,10 @@ class NATSStreamChannel(StreamChannel):
         self._stream_type = stream_type
         self._backend = backend
         self._closed = False
-        self._subject = f"pantheon.stream.{stream_id}"
+        
+        # Use subject prefix if available
+        prefix = getattr(backend, "subject_prefix", "")
+        self._subject = _format_subject(prefix, f"pantheon.stream.{stream_id}")
 
     @property
     def stream_id(self) -> str:
@@ -129,8 +146,9 @@ class NATSStreamChannel(StreamChannel):
 class NATSBackend(RemoteBackend):
     """NATS remote backend - Core NATS streaming + JetStream KV storage"""
 
-    def __init__(self, server_urls: list[str], **nats_kwargs):
+    def __init__(self, server_urls: list[str], subject_prefix: str = "", **nats_kwargs):
         self.server_urls = server_urls or ["nats://localhost:4222"]
+        self.subject_prefix = subject_prefix
         self.nats_kwargs = nats_kwargs
         self._nc: nats.aio.client.Client = None
         self._js = None  # Only used for KV store
@@ -148,15 +166,20 @@ class NATSBackend(RemoteBackend):
             try:
                 self._js = self._nc.jetstream()
 
+                # Determine dynamic bucket name based on subject_prefix
+                # FIX: Force use of global 'pantheon-service' bucket for service discovery
+                # This ensures frontend and agents look in the same place despite subject prefix
+                bucket_name = "pantheon-service"
+
                 # Create KV bucket for service discovery
                 try:
-                    self._kv = await self._js.key_value("pantheon-service")
+                    self._kv = await self._js.key_value(bucket_name)
                 except Exception:
                     try:
                         self._kv = await self._js.create_key_value(
-                            bucket="pantheon-service"
+                            bucket=bucket_name
                         )
-                        logger.debug("Created NATS KV bucket: pantheon-service")
+                        logger.debug(f"Created NATS KV bucket: {bucket_name}")
                     except Exception as e:
                         logger.warning(
                             f"KV store creation failed: {e}, continuing without KV store"
@@ -190,6 +213,8 @@ class NATSBackend(RemoteBackend):
             raise ValueError("service_id cannot be None")
 
         nc, _ = await self._get_connection()
+        # Pass subject_prefix to service
+        kwargs["subject_prefix"] = self.subject_prefix
         service = NATSService(nc, service_id, kv_store=self._kv, **kwargs)
 
         try:
@@ -246,20 +271,25 @@ class NATSService(RemoteService):
         service_id: str,
         kv_store=None,
         timeout: float | None = None,
+        subject_prefix: str = "",
         **kwargs,
     ):
         self.nc = nc
         self.service_id = service_id
         self.kv_store = kv_store
-        
-        # Use provided timeout or get from settings (unified with ToolSetManager and Kernel)
+
+        # Use provided timeout or get from settings
         if timeout is not None:
             self.timeout = timeout
         else:
-            from pantheon.settings import get_settings
-            self.timeout = get_settings().tool_timeout
-            
-        self.service_subject = f"pantheon.service.{service_id}"
+            try:
+                from pantheon.settings import get_settings
+                self.timeout = get_settings().tool_timeout
+            except Exception:
+                self.timeout = 3600
+
+        self.service_subject = _format_subject(subject_prefix, f"pantheon.service.{service_id}")
+
         self._service_info = ServiceInfo(
             service_id=service_id,
             service_name="",
@@ -381,13 +411,16 @@ class NATSRemoteWorker(RemoteWorker):
         self.kv_store = None
         self._service_name = service_name
         self._description = description
-        
-        # Use provided timeout or get from settings (unified with ToolSetManager and Kernel)
+
+        # Use provided timeout or get from settings
         if "timeout" in kwargs:
             self.timeout = kwargs["timeout"]
         else:
-            from pantheon.settings import get_settings
-            self.timeout = get_settings().tool_timeout
+            try:
+                from pantheon.settings import get_settings
+                self.timeout = get_settings().tool_timeout
+            except Exception:
+                self.timeout = 3600
 
         # Generate service ID using full hash for frontend compatibility
         id_hash = kwargs.get("id_hash")
@@ -402,7 +435,9 @@ class NATSRemoteWorker(RemoteWorker):
             fallback_id = f"{service_name}_{str(uuid.uuid4())[:8]}"
             self._service_id = hashlib.sha256(fallback_id.encode()).hexdigest()
 
-        self.service_subject = f"pantheon.service.{self._service_id}"
+        # Use subject prefix if available from backend
+        prefix = getattr(backend, "subject_prefix", "")
+        self.service_subject = _format_subject(prefix, f"pantheon.service.{self._service_id}")
         self._functions: Dict[str, Callable] = {}
         self._running = False
         self._subscription = None
@@ -423,17 +458,25 @@ class NATSRemoteWorker(RemoteWorker):
 
     async def run(self):
         """Start worker"""
+        logger.info(f"[NATSWorker.run] Starting worker for subject: {self.service_subject}")
         if self.nc is None:
+            logger.info(f"[NATSWorker.run] Connecting to NATS: {self._backend.server_urls}")
             self.nc, _ = await self._backend._get_connection()
             self.kv_store = self._backend._kv
+            logger.info(f"[NATSWorker.run] NATS connected: {self.nc.connected_url}")
 
         self._running = True
         await self._register_to_kv_store()
+        logger.info(f"[NATSWorker.run] KV store registered, subscribing to: {self.service_subject}")
 
         self._subscription = await self.nc.subscribe(
             self.service_subject, cb=self._handle_request
         )
         logger.info(f"NATS worker: {self.service_subject} registered.")
+
+        # Signal that the worker is ready to accept requests
+        if hasattr(self, '_on_ready') and self._on_ready:
+            self._on_ready.set()
 
         while self._running:
             await asyncio.sleep(1)
@@ -575,6 +618,9 @@ class NATSRemoteWorker(RemoteWorker):
                 await msg.respond(cloudpickle.dumps(response))
 
         except Exception as e:
+            import traceback
+            error_msg = f"Error processing {method if 'method' in locals() else 'request'}: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
             error_response = {"error": str(e)}
             await msg.respond(json.dumps(error_response).encode("utf-8"))
 

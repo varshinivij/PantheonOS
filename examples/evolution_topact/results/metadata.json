@@ -1,0 +1,174 @@
+{
+  "config": {
+    "max_iterations": 50,
+    "checkpoint_interval": 10,
+    "early_stop_generations": 200,
+    "num_workers": 4,
+    "num_islands": 2,
+    "migration_interval": 20,
+    "migration_rate": 0.1,
+    "feature_dimensions": [
+      "speed_score",
+      "fidelity_score"
+    ],
+    "feature_bins": 10,
+    "feature_range_padding": 0.1,
+    "feature_range_adaptive": true,
+    "archive_ratio": 0.25,
+    "population_size": 500,
+    "num_inspirations": 2,
+    "num_top_programs": 3,
+    "exploration_ratio": 0.2,
+    "exploitation_ratio": 0.7,
+    "evaluation_timeout": 300,
+    "max_parallel_evaluations": 2,
+    "function_weight": 1.0,
+    "llm_weight": 0.0,
+    "cascade_evaluation": false,
+    "cascade_thresholds": [
+      0.3,
+      0.6,
+      0.8
+    ],
+    "feedback_max_lines_per_file": null,
+    "diff_based_evolution": true,
+    "max_code_length": 50000,
+    "max_diff_size": 5000,
+    "temperature": 0.7,
+    "max_retries": 3,
+    "mutation_timeout": 120,
+    "use_analyzer": true,
+    "analyzer_model": "normal",
+    "analyzer_timeout": 120,
+    "top_programs_probability": 0.5,
+    "inspirations_probability": 0.2,
+    "analyzer_use_python": false,
+    "analyzer_python_workdir": null,
+    "analyzer_exploration_initial": 0.9,
+    "analyzer_exploration_final": 0.1,
+    "analyzer_exploration_decay_generations": 10,
+    "summarizer_timeout": 30,
+    "evolution_history_max_siblings": 5,
+    "evolution_history_max_ancestors": 10,
+    "evolution_history_max_chars": 2000,
+    "mutator_model": "normal",
+    "feedback_model": "normal",
+    "db_path": "results/",
+    "workspace_path": null,
+    "save_prompts": true,
+    "save_all_programs": false,
+    "log_level": "DEBUG",
+    "log_iterations": true,
+    "log_improvements": true
+  },
+  "best_program_id": "7d7e2251",
+  "archive": [
+    "ec97f9f8",
+    "8447e299",
+    "06b5c36a",
+    "28d03e5b",
+    "afbcaf7c",
+    "7d7e2251",
+    "21f9bd8d",
+    "1862c6aa",
+    "0b555396",
+    "2130e91b",
+    "77039545",
+    "35a5d40b"
+  ],
+  "islands": [
+    [
+      "5f707d7a",
+      "4935bb99",
+      "057a2372",
+      "8447e299",
+      "9a418ef1",
+      "55e3ba25",
+      "2fbce00d",
+      "0b8dfeb0",
+      "5116bb88",
+      "6f8665f1",
+      "d14aa7d9",
+      "2130e91b",
+      "d38170b3",
+      "35a5d40b",
+      "7c08a085",
+      "afbcaf7c",
+      "21f9bd8d",
+      "1862c6aa",
+      "9643bda9",
+      "669b6d53",
+      "29cc7f0a",
+      "9005a8d2",
+      "54b08354",
+      "8aec6a6c",
+      "13b0311c",
+      "cceadb2c",
+      "a1309e23",
+      "19e74be6",
+      "7a889dbb",
+      "c6aed697"
+    ],
+    [
+      "4c56875a",
+      "77039545",
+      "00be6b41",
+      "c9395c21",
+      "0b555396",
+      "376de011",
+      "bcc23751",
+      "cd248fc5",
+      "ec97f9f8",
+      "06b5c36a",
+      "53c374df",
+      "d6008be4",
+      "7d7e2251",
+      "6aa79e1a",
+      "cea3965f",
+      "cae00711",
+      "9a29d4d2",
+      "28d03e5b",
+      "a367c0f8",
+      "4b51f110"
+    ]
+  ],
+  "total_added": 50,
+  "total_improved": 0,
+  "feature_ranges": {
+    "speed_score": [
+      0.016315994869648947,
+      0.5
+    ],
+    "fidelity_score": [
+      0.5,
+      0.9997
+    ]
+  },
+  "metric_ranges": {
+    "llm_score": [
+      0.5,
+      0.5
+    ],
+    "speed_score": [
+      0.016315994869648947,
+      0.4516609721378545
+    ],
+    "fidelity_score": [
+      0.9997,
+      0.9997
+    ],
+    "execution_time": [
+      1.214050054550171,
+      60.28955101966858
+    ],
+    "fidelity_pct": [
+      99.97,
+      99.97
+    ],
+    "function_score": [
+      0.0,
+      0.0
+    ]
+  },
+  "next_order": 50
+}

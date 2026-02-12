@@ -992,7 +992,7 @@ class EvolutionDatabase:
             "metric_ranges": {k: list(v) for k, v in self.metric_ranges.items()},
             "next_order": self._next_order,
         }
-        with open(save_dir / "metadata.json", "w") as f:
+        with open(save_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
         # Save programs
@@ -1003,7 +1003,7 @@ class EvolutionDatabase:
             program.save(str(programs_dir / f"{program_id}.json"))
 
         # Save island coordinates (for dynamic bin calculation)
-        with open(save_dir / "island_coordinates.json", "w") as f:
+        with open(save_dir / "island_coordinates.json", "w", encoding="utf-8") as f:
             json.dump(self.island_coordinates, f, indent=2)
 
         logger.info(f"Saved database with {len(self.programs)} programs to {path}")
@@ -1022,7 +1022,7 @@ class EvolutionDatabase:
         load_dir = Path(path)
 
         # Load metadata
-        with open(load_dir / "metadata.json", "r") as f:
+        with open(load_dir / "metadata.json", "r", encoding="utf-8") as f:
             metadata = json.load(f)
 
         config = EvolutionConfig.from_dict(metadata.get("config", {}))
@@ -1052,7 +1052,7 @@ class EvolutionDatabase:
         # Try to load island_coordinates (new format)
         coordinates_path = load_dir / "island_coordinates.json"
         if coordinates_path.exists():
-            with open(coordinates_path, "r") as f:
+            with open(coordinates_path, "r", encoding="utf-8") as f:
                 db.island_coordinates = json.load(f)
         else:
             # Backward compatibility: rebuild coordinates from programs

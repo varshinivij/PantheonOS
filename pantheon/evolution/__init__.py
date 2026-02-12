@@ -18,8 +18,8 @@ Example usage:
 
     # Run evolution
     result = await team.evolve(
-        initial_code=open("program.py").read(),
-        evaluator_code=open("evaluator.py").read(),
+        initial_code=open("program.py", encoding="utf-8").read(),
+        evaluator_code=open("evaluator.py", encoding="utf-8").read(),
         objective="Optimize for speed while maintaining correctness",
     )
 

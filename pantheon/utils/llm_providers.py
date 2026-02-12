@@ -76,6 +76,17 @@ def detect_provider(model: str, force_litellm: bool) -> ProviderConfig:
     )
 
 
+def is_responses_api_model(config: ProviderConfig) -> bool:
+    """Check if model should use the OpenAI Responses API instead of Chat Completions.
+
+    Currently triggers for OpenAI models with "codex" in the name (e.g. codex-mini-latest).
+    """
+    return (
+        config.provider_type == ProviderType.OPENAI
+        and "codex" in config.model_name.lower()
+    )
+
+
 def get_base_url(provider: ProviderType) -> Optional[str]:
     """Get base URL from environment variables or settings.
 
@@ -298,6 +309,13 @@ async def call_llm_provider(
         remove_metadata,
     )
 
+    logger.debug(
+        f"[CALL_LLM_PROVIDER] Starting LLM call | "
+        f"Provider={config.provider_type.value} | "
+        f"Model={config.model_name} | "
+        f"BaseUrl={config.base_url}"
+    )
+
     # Initialize model_params if None
     model_params = model_params or {}
 
@@ -324,12 +342,38 @@ async def call_llm_provider(
     clean_messages = remove_metadata(clean_messages)
 
     # Call appropriate provider
+    # Route codex models through the OpenAI Responses API
+    if is_responses_api_model(config):
+        from .llm import acompletion_responses
+
+        model_name = config.model_name
+        if model_name.startswith("openai/"):
+            model_name = model_name.split("/", 1)[1]
+
+        logger.debug(
+            f"[CALL_LLM_PROVIDER] Using Responses API for model={model_name}"
+        )
+        # acompletion_responses returns a normalised message dict directly
+        return await acompletion_responses(
+            messages=clean_messages,
+            model=model_name,
+            tools=tools,
+            response_format=response_format,
+            process_chunk=process_chunk,
+            base_url=config.base_url,
+            model_params=model_params,
+        )
+
     if config.provider_type == ProviderType.OPENAI:
         # LiteLLM requires explicit provider prefixes for models it cannot auto-detect.
         # Ensure OpenAI models include the provider namespace to avoid BadRequestError.
         model_name = config.model_name
         if "/" not in model_name:
             model_name = f"{config.provider_type.value}/{model_name}"
+
+        logger.debug(
+            f"[CALL_LLM_PROVIDER] Using OpenAI provider with model={model_name}"
+        )
         complete_resp = await acompletion_litellm(
             messages=clean_messages,
             model=model_name,
@@ -342,6 +386,9 @@ async def call_llm_provider(
         error_prefix = "OpenAI"
 
     else:  # LITELLM
+        logger.debug(
+            f"[CALL_LLM_PROVIDER] Using LiteLLM provider with model={config.model_name}"
+        )
         complete_resp = await acompletion_litellm(
             messages=clean_messages,
             model=config.model_name,

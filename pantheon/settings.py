@@ -149,13 +149,24 @@ class Settings:
     SETTINGS_FILE = "settings.json"
     MCP_FILE = "mcp.json"
 
-    def __init__(self, work_dir: Optional[Path] = None):
+    def __init__(self, work_dir: Optional[Path] = None, env_override: bool = False):
         """
         Initialize settings manager.
 
         Args:
             work_dir: Working directory for project-level config.
                       Defaults to PROJECT_ROOT (captured at module load, before any chdir).
+            env_override: Whether to override existing environment variables when loading .env file.
+                         Default: False (respects dynamically set environment variables).
+                         Set to True to force .env values to override existing environment variables.
+
+        Note:
+            API keys should be set via:
+            - Environment variables: export OPENAI_API_KEY="sk-..."
+            - .env file: OPENAI_API_KEY=sk-...
+            - settings.json api_keys section
+
+            Use LiteLLM Proxy mode for secure API key handling (LITELLM_PROXY_ENABLED environment variable).
         """
         from .constant import PROJECT_ROOT
 
@@ -167,6 +178,7 @@ class Settings:
         self._settings: Dict[str, Any] = {}
         self._mcp: Dict[str, Any] = {}
         self._loaded = False
+        self._env_override = env_override  # Control .env loading behavior
 
     @property
     def config_dir(self) -> Path:
@@ -409,11 +421,16 @@ class Settings:
             logger.debug(f"Loaded user config from {self.user_home}")
 
         # Load env_file
+        # Priority: dynamically set variables > .env file > defaults
+        # Use _env_override to control whether .env overwrites existing environment variables
         env_file = self._settings.get("env_file", ".env")
         env_path = self.work_dir / env_file
         if env_path.exists():
-            load_dotenv(env_path)
-            logger.debug(f"Loaded environment from {env_path}")
+            load_dotenv(env_path, override=self._env_override)
+            if self._env_override:
+                logger.debug(f"Loaded environment from {env_path} (override=True)")
+            else:
+                logger.debug(f"Loaded environment from {env_path} (respecting existing variables)")
 
         self._load_mcp()
 
@@ -433,6 +450,22 @@ class Settings:
         self._merge_settings(self._mcp, mcp_user)
         if mcp_user:
             logger.debug(f"Loaded user MCP config from {self.user_home}")
+
+    def __getitem__(self, key: str) -> Any:
+        """
+        Get a setting value using dictionary-style access.
+
+        Args:
+            key: Key to look up in settings (e.g., 'endpoint', or any top-level key)
+
+        Returns:
+            Setting value
+
+        Raises:
+            KeyError: If key not found
+        """
+        self._ensure_loaded()
+        return self._settings[key]
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -464,8 +497,7 @@ class Settings:
 
         Priority:
         1. Environment variable (os.environ)
-        2. env_file loaded values
-        3. settings.json api_keys section
+        2. settings.json api_keys section
 
         Args:
             key: API key name (e.g., 'OPENAI_API_KEY')
@@ -475,13 +507,28 @@ class Settings:
         """
         self._ensure_loaded()
 
-        # Environment variable has highest priority
+        logger.debug(f"[SETTINGS.GET_API_KEY] Looking up key={key}")
+
+        # 1. Environment variable (highest priority)
         env_value = os.environ.get(key)
         if env_value:
+            logger.debug(
+                f"[SETTINGS.GET_API_KEY] ✓ Retrieved key {key} from "
+                f"os.environ | ValueLength={len(env_value)}"
+            )
             return env_value
 
-        # Fall back to settings.json
-        return self._settings.get("api_keys", {}).get(key)
+        # 2. Fall back to settings.json
+        settings_value = self._settings.get("api_keys", {}).get(key)
+        if settings_value:
+            logger.debug(
+                f"[SETTINGS.GET_API_KEY] ✓ Retrieved key {key} from "
+                f"settings.json | ValueLength={len(settings_value)}"
+            )
+            return settings_value
+
+        logger.debug(f"[SETTINGS.GET_API_KEY] Key {key} not found in any source")
+        return None
 
     def get_endpoint_config(self) -> Dict[str, Any]:
         """
@@ -544,6 +591,8 @@ class Settings:
             "server_urls": server_urls,
             "server_host": os.environ.get("PANTHEON_SERVER_HOST")
             or remote.get("server_host", "localhost"),
+            "jwt": os.environ.get("NATS_JWT"),
+            "subject_prefix": os.environ.get("NATS_SUBJECT_PREFIX"),
         }
 
     def get_knowledge_config(self) -> Dict[str, Any]:
@@ -665,29 +714,141 @@ class Settings:
         self._ensure_loaded()
         return self._mcp
 
+    def reload(self, env_override: Optional[bool] = None) -> None:
+        """Reload settings and .env file.
+
+        This reloads:
+        1. Settings files (settings.json) - all three layers
+        2. Environment file (.env)
+        3. MCP configuration (mcp.json)
+        4. Model selector cache (ensures configuration changes take effect)
+        5. Package manager cache (ensures packages path is synchronized)
+
+        Args:
+            env_override: Whether to override existing environment variables when reloading .env.
+
+                         Default (None): Uses True for reload (user explicitly requests reload)
+                         This means reload() will force .env values to override existing variables.
+
+                         Rationale: When a user explicitly calls reload(), they typically want
+                         to refresh all settings from files, including .env. This makes .env
+                         values "active" again, overriding any runtime modifications.
+
+                         If False: Respects dynamically set environment variables (advanced use)
+                         If True: Forces .env values to override everything
+
+        Examples:
+            # Standard reload: force .env values
+            settings.reload()  # env_override defaults to True
+
+            # Reload but preserve dynamic variables
+            settings.reload(env_override=False)
+
+        After reload, any changes in .env or settings.json will take effect immediately.
+        """
+        # Default to True for reload: user explicitly wants to reload from .env
+        if env_override is None:
+            env_override = True
+
+        self._env_override = env_override
+        self._loaded = False
+        self._ensure_loaded()
+
+        # Reset ModelSelector cache to ensure configuration changes take effect.
+        # This is critical because ModelSelector caches available providers and
+        # detected provider, which depend on environment variables from .env.
+        # Without this reset, changes to .env or settings.json won't be reflected
+        # in downstream code (e.g., generate_image model selection).
+        try:
+            from pantheon.utils.model_selector import reset_model_selector
+
+            reset_model_selector()
+        except ImportError:
+            pass  # model_selector module might not be available
+
+        # Reset PackageManager cache to ensure it uses updated configuration.
+        try:
+            from pantheon.internal.package_runtime import reset_package_manager
+
+            reset_package_manager()
+        except ImportError:
+            pass  # package_runtime module might not be available
+
+        logger.info("Settings reloaded successfully")
+
+
+
+
 
 # Global settings instance (lazy loaded)
 _settings: Optional[Settings] = None
 
 
-def get_settings(work_dir: Optional[Path] = None) -> Settings:
+def get_settings(
+    work_dir: Optional[Path] = None,
+    env_override: Optional[bool] = None,
+    mode: str = "safe"
+) -> Settings:
     """
     Get or create the global settings instance.
 
     Args:
         work_dir: Working directory. If provided, creates new instance.
 
+        env_override: Explicit override for environment variable behavior.
+                     If provided, takes precedence over mode parameter.
+                     - True: Force .env values to override existing environment variables
+                     - False: Respect dynamically set environment variables
+
+        mode: High-level mode for environment variable handling (if env_override not provided):
+              - "safe" (default): env_override=False
+                Respects dynamically set environment variables (e.g., from --auto-start-nats).
+                Use for initial configuration loading.
+
+              - "reload": env_override=True
+                Forces .env file to override existing environment variables.
+                Use when user explicitly requests to reload settings (e.g., from frontend).
+
+              - "strict": env_override=True
+                Same as "reload" - forces .env values to take precedence.
+
     Returns:
         Settings instance
+
+    Examples:
+        # Default: safe mode, doesn't override dynamic variables
+        settings = get_settings()
+
+        # Reload mode: force .env to override everything
+        settings = get_settings(mode='reload')
+
+        # Explicit override (takes precedence over mode)
+        settings = get_settings(env_override=True)
+
+    Note:
+        API keys should be set via environment variables, .env file, or
+        settings.json api_keys section.
+
+        For secure API key handling, use LiteLLM Proxy mode by setting
+        LITELLM_PROXY_ENABLED environment variable.
     """
     global _settings
 
+    # Determine env_override based on mode if not explicitly provided
+    if env_override is None:
+        if mode in ("reload", "strict"):
+            env_override = True
+        elif mode == "safe":
+            env_override = False
+        else:
+            raise ValueError(f"Unknown mode: {mode}. Must be 'safe', 'reload', or 'strict'")
+
     if work_dir is not None:
-        # Create new instance with custom work_dir
-        return Settings(work_dir)
+        # Create new instance with custom parameters
+        return Settings(work_dir, env_override=env_override)
 
     if _settings is None:
-        _settings = Settings()
+        _settings = Settings(env_override=env_override)
 
     return _settings
 

@@ -39,11 +39,22 @@ class FileTransferToolSet(FileManagerToolSetBase):
             return {"success": False, "error": str(e)}
 
     @tool
-    async def write_chunk(self, handle_id: str, data: bytes):
-        """Write a chunk to a file."""
+    async def write_chunk(self, handle_id: str, data):
+        """Write a chunk to a file.
+
+        Args:
+            handle_id: File handle ID from open_file_for_write.
+            data: Binary data as bytes (from cloudpickle) or
+                  base64-encoded string (from JSON/frontend clients).
+        """
         if handle_id not in self._handles:
             return {"success": False, "error": "Handle not found"}
         handle = self._handles[handle_id]
+        # Frontend JSON clients send base64-encoded strings
+        if isinstance(data, str):
+            data = base64.b64decode(data)
+        elif not isinstance(data, (bytes, bytearray)):
+            return {"success": False, "error": f"Unsupported data type: {type(data).__name__}"}
         handle.write(data)
         return {"success": True}
 
@@ -56,6 +67,47 @@ class FileTransferToolSet(FileManagerToolSetBase):
         handle.close()
         del self._handles[handle_id]
         return {"success": True}
+
+    @tool
+    async def open_file_for_read(self, file_path: str):
+        """Open a file for chunked reading. Returns handle_id and total_size."""
+        if ".." in file_path:
+            return {"success": False, "error": "File path cannot contain '..'"}
+        path = self.path / file_path
+        if not path.exists():
+            return {"success": False, "error": "File does not exist"}
+        handle_id = str(uuid.uuid4())
+        try:
+            handle = open(path, "rb")
+            total_size = path.stat().st_size
+            self._handles[handle_id] = handle
+            return {"success": True, "handle_id": handle_id, "total_size": total_size}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @tool
+    async def read_chunk(self, handle_id: str, size: int = 512 * 1024):
+        """Read a chunk from an open file handle.
+
+        Args:
+            handle_id: File handle ID from open_file_for_read.
+            size: Number of bytes to read (before base64 encoding).
+        """
+        if handle_id not in self._handles:
+            return {"success": False, "error": "Handle not found"}
+        handle = self._handles[handle_id]
+        try:
+            data = handle.read(size)
+            if not data:
+                return {"success": True, "data": "", "bytes_read": 0, "eof": True}
+            return {
+                "success": True,
+                "data": base64.b64encode(data).decode("utf-8"),
+                "bytes_read": len(data),
+                "eof": len(data) < size,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @tool
     async def read_file(

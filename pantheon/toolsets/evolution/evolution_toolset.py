@@ -242,7 +242,7 @@ class EvolutionSession:
         session_file = Path(self.workspace_path) / "session_state.json"
         session_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(session_file, "w") as f:
+        with open(session_file, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
     
     @classmethod
@@ -254,7 +254,7 @@ class EvolutionSession:
             return None
         
         try:
-            with open(session_file) as f:
+            with open(session_file, encoding="utf-8") as f:
                 data = json.load(f)
             return cls.from_dict(data, workspace_path)
         except Exception as e:

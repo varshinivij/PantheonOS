@@ -171,10 +171,14 @@ async def _start_async(
 
         os.environ.setdefault("FASTMCP_LOG_LEVEL", ext_level)
 
-        # Also set Python logging for uvicorn
+        # Also set Python logging for uvicorn and MCP SDK
         logging.getLogger("FastMCP").setLevel(ext_level)
         logging.getLogger("uvicorn").setLevel(ext_level)
         logging.getLogger("uvicorn.access").setLevel(ext_level)
+        # Suppress MCP SDK "Processing request of type" INFO logs
+        logging.getLogger("mcp").setLevel(ext_level)
+        logging.getLogger("mcp.server").setLevel(ext_level)
+        logging.getLogger("mcp.server.lowlevel.server").setLevel(ext_level)
 
     # Use original CWD as workspace if not specified
     # This ensures file operations work relative to user's launch directory

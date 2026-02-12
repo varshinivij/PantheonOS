@@ -894,7 +894,7 @@ class SCFMToolSet(ToolSet):
 
         with tempfile.TemporaryDirectory(prefix="scfm_conda_") as tmpdir:
             payload_path = Path(tmpdir) / "payload.json"
-            payload_path.write_text(json.dumps(payload, ensure_ascii=False))
+            payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
             cmd = [
                 "conda",

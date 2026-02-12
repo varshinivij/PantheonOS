@@ -30,7 +30,7 @@ class TaskToolSet(ToolSet):
         path = Path(brain_dir) / self.STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {"last": self._last, "state": self.state.to_dict()}
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _load(self, brain_dir: str):
         """Lazy load state from disk (only once)."""
@@ -41,7 +41,7 @@ class TaskToolSet(ToolSet):
         if not path.exists():
             return
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             self._last = data.get("last", {})
             self.state = ConversationState.from_dict(data.get("state", {}))
             logger.info(f"[TaskToolSet] Restored state from {path}")

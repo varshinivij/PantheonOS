@@ -54,7 +54,7 @@ class Memory:
         Args:
             file_path: The path to save the memory to.
         """
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "id": self.id,
@@ -74,7 +74,7 @@ class Memory:
         Args:
             file_path: The path to load the memory from.
         """
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             memory = cls(data["name"])
             memory.id = data["id"]

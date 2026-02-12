@@ -101,10 +101,10 @@ def load_single_template(file_path: str | Path) -> dict:
         with open(path, "rb") as f:
             return tomllib.load(f)
     elif path.suffix == ".yaml" or path.suffix == ".yml":
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     elif path.suffix == ".json":
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")

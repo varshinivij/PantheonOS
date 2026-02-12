@@ -32,7 +32,7 @@ class EndpointHub(ToolSet):
     def load_endpoint_config_paths(self):
         print(self.config_dir)
         for config_file in self.config_dir.glob("*.yaml"):
-            with open(config_file, "r") as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 self.endpoint_config_paths[config_file.stem] = config_file
                 print(f"Add endpoint config: {config_file}")
 
@@ -63,7 +63,7 @@ class EndpointHub(ToolSet):
                     "success": False,
                     "error": f"Static config '{config_name}' not found",
                 }
-            with open(self.endpoint_config_paths[config_name], "r") as f:
+            with open(self.endpoint_config_paths[config_name], "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f)
         else:
             # Validate custom_config
@@ -85,7 +85,7 @@ class EndpointHub(ToolSet):
         # Create log directory and config file
         (workspace_path / ".endpoint-logs").mkdir(parents=True, exist_ok=True)
         tmp_config_file = workspace_path / ".endpoint-logs" / "endpoint_config.yaml"
-        with open(tmp_config_file, "w") as f:
+        with open(tmp_config_file, "w", encoding="utf-8") as f:
             yaml.dump(config, f)
         cmd = (
             f"python -m pantheon.toolsets.endpoint start "
@@ -101,7 +101,7 @@ class EndpointHub(ToolSet):
         await job.wait_until_status("running")
         await asyncio.sleep(1)
         self.jobs[id_hash] = job
-        with open(workspace_path / ".endpoint-logs" / "service_id.txt", "r") as f:
+        with open(workspace_path / ".endpoint-logs" / "service_id.txt", "r", encoding="utf-8") as f:
             service_id = f.read().strip()
 
         logger.info(f"Endpoint: {service_id} started with config: {config}")

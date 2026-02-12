@@ -113,6 +113,84 @@ GPU acceleration, and memory optimization.
 
 ---
 
+## Upstream Processing
+
+Technology-specific pipelines for processing raw sequencing data into
+analysis-ready count matrices with spatial coordinates. These cover the steps
+that precede standard single-cell analysis (QC, normalization, clustering, etc.).
+
+**Skill index**: [upstream_processing/SKILL.md](./upstream_processing/SKILL.md)
+
+**Technologies covered**:
+- **nf-core Pipelines**: 143+ curated Nextflow pipelines for scRNA-seq, spatial
+  transcriptomics, bulk RNA-seq, ATAC-seq, ChIP-seq, CUT&Run, methylation,
+  and variant calling (WGS/WES)
+- **OpenST**: Open-source spatial transcriptomics at sub-cellular resolution —
+  flow cell barcode preprocessing, spacemake alignment, image registration,
+  Cellpose segmentation, 3D reconstruction, and downstream analysis
+
+**When to use**:
+- Processing raw BCL/FASTQ files with nf-core community pipelines
+- Running technology-specific alignment and preprocessing pipelines
+- Spatial coordinate registration and cell segmentation
+- Variant calling from WGS/WES/targeted sequencing
+- 3D reconstruction from serial tissue sections
+
+---
+
+## Database Access
+
+Tools for querying genomic databases, downloading sequencing data from public
+repositories, and accessing large-scale single-cell datasets programmatically.
+
+**Skill index**: [database_access/SKILL.md](./database_access/SKILL.md)
+
+**Tools covered**:
+- **gget**: Python package with 23 modules for querying Ensembl, NCBI, UniProt,
+  ARCHS4, Enrichr, COSMIC, OpenTargets, CellxGene, cBioPortal, PDB, and Bgee
+- **iSeq**: Bash CLI for downloading sequencing data from GSA, SRA, ENA, DDBJ,
+  and GEO databases with parallel downloads and Aspera support
+- **CZ CELLxGENE Census**: Cloud-based Python API for accessing 217M+
+  single-cell RNA-seq observations with flexible metadata queries and
+  pre-computed embeddings
+
+**When to use**:
+- Querying gene/protein information from public databases
+- Downloading raw sequencing data (FASTQ/SRA) from public repositories
+- Accessing curated single-cell RNA-seq datasets by tissue, cell type, disease
+- Performing enrichment analysis or cancer mutation queries
+- Fetching reference genomes, annotations, and sequences
+
+---
+
+## Supplementary Reference: SC Best Practices
+
+For more comprehensive guidance on single-cell and spatial omics analysis, refer to
+the **SC Best Practices** skill collection, derived from the authoritative
+[Single-cell Best Practices](https://www.sc-best-practices.org) book. It covers
+the full analysis pipeline from preprocessing to reproducibility, including
+detailed workflows, method comparisons, and code examples for the scverse ecosystem.
+
+**Skill index**: [sc_best_practices/SKILL.md](./sc_best_practices/SKILL.md)
+
+**Topics covered**:
+- Introduction & raw data processing frameworks
+- Preprocessing (QC, normalization, HVG, dimensionality reduction)
+- Clustering, annotation & dataset integration
+- Trajectory analysis (pseudotime, RNA velocity, lineage tracing)
+- Differential expression & condition analysis
+- Gene regulatory networks & cell-cell communication
+- Bulk deconvolution, chromatin accessibility (scATAC-seq)
+- Spatial omics (neighborhood analysis, deconvolution, imputation)
+- Surface protein (CITE-seq), immune repertoire (TCR/BCR)
+- Multimodal integration & reproducibility
+
+When the skills above provide task-specific workflows, these supplementary
+references offer broader context, alternative methods, and detailed best practices
+to complement your analysis.
+
+---
+
 ## Using Skills
 
 1. **Before analysis**: Scan this index for relevant skills

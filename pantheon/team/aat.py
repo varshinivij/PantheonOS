@@ -57,7 +57,7 @@ class AgentAsToolTeam(Team):
         # Report the instruction to the sub-agent
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         record_path = self.record_dir / f"{timestamp}_instruction_{caller}__call__{name}.md"
-        with open(record_path, "w") as f:
+        with open(record_path, "w", encoding="utf-8") as f:
             f.write(instruction)
 
         try:
@@ -67,13 +67,13 @@ class AgentAsToolTeam(Team):
             if self.record:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 record_path = self.record_dir / f"{timestamp}_result_{caller}__call__{name}.md"
-                with open(record_path, "w") as f:
+                with open(record_path, "w", encoding="utf-8") as f:
                     f.write(str(resp.content))
         except Exception as e:
             if self.record:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 record_path = self.record_dir / f"{timestamp}_error_{caller}__call__{name}.md"
-                with open(record_path, "w") as f:
+                with open(record_path, "w", encoding="utf-8") as f:
                     f.write(str(e))
             raise e
         return resp.content

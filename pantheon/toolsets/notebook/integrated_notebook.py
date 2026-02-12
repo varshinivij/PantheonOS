@@ -161,7 +161,7 @@ class IntegratedNotebookToolSet(ToolSet):
         """Load notebook contexts from persistence"""
         try:
             if self.persistence_file.exists():
-                with open(self.persistence_file, "r") as f:
+                with open(self.persistence_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
                 # Convert back to NotebookContext objects
@@ -201,7 +201,7 @@ class IntegratedNotebookToolSet(ToolSet):
                 "last_updated": datetime.now().isoformat(),
             }
 
-            with open(self.persistence_file, "w") as f:
+            with open(self.persistence_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
 
             logger.debug(f"Saved {len(self.notebook_contexts)} context(s)")

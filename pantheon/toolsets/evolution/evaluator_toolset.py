@@ -97,7 +97,7 @@ class EvaluatorToolSet(ToolSet):
 
                 # Write code to file
                 code_file = workspace_path / filename
-                code_file.write_text(code)
+                code_file.write_text(code, encoding="utf-8")
 
                 # Run evaluator
                 result = await self._run_evaluator(

@@ -133,6 +133,8 @@ class Repl(ReplUI):
         self._tools_executing = False
         self._current_agent_task = None
         self._current_tool_name = None
+        # Flag to skip stale token update after compression
+        self._skip_token_update = False
 
         # Setup history file
         self.history_file = Path(CLI_HISTORY_FILE)
@@ -161,6 +163,14 @@ class Repl(ReplUI):
             EditHandler(self.console, self),
             RevertCommandHandler(self.console, self),
         ]
+
+        # Save terminal state for restoration on exit
+        self._saved_terminal_attrs = None
+        try:
+            import termios
+            self._saved_terminal_attrs = termios.tcgetattr(sys.stdin.fileno())
+        except Exception:
+            pass
 
         # prompt_toolkit application for enhanced input
         self.prompt_app: PantheonInputApp | None = None
@@ -452,11 +462,18 @@ class Repl(ReplUI):
 
     async def _update_status_bar_token_usage(self):
         """Update token usage percentage in status bar (async).
-        
+
         Optimized to use cached reads from message metadata instead of
         full token counting for better performance.
         """
         if not self.prompt_app:
+            return
+
+        # After compression, _handle_compress already set an accurate estimate.
+        # Skip this call to avoid overwriting with stale metadata from
+        # preserved messages. The next LLM response will clear the flag.
+        if self._skip_token_update:
+            self._skip_token_update = False
             return
         
         try:
@@ -464,8 +481,8 @@ class Repl(ReplUI):
             if self._chatroom and self._chat_id:
                 memory = self._chatroom.memory_manager.get_memory(self._chat_id)
                 if memory:
-                    # Get only root agent messages
-                    messages = memory.get_messages(execution_context_id=None)
+                    # Get root agent messages with LLM view (respects compression truncation)
+                    messages = memory.get_messages(execution_context_id=None, for_llm=True)
                     
                     if messages:
                         # Find last message with token metadata
@@ -480,22 +497,20 @@ class Repl(ReplUI):
                             meta = last_with_tokens["_metadata"]
                             total_tokens = meta.get("total_tokens", 0)
                             max_tokens = meta.get("max_tokens", 200000)
-                            
+
                             # Calculate usage percentage
                             usage_pct = (total_tokens / max_tokens * 100) if max_tokens > 0 else 0
-                        else:
-                            # No message with total_tokens found (e.g., after compression)
-                            # Show 0% until next LLM call or user runs /tokens
-                            usage_pct = 0.0
-                        
-                        # Calculate total cost from all messages (including compressed)
-                        # Use for_llm=False to get full message history
-                        all_messages = memory.get_messages(for_llm=False)
-                        from pantheon.utils.llm import calculate_total_cost_from_messages
-                        total_cost = calculate_total_cost_from_messages(all_messages)
-                        
-                        # Update status bar
-                        self.prompt_app.update_token_usage(usage_pct, total_cost)
+
+                            # Calculate total cost from all messages (including compressed)
+                            all_messages = memory.get_messages(for_llm=False)
+                            from pantheon.utils.llm import calculate_total_cost_from_messages
+                            total_cost = calculate_total_cost_from_messages(all_messages)
+
+                            # Update status bar
+                            self.prompt_app.update_token_usage(usage_pct, total_cost)
+                        # else: no valid metadata (e.g., after compression) — keep
+                        # existing status bar values to avoid overwriting a more
+                        # accurate estimate set by _handle_compress
                         return
             return
             
@@ -694,16 +709,30 @@ class Repl(ReplUI):
         finally:
             # Clean up ChatRoom resources (saves skillbook via learning pipeline)
             await self._cleanup_resources()
-            
+
             # Suppress any remaining aiohttp warnings during GC
             try:
                 loop = asyncio.get_event_loop()
                 loop.set_exception_handler(suppress_aiohttp_warnings)
             except Exception:
                 pass
-            
+
             if self._use_prompt_toolkit:
                 self.output.exit_patch_context()
+
+            # Restore terminal state saved at REPL startup — prompt_toolkit
+            # may leave terminal in raw mode if cleanup or async tasks
+            # interfere with its exit path
+            if self._saved_terminal_attrs is not None:
+                try:
+                    import termios
+                    termios.tcsetattr(
+                        sys.stdin.fileno(),
+                        termios.TCSANOW,
+                        self._saved_terminal_attrs,
+                    )
+                except Exception:
+                    pass
 
     async def _handle_message_or_command(self, current_message: str):
         """Process a single message or command (extracted from run loop)."""
@@ -1421,13 +1450,20 @@ class Repl(ReplUI):
                 self.console.print()
                 return
         else:
-            # Search by ID or name prefix
-            for chat in chats:
-                if chat.get("id", "").startswith(chat_arg) or chat.get(
-                    "name", ""
-                ).lower().startswith(chat_arg.lower()):
-                    found = chat
-                    break
+            # Search by numeric index (from /list), ID prefix, or name prefix
+            if chat_arg.isdigit():
+                idx = int(chat_arg)
+                if 1 <= idx <= len(chats):
+                    found = chats[idx - 1]
+
+            if not found:
+                # Search by ID or name prefix
+                for chat in chats:
+                    if chat.get("id", "").startswith(chat_arg) or chat.get(
+                        "name", ""
+                    ).lower().startswith(chat_arg.lower()):
+                        found = chat
+                        break
 
             if not found:
                 self.console.print(f"[red]Chat not found: {chat_arg}[/red]")
@@ -1437,6 +1473,51 @@ class Repl(ReplUI):
         # Switch to the found chat
         self.task_ui_renderer.reset()
         self._chat_id = found["id"]
+
+        # Reload team from the new chat's memory (each chat persists its own team)
+        # Fall back to default team if the saved template can no longer be created
+        # (e.g., template file deleted, required services unavailable)
+        try:
+            self._team = await self._chatroom.get_team_for_chat(self._chat_id)
+        except Exception as e:
+            logger.warning(f"Failed to load team for chat {self._chat_id}: {e}")
+            self.console.print(
+                f"[yellow]Warning: Could not load saved team ({e}), falling back to default[/yellow]"
+            )
+            # Force reload from default template by clearing stored template
+            try:
+                from pantheon.utils.misc import run_func
+                memory = await run_func(self._chatroom.memory_manager.get_memory, self._chat_id)
+                if hasattr(memory, "extra_data") and "team_template" in memory.extra_data:
+                    del memory.extra_data["team_template"]
+                    memory.mark_dirty()
+                # Clear cache so get_team_for_chat creates fresh default
+                self._chatroom.chat_teams.pop(self._chat_id, None)
+                self._team = await self._chatroom.get_team_for_chat(self._chat_id)
+            except Exception as e2:
+                self.console.print(f"[red]Error loading default team: {e2}[/red]")
+                self.console.print()
+                return
+        self._is_multi_agent = len(self._team.agents) > 1
+        self._current_agent_name = None
+        self._last_printed_agent = None
+
+        # Update status bar
+        if self.prompt_app and self._team and self._team.agents:
+            agent_names = list(self._team.agents.keys())
+            if agent_names:
+                first_agent_name = agent_names[0]
+                agent = self._team.agents[first_agent_name]
+                model = getattr(agent, 'model', 'unknown')
+                if hasattr(agent, 'models'):
+                    models = agent.models
+                    if isinstance(models, list) and models:
+                        model = models[0]
+                    elif isinstance(models, str):
+                        model = models
+                self.prompt_app.update_agent(first_agent_name)
+                self.prompt_app.update_model(model)
+
         self.console.print(
             f"[green]✅ Resumed:[/green] {found.get('name', self._chat_id)}"
         )
@@ -1906,6 +1987,10 @@ class Repl(ReplUI):
 
     async def _handle_compress(self):
         """Trigger manual context compression."""
+        # Update status bar to show compression in progress
+        if self.prompt_app:
+            self.prompt_app.update_processing(status="Compressing...")
+
         self.console.print()
         self.console.print(
             "[dim][bold blue]-- COMPRESS ---------------------------------------------------------[/bold blue][/dim]"
@@ -1916,19 +2001,46 @@ class Repl(ReplUI):
             result = await self._chatroom.compress_chat(self._chat_id)
             
             if result.get("success"):
-                # Show compression stats if available
+                # Show compression stats
                 compressed_msgs = result.get("compressed_messages", 0)
                 original_tokens = result.get("original_tokens", 0)
                 new_tokens = result.get("new_tokens", 0)
-                
+                saved_tokens = original_tokens - new_tokens
+
                 self.console.print("[green]✅ Context compression completed[/green]")
                 if compressed_msgs:
-                    saved_tokens = original_tokens - new_tokens
                     self.console.print(f"[dim]  • Compressed {compressed_msgs} messages[/dim]")
                     self.console.print(f"[dim]  • Tokens: {original_tokens:,} → {new_tokens:,} (saved {saved_tokens:,})[/dim]")
-                
-                # Refresh status bar token usage to show updated context
-                await self._update_status_bar_token_usage()
+
+                # Update status bar with post-compression estimate
+                if self.prompt_app:
+                    try:
+                        memory = self._chatroom.memory_manager.get_memory(self._chat_id)
+                        if memory:
+                            # Find pre-compression total/max from last metadata
+                            all_msgs = memory.get_messages(for_llm=False)
+                            last_meta = next(
+                                (m.get("_metadata") for m in reversed(all_msgs)
+                                 if m.get("_metadata", {}).get("total_tokens")),
+                                None,
+                            )
+                            if last_meta:
+                                old_total = last_meta.get("total_tokens", 0)
+                                max_tokens = last_meta.get("max_tokens", 200000)
+                                new_total = max(0, old_total - saved_tokens)
+                                usage_pct = (new_total / max_tokens * 100) if max_tokens > 0 else 0
+                            else:
+                                # No metadata found — just show low usage
+                                usage_pct = 0.0
+
+                            from pantheon.utils.llm import calculate_total_cost_from_messages
+                            total_cost = calculate_total_cost_from_messages(all_msgs)
+                            self.prompt_app.update_token_usage(usage_pct, total_cost)
+                            # Prevent _update_status_bar_token_usage from overwriting
+                            # with stale metadata from preserved messages
+                            self._skip_token_update = True
+                    except Exception as e:
+                        logger.debug(f"Failed to update status bar after compression: {e}")
                 
             else:
                 msg = result.get("message", "Compression not available")

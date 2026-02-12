@@ -93,7 +93,7 @@ def _patch_stdio_client_errlog():
                 log_path = _get_mcp_log_path(cmd_str)
                 
                 # Open in append mode, line buffered
-                log_file = open(log_path, "a", buffering=1)
+                log_file = open(log_path, "a", buffering=1, encoding="utf-8")
                 stdio_module._mcp_log_files[cmd_str] = log_file
                 
                 # Write session separator
@@ -267,9 +267,9 @@ class MCPServerInstance:
                 if os.name == 'nt':
                     cmd = [arg.strip('"').strip("'") for arg in cmd]
 
-                # Create StdioTransport - it will manage subprocess lifecycle
-                # Note: subprocess stderr (welcome messages) is handled by FastMCP
-                # and may appear in console. Use FASTMCP_LOG_LEVEL=WARNING to suppress.
+                # Create StdioTransport
+                # Note: fastmcp 2.14.4 doesn't support log_file parameter
+                # MCP server logs will be handled by the MCP server itself
                 self.stdio_transport = StdioTransport(
                     command=cmd[0], args=cmd[1:], env=self._prepare_env()
                 )
