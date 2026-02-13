@@ -1083,7 +1083,10 @@ class ChatRoom(ToolSet):
 
         if chat_id in self.threads:
             return {"success": False, "message": "Chat is already running"}
-        memory = await run_func(self.memory_manager.get_memory, chat_id)
+        try:
+            memory = await run_func(self.memory_manager.get_memory, chat_id)
+        except KeyError:
+            return {"success": False, "message": f"Chat '{chat_id}' not found"}
         memory.extra_data["running"] = True
         memory.extra_data["last_activity_date"] = datetime.now().isoformat()
 

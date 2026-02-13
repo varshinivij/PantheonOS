@@ -422,7 +422,12 @@ class MemoryManager:
 
         Args:
             id: The ID of the memory.
+
+        Raises:
+            KeyError: If the memory with the given ID does not exist.
         """
+        if id not in self.memory_store:
+            raise KeyError(f"Chat '{id}' not found. It may have been deleted.")
         memory = self.memory_store[id]
         # Lazy fix: repair orphaned tool_calls on first access
         if not getattr(memory, '_orphans_fixed', False):
