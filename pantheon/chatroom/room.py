@@ -1156,7 +1156,8 @@ class ChatRoom(ToolSet):
         """
         thread = self.threads.get(chat_id, None)
         if thread is None:
-            return {"success": False, "message": "Chat doesn't have a thread"}
+            # Thread already finished and cleaned up — treat as success
+            return {"success": True, "message": "Chat already stopped"}
         await thread.stop()
         # Note: Thread cleanup from self.threads happens in chat()'s finally block
         # But if called externally, we ensure cleanup here as well
