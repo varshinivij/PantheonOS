@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # Built-in defaults based on December 2025 flagship models
 # Users can override in settings.json
 
-DEFAULT_PROVIDER_PRIORITY = ["openai", "anthropic", "gemini", "zai", "deepseek", "minimax"]
+DEFAULT_PROVIDER_PRIORITY = ["openai", "anthropic", "gemini", "zai", "deepseek", "minimax", "moonshot"]
 
 # Quality levels map to MODEL LISTS (not single models) for fallback chains
 # Models within each level are ordered by preference
@@ -96,6 +96,13 @@ DEFAULT_PROVIDER_MODELS = {
             "minimax/MiniMax-M2.1",
         ],
     },
+    # Moonshot: Kimi K2.5/K2 series
+    # https://platform.moonshot.cn/
+    "moonshot": {
+        "high": ["moonshot/kimi-k2.5", "moonshot/kimi-k2-0905-preview"],
+        "normal": ["moonshot/kimi-k2.5", "moonshot/kimi-k2-0905-preview"],
+        "low": ["moonshot/kimi-k2.5", "moonshot/kimi-k2-0905-preview"],
+    },
 }
 
 # Capability tags map to litellm's supports_* fields
@@ -155,34 +162,10 @@ class ModelSelector:
 
         import os
 
-        # Cloud providers that require API keys (excludes local-only providers)
-        CLOUD_PROVIDERS = [
-            "openai", "anthropic", "gemini", "google", "azure",
-            "cohere", "replicate", "huggingface", "together_ai",
-            "openrouter", "groq", "mistral", "deepseek", "bedrock",
-            "minimax", "zai",
-        ]
-
         self._available_providers = set()
 
-        # Try litellm's validate_environment (works across versions)
-        try:
-            from litellm.utils import validate_environment
-
-            for provider in CLOUD_PROVIDERS:
-                try:
-                    result = validate_environment(model=f"{provider}/dummy")
-                    if result.get("keys_in_environment", False):
-                        self._available_providers.add(provider)
-                except Exception:
-                    continue
-
-            if self._available_providers:
-                return self._available_providers
-        except ImportError:
-            pass  # litellm not available
-
-        # Fallback: manually check common provider API keys
+        # Check provider API keys directly from environment
+        # (litellm's validate_environment is unreliable - returns True even without keys)
         PROVIDER_API_KEYS = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
@@ -199,6 +182,7 @@ class ModelSelector:
             "deepseek": "DEEPSEEK_API_KEY",
             "minimax": "MINIMAX_API_KEY",
             "zai": "ZAI_API_KEY",
+            "moonshot": "MOONSHOT_API_KEY",
         }
 
         for provider, env_key in PROVIDER_API_KEYS.items():
