@@ -50,6 +50,18 @@ def _bootstrap_repo_imports(repo_root: Path) -> None:
 
 def _load_adapter(model_name: str, checkpoint_dir: str | None):
     model_name = model_name.lower()
+
+    # Try registry-based resolution first (supports plugins)
+    try:
+        from pantheon.toolsets.scfm.registry import get_registry
+        adapter_cls = get_registry().get_adapter_class(model_name)
+        if adapter_cls is not None:
+            return adapter_cls(checkpoint_dir)
+    except Exception:
+        pass  # Fall through to hardcoded mapping
+
+    # Hardcoded fallback for isolated conda envs where full registry
+    # bootstrap may not be available
     mapping: dict[str, tuple[str, str]] = {
         "uce": ("pantheon.toolsets.scfm.adapters.uce", "UCEAdapter"),
         "scgpt": ("pantheon.toolsets.scfm.adapters.scgpt", "ScGPTAdapter"),

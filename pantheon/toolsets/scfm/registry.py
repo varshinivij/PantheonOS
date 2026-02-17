@@ -5,9 +5,17 @@ Defines model capabilities, I/O contracts, and hardware requirements.
 See pantheon/factory/templates/skills/omics/_scfm_docs/ for runbooks and checkpoint conventions.
 """
 
+import importlib
+import importlib.metadata
+import importlib.util
+import logging
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TaskType(str, Enum):
@@ -868,11 +876,25 @@ class ModelRegistry:
     Registry of available single-cell foundation models.
 
     Provides capability-driven model discovery and selection.
+
+    Models can be registered from three sources:
+    - Built-in: Hardcoded default models shipped with pantheon-agents.
+    - Entry points: Third-party pip packages using the ``pantheon.scfm`` group.
+    - Local plugins: Python files in ``~/.pantheon/plugins/scfm/``.
     """
 
     def __init__(self):
         self._models: dict[str, ModelSpec] = {}
+        self._adapters: dict[str, type] = {}
+        self._model_sources: dict[str, str] = {}
+        self._builtin_adapter_imports: dict[str, tuple[str, str]] = {}
         self._register_default_models()
+        self._register_builtin_adapters()
+        self._discover_plugins()
+
+    # =========================================================================
+    # Built-in registration
+    # =========================================================================
 
     def _register_default_models(self):
         """Register skill-ready and partial-spec models"""
@@ -902,13 +924,105 @@ class ModelRegistry:
         self.register(CHATCELL_SPEC)
         self.register(TABULA_SPEC)
 
-    def register(self, spec: ModelSpec):
-        """Register a model specification"""
-        self._models[spec.name.lower()] = spec
+    def _register_builtin_adapters(self):
+        """Register lazy-import paths for built-in adapters."""
+        self._builtin_adapter_imports = {
+            "uce": (".adapters.uce", "UCEAdapter"),
+            "scgpt": (".adapters.scgpt", "ScGPTAdapter"),
+            "geneformer": (".adapters.geneformer", "GeneformerAdapter"),
+            "scfoundation": (".adapters.scfoundation", "ScFoundationAdapter"),
+            "scbert": (".adapters.scbert", "ScBERTAdapter"),
+            "genecompass": (".adapters.genecompass", "GeneCompassAdapter"),
+            "cellplm": (".adapters.cellplm", "CellPLMAdapter"),
+            "nicheformer": (".adapters.nicheformer", "NicheformerAdapter"),
+            "scmulan": (".adapters.scmulan", "ScMulanAdapter"),
+            "tgpt": (".adapters.tgpt", "TGPTAdapter"),
+            "cellfm": (".adapters.cellfm", "CellFMAdapter"),
+            "sccello": (".adapters.sccello", "ScCelloAdapter"),
+            "scprint": (".adapters.scprint", "ScPRINTAdapter"),
+            "aidocell": (".adapters.aidocell", "AIDOCellAdapter"),
+            "pulsar": (".adapters.pulsar", "PULSARAdapter"),
+            "atacformer": (".adapters.atacformer", "AtacformerAdapter"),
+            "scplantllm": (".adapters.scplantllm", "ScPlantLLMAdapter"),
+            "langcell": (".adapters.langcell", "LangCellAdapter"),
+            "cell2sentence": (".adapters.cell2sentence", "Cell2SentenceAdapter"),
+            "genept": (".adapters.genept", "GenePTAdapter"),
+            "chatcell": (".adapters.chatcell", "CHATCELLAdapter"),
+            "tabula": (".adapters.tabula", "TabulaAdapter"),
+        }
+
+    # =========================================================================
+    # Public API
+    # =========================================================================
+
+    def register(
+        self,
+        spec: ModelSpec,
+        adapter_class: Optional[type] = None,
+        *,
+        source: str = "builtin",
+    ) -> None:
+        """Register a model specification and optionally its adapter class.
+
+        Args:
+            spec: Model specification.
+            adapter_class: Adapter class (subclass of BaseAdapter). Optional for
+                backward compatibility with existing built-in registrations.
+            source: Where this registration came from ('builtin', 'entrypoint:*',
+                'local:*'). Used for logging and conflict resolution.
+        """
+        name = spec.name.lower()
+        if name in self._models and source != "builtin":
+            existing_source = self._model_sources.get(name, "builtin")
+            if existing_source == "builtin":
+                logger.warning(
+                    "Plugin '%s' (source=%s) conflicts with built-in model '%s'; "
+                    "skipping. Use a different model name.",
+                    name, source, name,
+                )
+                return
+            else:
+                logger.warning(
+                    "Plugin '%s' (source=%s) overrides previous plugin (source=%s).",
+                    name, source, existing_source,
+                )
+        self._models[name] = spec
+        if adapter_class is not None:
+            self._adapters[name] = adapter_class
+        self._model_sources[name] = source
 
     def get(self, name: str) -> Optional[ModelSpec]:
         """Get model spec by name"""
         return self._models.get(name.lower())
+
+    def get_adapter_class(self, name: str) -> Optional[type]:
+        """Get the adapter class for a model.
+
+        Checks plugin-registered adapters first, then falls back to lazy
+        import of built-in adapters.
+        """
+        name = name.lower()
+        # Check if already resolved (plugin or previously loaded built-in)
+        if name in self._adapters:
+            return self._adapters[name]
+
+        # Try lazy import of built-in adapter
+        if name in self._builtin_adapter_imports:
+            rel_module, class_name = self._builtin_adapter_imports[name]
+            try:
+                module = importlib.import_module(
+                    rel_module, package="pantheon.toolsets.scfm"
+                )
+                cls = getattr(module, class_name)
+                self._adapters[name] = cls  # cache for next time
+                return cls
+            except (ImportError, AttributeError) as e:
+                logger.warning(
+                    "Failed to import built-in adapter for '%s': %s", name, e
+                )
+                return None
+
+        return None
 
     def list_models(self, skill_ready_only: bool = False) -> list[ModelSpec]:
         """List all registered models"""
@@ -980,6 +1094,112 @@ class ModelRegistry:
             return 2
 
         return sorted(matches, key=sort_key)
+
+    # =========================================================================
+    # Plugin discovery
+    # =========================================================================
+
+    def _discover_plugins(self):
+        """Discover and load plugins from entry points and local directory."""
+        self._discover_entry_point_plugins()
+        self._discover_local_plugins()
+
+    def _discover_entry_point_plugins(self):
+        """Load plugins registered via the ``pantheon.scfm`` entry-point group."""
+        try:
+            all_eps = importlib.metadata.entry_points()
+            if isinstance(all_eps, dict):
+                # Python 3.10–3.11 may return a dict
+                eps = all_eps.get("pantheon.scfm", [])
+            else:
+                eps = all_eps.select(group="pantheon.scfm")
+        except Exception as e:
+            logger.debug("Entry point discovery failed: %s", e)
+            return
+
+        for ep in eps:
+            try:
+                register_fn = ep.load()
+                result = register_fn()
+                self._process_plugin_result(result, source=f"entrypoint:{ep.name}")
+            except Exception as e:
+                logger.warning(
+                    "Failed to load SCFM plugin entry point '%s': %s", ep.name, e
+                )
+
+    def _discover_local_plugins(self):
+        """Load plugins from ``~/.pantheon/plugins/scfm/`` directory."""
+        plugin_dir = Path.home() / ".pantheon" / "plugins" / "scfm"
+        if not plugin_dir.is_dir():
+            return
+
+        for py_file in sorted(plugin_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            try:
+                spec_obj = importlib.util.spec_from_file_location(
+                    f"pantheon_scfm_local_plugin_{py_file.stem}",
+                    py_file,
+                )
+                if spec_obj is None or spec_obj.loader is None:
+                    continue
+                module = importlib.util.module_from_spec(spec_obj)
+                spec_obj.loader.exec_module(module)
+
+                register_fn = getattr(module, "register", None)
+                if register_fn is None:
+                    logger.warning(
+                        "Local plugin '%s' has no register() function; skipping.",
+                        py_file.name,
+                    )
+                    continue
+
+                result = register_fn()
+                self._process_plugin_result(result, source=f"local:{py_file.name}")
+            except Exception as e:
+                logger.warning(
+                    "Failed to load local SCFM plugin '%s': %s", py_file.name, e
+                )
+
+    def _process_plugin_result(self, result, source: str):
+        """Normalize and validate plugin register() output."""
+        # Normalize: allow single tuple or list of tuples
+        if isinstance(result, tuple) and len(result) == 2:
+            registrations = [result]
+        elif isinstance(result, list):
+            registrations = result
+        else:
+            logger.warning(
+                "Plugin (source=%s) returned unexpected type %s; skipping.",
+                source, type(result).__name__,
+            )
+            return
+
+        for spec, adapter_cls in registrations:
+            self._validate_and_register(spec, adapter_cls, source=source)
+
+    def _validate_and_register(self, spec, adapter_cls, source: str):
+        """Validate a plugin's spec and adapter class, then register."""
+        if not isinstance(spec, ModelSpec):
+            logger.warning(
+                "Plugin (source=%s) provided non-ModelSpec object: %s; skipping.",
+                source, type(spec).__name__,
+            )
+            return
+
+        # Import BaseAdapter here to avoid circular imports at module level
+        from .adapters.base import BaseAdapter
+
+        if not (isinstance(adapter_cls, type) and issubclass(adapter_cls, BaseAdapter)):
+            logger.warning(
+                "Plugin '%s' (source=%s) adapter class %s does not subclass "
+                "BaseAdapter; skipping.",
+                spec.name, source, adapter_cls,
+            )
+            return
+
+        self.register(spec, adapter_cls, source=source)
+        logger.info("Registered SCFM plugin '%s' from %s", spec.name, source)
 
 
 # Global registry instance

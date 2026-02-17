@@ -956,165 +956,19 @@ class SCFMToolSet(ToolSet):
         return parsed
 
     def _get_model_adapter(self, model_name: str):
-        """Get the adapter for a specific model"""
+        """Get the adapter instance for a specific model.
+
+        Resolves the adapter class from the registry (which handles both
+        built-in lazy imports and plugin-registered adapters).
+        """
         model_name = model_name.lower()
-
-        if model_name == "uce":
-            try:
-                from .adapters.uce import UCEAdapter
-                return UCEAdapter()
-            except ImportError:
-                return None
-
-        if model_name == "scgpt":
-            try:
-                from .adapters.scgpt import ScGPTAdapter
-                return ScGPTAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "geneformer":
-            try:
-                from .adapters.geneformer import GeneformerAdapter
-                return GeneformerAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "scfoundation":
-            try:
-                from .adapters.scfoundation import ScFoundationAdapter
-                return ScFoundationAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "scbert":
-            try:
-                from .adapters.scbert import ScBERTAdapter
-                return ScBERTAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "genecompass":
-            try:
-                from .adapters.genecompass import GeneCompassAdapter
-                return GeneCompassAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "cellplm":
-            try:
-                from .adapters.cellplm import CellPLMAdapter
-                return CellPLMAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "nicheformer":
-            try:
-                from .adapters.nicheformer import NicheformerAdapter
-                return NicheformerAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "scmulan":
-            try:
-                from .adapters.scmulan import ScMulanAdapter
-                return ScMulanAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        # Specialized & Emerging Models (2024-2025)
-        if model_name == "tgpt":
-            try:
-                from .adapters.tgpt import TGPTAdapter
-                return TGPTAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "cellfm":
-            try:
-                from .adapters.cellfm import CellFMAdapter
-                return CellFMAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "sccello":
-            try:
-                from .adapters.sccello import ScCelloAdapter
-                return ScCelloAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "scprint":
-            try:
-                from .adapters.scprint import ScPRINTAdapter
-                return ScPRINTAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "aidocell":
-            try:
-                from .adapters.aidocell import AIDOCellAdapter
-                return AIDOCellAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "pulsar":
-            try:
-                from .adapters.pulsar import PULSARAdapter
-                return PULSARAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "atacformer":
-            try:
-                from .adapters.atacformer import AtacformerAdapter
-                return AtacformerAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "scplantllm":
-            try:
-                from .adapters.scplantllm import ScPlantLLMAdapter
-                return ScPlantLLMAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "langcell":
-            try:
-                from .adapters.langcell import LangCellAdapter
-                return LangCellAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "cell2sentence":
-            try:
-                from .adapters.cell2sentence import Cell2SentenceAdapter
-                return Cell2SentenceAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "genept":
-            try:
-                from .adapters.genept import GenePTAdapter
-                return GenePTAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "chatcell":
-            try:
-                from .adapters.chatcell import CHATCELLAdapter
-                return CHATCELLAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        if model_name == "tabula":
-            try:
-                from .adapters.tabula import TabulaAdapter
-                return TabulaAdapter(self._checkpoint_dir)
-            except ImportError:
-                return None
-
-        return None
+        adapter_cls = self._registry.get_adapter_class(model_name)
+        if adapter_cls is None:
+            return None
+        try:
+            return adapter_cls(self._checkpoint_dir)
+        except Exception:
+            return None
 
     # =========================================================================
     # Interpretation Tools
