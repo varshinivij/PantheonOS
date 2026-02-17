@@ -49,11 +49,26 @@ class TaskToolSet(ToolSet):
             logger.warning(f"[TaskToolSet] Failed to load state: {e}")
 
     def _get_brain_dir(self, context: dict) -> str:
-        """Get brain_dir path from context."""
-        client_id = context.get("client_id", "default")
-        from pantheon.settings import get_settings
+        """Get brain_dir path from context.
 
-        return str(get_settings().brain_dir / client_id)
+        Priority:
+        1. Use workdir if present in context (test user scenario)
+        2. Fall back to settings.brain_dir (original scenario)
+        """
+        client_id = context.get("client_id", "default")
+
+        # Priority 1: Use workdir from context if available (test user scenario)
+        workdir = context.get("workdir")
+        if workdir:
+            brain_path = Path(workdir) / ".pantheon" / "brain" / client_id
+            logger.debug(f"[TaskToolSet] Using workdir brain_dir: {brain_path}")
+            return str(brain_path)
+
+        # Priority 2: Fall back to settings (original scenario, backward compatible)
+        from pantheon.settings import get_settings
+        brain_path = get_settings().brain_dir / client_id
+        logger.debug(f"[TaskToolSet] Using settings brain_dir: {brain_path}")
+        return str(brain_path)
 
     @tool
     async def task_boundary(

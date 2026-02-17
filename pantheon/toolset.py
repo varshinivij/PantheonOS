@@ -278,6 +278,18 @@ class ToolSet(ABC):
         """Get current execution context"""
         return get_current_context_variables()
 
+    def _get_effective_workdir(self) -> Optional[str]:
+        """Get effective working directory from context_variables.
+
+        Returns the workdir set via project's workspace_path in context_variables.
+        Returns None if no workdir is set — callers should fallback to their own
+        default (e.g. self.path, self.workdir) to preserve existing behavior.
+        """
+        ctx = self.get_context()
+        if ctx and (workdir := ctx.get("workdir")):
+            return workdir
+        return None
+
     async def run_setup(self):
         """Setup the toolset before running it. Can be overridden by subclasses."""
         pass

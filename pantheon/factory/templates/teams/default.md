@@ -22,6 +22,7 @@ leader:
     - code
     - integrated_notebook
     - web
+    - evolution
 ---
 
 {{agentic_general}}

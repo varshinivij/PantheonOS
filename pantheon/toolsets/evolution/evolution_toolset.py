@@ -465,50 +465,47 @@ class EvolutionToolSet(ToolSet):
         timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Evolve and optimize code using evolutionary algorithms.
+        Evolve and optimize code using evolutionary algorithms with LLM-guided mutation.
 
-        This tool runs an evolutionary optimization loop that:
-        1. Generates mutations of the code using an LLM
-        2. Evaluates each mutation using the provided evaluator
-        3. Keeps the best-performing variants
-        4. Repeats until convergence or max iterations
+        Use when: Optimizing single-file code. For multi-file projects, use evolve_codebase.
 
         Args:
-            code: The initial code to optimize (single file content)
-            evaluator_code: Python code defining an `evaluate(workspace_path)` function
-                that returns a dict with at least a "combined_score" key (0-1 scale).
+            code: Initial code to optimize (string)
+            
+            evaluator_code: Python function: evaluate(workspace_path: str) -> Dict[str, float]
+                Must return: {"combined_score": 0.0-1.0, ...other_metrics}
                 Example:
                 ```python
                 def evaluate(workspace_path):
-                    import time
-                    exec(open(f"{workspace_path}/main.py").read())
-                    # ... run tests or benchmarks ...
-                    return {"combined_score": 0.85, "speed": 1.2}
+                    import sys; sys.path.insert(0, workspace_path)
+                    from main import func
+                    result = func(test_data)
+                    correct = (result == expected)
+                    speed = benchmark(func)  # 0-1 scale
+                    return {"combined_score": 0.8 * correct + 0.2 * speed}
                 ```
-            objective: Natural language description of the optimization goal.
-                Example: "Optimize for speed while maintaining correctness"
-            iterations: Maximum number of evolution iterations (default: 50)
-            islands: Number of evolution islands for diversity (default: 3)
-            model: Model to use for mutation generation
-            async_mode: If True, run in background and return immediately (default: True)
-            timeout: Timeout in seconds for sync mode (None = auto-estimate)
+            
+            objective: Optimization goal (e.g., "Optimize for speed", "Reduce memory usage")
+            
+            iterations: Max iterations (default: 50)
+                Recommended: 10-20 for experiments, 50-100 for production
+            
+            islands: Evolution islands for diversity (default: 3, recommended: 3-5)
+            
+            model: Mutation model (default: "normal", options: "normal", "fast", "smart")
+            
+            async_mode: Run in background (default: True, RECOMMENDED for iterations > 20)
+                True: Returns evolution_id immediately, monitor via get_evolution_status(evolution_id)
+                False: Waits for completion (only for quick tests <20 iterations)
+            
+            timeout: Timeout seconds for sync mode (default: auto-estimate)
 
         Returns:
-            dict: Evolution results containing:
-                Async mode (async_mode=True):
-                    - success: Whether evolution started successfully
-                    - evolution_id: Unique ID for tracking
-                    - status: "running"
-                    - estimated_time: Estimated completion time
-                    - message: Status message
-                Sync mode (async_mode=False):
-                    - success: Whether evolution completed successfully
-                    - evolution_id: Unique ID
-                    - status: "completed" or "running" (if timeout)
-                    - file_count: Number of files (if completed)
-                    - best_score: The best score achieved (if completed)
-                    - improvement: Score improvement (if completed)
-                    - summary: Human-readable summary (if completed)
+            dict:
+                Async: {"success": bool, "evolution_id": str, "status": "running", "estimated_time": str}
+                Sync: {"success": bool, "evolution_id": str, "status": str, "best_score": float, "improvement": float, "summary": str}
+            
+            Key: SAVE evolution_id for tracking. Monitor via get_evolution_status(evolution_id) or Evolution UI (🧬).
         """
         # Generate evolution ID
         evolution_id = str(uuid.uuid4())
@@ -612,21 +609,62 @@ class EvolutionToolSet(ToolSet):
         async_mode: bool = True,
     ) -> Dict[str, Any]:
         """
-        Evolve and optimize an entire codebase.
+        Evolve and optimize an entire codebase (multiple files).
+
+        Use when: Optimizing multi-file projects, libraries, or applications.
+        For single-file optimization, use evolve_code instead.
 
         Args:
-            codebase_path: Path to the directory containing the codebase
-            evaluator_code: Python code defining an `evaluate(workspace_path)` function
-            objective: Natural language description of the optimization goal
+            codebase_path: Path to directory containing the codebase (must exist)
+            
+            evaluator_code: Python function: evaluate(workspace_path: str) -> Dict[str, float]
+                Must return: {"combined_score": 0.0-1.0, ...other_metrics}
+                Should run project-level tests/benchmarks across all files.
+                Example:
+                ```python
+                def evaluate(workspace_path):
+                    import subprocess, sys
+                    sys.path.insert(0, workspace_path)
+                    
+                    # Run test suite
+                    result = subprocess.run(
+                        ["python", "-m", "pytest", workspace_path],
+                        capture_output=True, timeout=30, cwd=workspace_path
+                    )
+                    tests_pass = result.returncode == 0
+                    
+                    # Run benchmarks
+                    from benchmarks import run_benchmark
+                    perf_score = run_benchmark()  # Returns 0-1
+                    
+                    return {
+                        "combined_score": 0.7 * tests_pass + 0.3 * perf_score,
+                        "tests_passed": tests_pass,
+                        "performance": perf_score
+                    }
+                ```
+            
+            objective: Optimization goal (e.g., "Optimize library performance")
+            
             include_patterns: Glob patterns for files to include (default: ["**/*.py"])
-            iterations: Maximum number of evolution iterations
-            islands: Number of evolution islands
-            model: Model to use for mutation generation
-            output_path: Optional path to save the best result
-            async_mode: If True, run in background and return immediately (default: True)
+                Examples: ["src/**/*.py"], ["lib/*.py", "utils/*.py"]
+            
+            iterations: Max iterations (default: 50, recommended: 20-100 for codebases)
+            
+            islands: Evolution islands (default: 3, recommended: 3-5)
+            
+            model: Mutation model (default: "normal")
+            
+            output_path: Optional path to save optimized codebase
+            
+            async_mode: Run in background (default: True, HIGHLY RECOMMENDED for codebases)
 
         Returns:
-            dict: Evolution results
+            dict:
+                Async: {"success": bool, "evolution_id": str, "status": "running", "file_count": int, "estimated_time": str}
+                Sync: {"success": bool, "evolution_id": str, "status": str, "file_count": int, "best_score": float, "improvement": float, "summary": str}
+            
+            Key: ALWAYS use async_mode=True for codebases. Monitor via get_evolution_status(evolution_id).
         """
         from pantheon.evolution import EvolutionConfig, CodebaseSnapshot
         
@@ -926,24 +964,45 @@ class EvolutionToolSet(ToolSet):
         include_code: bool = False,
     ) -> Dict[str, Any]:
         """
-        Query evolution status by ID (frontend polling tool).
+        Query evolution status by ID - Track progress of async evolutions.
+
+        Use when: Monitoring long-running evolutions started with async_mode=True.
 
         Args:
-            evolution_id: Unique evolution identifier
-            include_code: Whether to include files and evaluator_code
-                         Default False for lightweight polling
+            evolution_id: Unique evolution identifier from evolve_code/evolve_codebase
+            
+            include_code: Whether to include files and evaluator_code (default: False)
+                False: Lightweight polling, returns progress metrics only
+                True: Complete data including input/output files (use when completed)
 
         Returns:
-            Basic mode (include_code=False):
-                - evolution_id, evolution_type, status, iteration, max_iterations
-                - best_score, score_history, file_count, improvements_found
-                - config (objective, iterations, islands, model)
+            dict:
+                Basic (include_code=False):
+                    {"evolution_id": str, "evolution_type": str, "status": str, "iteration": int, 
+                     "max_iterations": int, "best_score": float, "score_history": list, 
+                     "improvements_found": int, "file_count": int, "error": str|null, 
+                     "has_html_report": bool, "config": dict}
+                
+                Complete (include_code=True):
+                    {...basic fields..., 
+                     "input": {"evaluator_code": str, "files": dict, "codebase_path": str, "include_patterns": list},
+                     "result": {"initial_score": float, "improvement": float, "summary": str, "files": dict, "output_path": str}}
             
-            Complete mode (include_code=True):
-                - All basic fields
-                - input: {files, evaluator_code, codebase_path*, include_patterns*}
-                - result: {initial_score, improvement, summary, output_path*}
-                (* codebase-specific fields)
+            Status values: "pending", "running", "completed", "failed", "cancelled", "not_found"
+
+        Usage:
+            # Start evolution
+            result = await evolve_code(..., async_mode=True)
+            evo_id = result["evolution_id"]
+            
+            # Poll status
+            status = await get_evolution_status(evo_id)
+            progress = status["iteration"] / status["max_iterations"] * 100
+            
+            # Get full results when completed
+            if status["status"] == "completed":
+                full = await get_evolution_status(evo_id, include_code=True)
+                optimized_code = full["result"]["files"]["main.py"]
         """
         # Get session from manager (single source of truth)
         session = self.manager.get_session(evolution_id)

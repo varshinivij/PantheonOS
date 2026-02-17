@@ -176,14 +176,14 @@ class JupyterKernelToolSet(ToolSet):
         env["PYTHONPATH"] = os.pathsep.join(unique_paths)
 
         return build_context_env(
-            workdir=self.workdir,
+            workdir=self._get_effective_workdir() or self.workdir,
             context_variables=self._current_context_dict(),
             base_env=env,
         )
 
     def _context_prefix_code(self) -> str:
         env = build_context_env(
-            workdir=self.workdir,
+            workdir=self._get_effective_workdir() or self.workdir,
             context_variables=self._current_context_dict(),
         )
         serialized = env.get("PANTHEON_CONTEXT")
@@ -336,7 +336,7 @@ class JupyterKernelToolSet(ToolSet):
                     except Exception as e:
                         logger.error(f"Failed to analyze PANTHEON_CONTEXT: {e}")
 
-            await km.start_kernel(cwd=self.workdir, env=env)
+            await km.start_kernel(cwd=self._get_effective_workdir() or self.workdir, env=env)
 
             # Wait for kernel to be ready
             kc = km.client()

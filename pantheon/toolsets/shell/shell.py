@@ -36,12 +36,21 @@ class ShellToolSet(ToolSet):
         return ctx
 
     def _build_runtime_env(self) -> dict:
+        effective_workdir = self._get_effective_workdir() or str(self.workdir)
         return build_context_env(
-            workdir=str(self.workdir),
+            workdir=effective_workdir,
             context_variables=self._current_context_dict(),
         )
 
     async def _apply_context_to_shell(self, shell: AsyncShell):
+        # cd to effective workdir if set
+        effective_workdir = self._get_effective_workdir()
+        if effective_workdir:
+            try:
+                await shell.run_command(f"cd {shlex.quote(effective_workdir)}")
+            except Exception:
+                logger.warning("Failed to cd to workdir in shell session")
+
         env = self._build_runtime_env()
         if not env:
             return

@@ -1468,6 +1468,23 @@ class Agent:
         system_prompt = self._render_system_prompt(
             self.instructions, context_variables or {}
         )
+        
+        # Static injection: Append workdir constraint if workdir is present
+        # This is NOT a template variable - it's automatically injected when workdir exists
+        if context_variables and context_variables.get("workdir"):
+            workdir = context_variables["workdir"]
+            workdir_constraint = f"""
+
+<workdir_constraint>
+IMPORTANT: You are operating in a restricted workspace environment.
+- Your working directory is: {workdir}
+- All file operations (read/write/create/delete) MUST be within this directory
+- Paths outside this directory are not accessible and will fail
+- When specifying file paths, use relative paths or absolute paths within {workdir}
+- The file manager and shell tools enforce this restriction at the code level
+</workdir_constraint>"""
+            system_prompt += workdir_constraint
+        
         current_timestamp = time.time()
 
         if (len(history) > 0) and (history[0]["role"] == "system"):

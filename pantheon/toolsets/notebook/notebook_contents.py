@@ -34,12 +34,17 @@ class NotebookContentsToolSet(ToolSet):
         self.workdir = Path(workdir) if workdir else Path.cwd()
         logger.info(f"NotebookContentsToolSet initialized with workdir: {self.workdir}")
 
+    def _get_root(self) -> Path:
+        """Get the effective workspace root: workdir from context or default self.workdir."""
+        workdir = self._get_effective_workdir()
+        return Path(workdir) if workdir else self.workdir
+
     def _resolve_path(self, file_path: str) -> Path:
-        """Resolve file path relative to workspace"""
+        """Resolve file path relative to effective workspace root"""
         path = Path(file_path)
         if path.is_absolute():
             return path
-        return self.workdir / path
+        return self._get_root() / path
 
     def _validate_path(self, file_path: str) -> tuple[bool, str, Path | None]:
         """Validate file path for security and existence checks"""
@@ -50,9 +55,9 @@ class NotebookContentsToolSet(ToolSet):
 
         # Check if path is within workspace (for security)
         try:
-            resolved_path.relative_to(self.workdir)
+            resolved_path.relative_to(self._get_root())
         except ValueError:
-            return False, f"Path must be within workspace: {self.workdir}", None
+            return False, f"Path must be within workspace: {self._get_root()}", None
 
         return True, "", resolved_path
 

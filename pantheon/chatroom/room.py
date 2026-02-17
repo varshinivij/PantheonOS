@@ -632,6 +632,21 @@ class ChatRoom(ToolSet):
                 f"chatroom proxy_toolset: method_name={method_name}, toolset_name={toolset_name}, args={args}"
             )
 
+            # Inject workdir from project metadata if session_id is available
+            session_id = (args or {}).get("session_id")
+            if session_id:
+                try:
+                    memory = await run_func(self.memory_manager.get_memory, session_id)
+                    project = memory.extra_data.get("project", {})
+                    workspace_path = project.get("workspace_path") if isinstance(project, dict) else None
+                    if workspace_path:
+                        from pantheon.toolset import get_current_context_variables
+                        ctx = get_current_context_variables()
+                        if ctx is not None:
+                            ctx["workdir"] = workspace_path
+                except Exception as e:
+                    logger.debug(f"Could not inject workdir for session {session_id}: {e}")
+
             # Use unified endpoint call method
             result = await self._call_endpoint_method(
                 endpoint_method_name="proxy_toolset",
@@ -762,6 +777,16 @@ class ChatRoom(ToolSet):
             project_name: Optional project name for grouping.
             workspace_path: Optional workspace directory path.
         """
+        # Ensure workspace directory exists if provided
+        if workspace_path:
+            import os
+            try:
+                os.makedirs(workspace_path, exist_ok=True)
+                logger.info(f"Ensured workspace directory exists: {workspace_path}")
+            except Exception as e:
+                logger.warning(f"Failed to create workspace directory {workspace_path}: {e}")
+                # Continue anyway - the directory might be created later or error will surface when used
+        
         memory = await run_func(self.memory_manager.new_memory, chat_name)
         memory.extra_data["last_activity_date"] = datetime.now().isoformat()
         
@@ -795,8 +820,12 @@ class ChatRoom(ToolSet):
             return {"success": False, "message": str(e)}
 
     @tool
-    async def list_chats(self) -> dict:
-        """List all the chats.
+    async def list_chats(self, project_name: str | None = None) -> dict:
+        """List all the chats, optionally filtered by project.
+
+        Args:
+            project_name: Optional project name to filter chats.
+                          When provided, only chats belonging to this project are returned.
 
         Returns:
             A dictionary with the following keys:
@@ -808,6 +837,14 @@ class ChatRoom(ToolSet):
             chats = []
             for id in ids:
                 memory = await run_func(self.memory_manager.get_memory, id)
+                project = memory.extra_data.get("project", None)
+
+                # Filter by project_name if specified
+                if project_name is not None:
+                    chat_project_name = project.get("name") if isinstance(project, dict) else None
+                    if chat_project_name != project_name:
+                        continue
+
                 chats.append(
                     {
                         "id": id,
@@ -816,7 +853,7 @@ class ChatRoom(ToolSet):
                         "last_activity_date": memory.extra_data.get(
                             "last_activity_date", None
                         ),
-                        "project": memory.extra_data.get("project", None),
+                        "project": project,
                     }
                 )
 
@@ -1092,6 +1129,13 @@ class ChatRoom(ToolSet):
 
         async def team_getter():
             return await self.get_team_for_chat(chat_id)
+
+        # Inject workdir from project metadata if available
+        project = memory.extra_data.get("project", {})
+        workspace_path = project.get("workspace_path") if isinstance(project, dict) else None
+        if workspace_path:
+            context_variables = context_variables or {}
+            context_variables["workdir"] = workspace_path
 
         thread = Thread(
             team_getter,  # Pass team getter

@@ -207,10 +207,22 @@ class FileManagerToolSetBase(ToolSet):
         self.path = Path(path)
         self.black_list = black_list or []
 
+    def _get_root(self) -> Path:
+        """Get the effective workspace root: workdir from context or default self.path."""
+        workdir = self._get_effective_workdir()
+        return Path(workdir) if workdir else self.path
+
+    def _resolve_path(self, file_path: str) -> Path:
+        """Resolve a file path: absolute paths pass through, relative paths
+        resolve against the effective workspace root (workdir or self.path)."""
+        if os.path.isabs(file_path):
+            return Path(file_path)
+        return self._get_root() / file_path
+
     @tool
     async def get_cwd(self) -> dict:
         """Get current working directory."""
-        return {"success": True, "cwd": str(self.path)}
+        return {"success": True, "cwd": str(self._get_root())}
 
     @tool(exclude=True)
     async def list_files(
@@ -242,12 +254,10 @@ class FileManagerToolSetBase(ToolSet):
             dict: {success: bool, files: list} with name, type, size, last_modified.
         """
         # Determine target directory - support absolute paths
-        if sub_dir is not None and os.path.isabs(sub_dir):
-            target_path = Path(sub_dir)
-        elif sub_dir:
-            target_path = self.path / sub_dir
+        if sub_dir:
+            target_path = self._resolve_path(sub_dir)
         else:
-            target_path = self.path
+            target_path = self._get_root()
 
         if not target_path.exists():
             return {"success": False, "error": "Directory does not exist"}
@@ -306,7 +316,7 @@ class FileManagerToolSetBase(ToolSet):
             dict: Success status. For batch operations, includes results for each path.
         """
         if isinstance(sub_dir, str):
-            new_dir = self.path / sub_dir
+            new_dir = self._resolve_path(sub_dir)
             new_dir.mkdir(parents=True, exist_ok=True)
             return {"success": True}
 
@@ -314,7 +324,7 @@ class FileManagerToolSetBase(ToolSet):
         results = []
         for path in sub_dir:
             try:
-                new_dir = self.path / path
+                new_dir = self._resolve_path(path)
                 new_dir.mkdir(parents=True, exist_ok=True)
                 results.append({"path": path, "success": True})
             except Exception as exc:
@@ -337,7 +347,7 @@ class FileManagerToolSetBase(ToolSet):
         """
 
         def _delete_single_path(relative_path: str) -> dict:
-            target_path = self.path / relative_path
+            target_path = self._resolve_path(relative_path)
             if not target_path.exists():
                 return {
                     "path": relative_path,
@@ -378,10 +388,10 @@ class FileManagerToolSetBase(ToolSet):
         Returns:
             dict: {success: bool} or {success: False, error: str}
         """
-        old_path = self.path / old_path
+        old_path = self._resolve_path(old_path)
         if not old_path.exists():
             return {"success": False, "error": "Old path does not exist"}
-        new_path = self.path / new_path
+        new_path = self._resolve_path(new_path)
         shutil.move(old_path, new_path)
         return {"success": True}
 
@@ -530,11 +540,11 @@ class FileManagerToolSet(FileManagerToolSetBase):
                     target_path = Path(resource_path)
                 elif base_path:
                     # Relative path with base_path
-                    base = Path(base_path) if os.path.isabs(base_path) else self.path / base_path
+                    base = Path(base_path) if os.path.isabs(base_path) else self._get_root() / base_path
                     target_path = (base / resource_path).resolve()
                 else:
                     # Relative path without base_path (relative to workspace)
-                    target_path = self.path / resource_path
+                    target_path = self._get_root() / resource_path
                 
                 result["resolved_path"] = str(target_path)
                 
@@ -635,10 +645,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             Use start_line/end_line to paginate or max_chars to control output size.
         """
         # Support both absolute and relative paths
-        if os.path.isabs(file_path):
-            target_path = Path(file_path)
-        else:
-            target_path = self.path / file_path
+        target_path = self._resolve_path(file_path)
         if not target_path.exists():
             return {"success": False, "error": "File does not exist"}
         if not target_path.is_file():
@@ -759,7 +766,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             dict: Success status or error message.
         """
 
-        target_path = self.path / file_path
+        target_path = self._resolve_path(file_path)
         if not overwrite and target_path.exists():
             return {
                 "success": False,
@@ -808,7 +815,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         Returns:
             dict: {success: bool, replacements: int} or {success: False, error: str}
         """
-        target_path = self.path / file_path
+        target_path = self._resolve_path(file_path)
         if not target_path.exists():
             return {"success": False, "error": "File does not exist"}
         if not target_path.is_file():
@@ -867,7 +874,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
 
         # Add images to the message
         for img_path in image_paths:
-            ipath = self.path / img_path
+            ipath = self._resolve_path(img_path)
 
             # Validate image path
             if not ipath.exists():
@@ -892,7 +899,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             # Check for blank images FIRST
             blank_warnings = []
             for img_path in image_paths:
-                if is_image_blank(self.path / img_path):
+                if is_image_blank(self._resolve_path(img_path)):
                     blank_warnings.append(f"WARNING: Image '{img_path}' appears to be BLANK (solid color or transparent). The image contains no visual information. Please check how this image was generated.")
 
             response = await context.call_agent(messages=messages, use_memory=True)
@@ -937,7 +944,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             page_numbers: The numbers of the pages to observe. If not provided, all pages will be observed.
             dpi: The DPI of the screenshots. If not provided, the default value is 300.
         """
-        file_path = self.path / pdf_path
+        file_path = self._resolve_path(pdf_path)
         if not file_path.exists():
             return {"success": False, "error": "PDF file does not exist"}
         if not file_path.is_file():
@@ -981,7 +988,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         Returns:
             dict: Success status, content, and metadata about the PDF.
         """
-        file_path = self.path / pdf_path
+        file_path = self._resolve_path(pdf_path)
 
         # Check if file exists
         if not file_path.exists():
@@ -1082,7 +1089,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             if candidate.is_absolute():
                 i_path = candidate
             else:
-                i_path = self.path / image_path
+                i_path = self._resolve_path(image_path)
 
             # Security: Check if path is within allowed directories
             try:
@@ -1243,7 +1250,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         """
         return execute_patch_operations(
             patch=patch,
-            workspace_root=self.path,
+            workspace_root=self._get_root(),
             file_path=file_path,
             fuzzy_threshold=fuzzy_threshold,
         )
@@ -1328,7 +1335,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         result = await asyncio.to_thread(
             glob_search,
             pattern=pattern,
-            workspace_root=self.path,
+            workspace_root=self._get_root(),
             path=path,
             respect_git_ignore=respect_git_ignore,
             type_filter=type_filter,
@@ -1432,7 +1439,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         result = await asyncio.to_thread(
             grep_search,
             pattern=pattern,
-            workspace_root=self.path,
+            workspace_root=self._get_root(),
             path=path,
             file_pattern=file_pattern,
             context_lines=context_lines,
@@ -1499,7 +1506,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
             abs_refs = []
             for ref in reference_images:
                 if not ref.startswith(("/", "file://", "http")):
-                    abs_refs.append(str(self.path / ref))
+                    abs_refs.append(str(self._resolve_path(ref)))
                 else:
                     abs_refs.append(ref)
 
@@ -1547,7 +1554,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
         # Resolve file path
         source_path = Path(file_path)
         if not source_path.is_absolute():
-            source_path = self.path / source_path
+            source_path = self._get_root() / source_path
 
         if not source_path.exists():
             return {"success": False, "error": f"File not found: {file_path}"}
