@@ -1,12 +1,13 @@
 """
 NATS Remote Backend Implementation
-Integrates RPC calls and streaming functionality using Core NATS + JetStream KV
+Integrates RPC calls and streaming functionality using Core NATS + Optional JetStream KV
 """
 
 import asyncio
 import hashlib
 import inspect
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -144,7 +145,7 @@ class NATSStreamChannel(StreamChannel):
 
 
 class NATSBackend(RemoteBackend):
-    """NATS remote backend - Core NATS streaming + JetStream KV storage"""
+    """NATS remote backend - Core NATS streaming + Optional JetStream KV storage"""
 
     def __init__(self, server_urls: list[str], subject_prefix: str = "", **nats_kwargs):
         self.server_urls = server_urls or ["nats://localhost:4222"]
@@ -154,41 +155,57 @@ class NATSBackend(RemoteBackend):
         self._js = None  # Only used for KV store
         self._kv = None  # JetStream KV store
 
+        # ✅ Control JetStream initialization via environment variable
+        # Default: enabled (true) for backward compatibility
+        self.enable_jetstream = os.getenv('NATS_ENABLE_JETSTREAM', 'true').lower() == 'true'
+        if not self.enable_jetstream:
+            logger.info("JetStream disabled via NATS_ENABLE_JETSTREAM=false")
+
         # Core NATS stream management
         self._streams: Dict[str, NATSStreamChannel] = {}
 
     async def _get_connection(self):
-        """Get NATS connection, JetStream only for KV storage"""
+        """Get NATS connection, JetStream optional for KV storage"""
         if not self._nc:
             self._nc = await nats.connect(servers=self.server_urls, **self.nats_kwargs)
 
-            # Initialize JetStream only for KV store
-            try:
-                self._js = self._nc.jetstream()
-
-                # Determine dynamic bucket name based on subject_prefix
-                # FIX: Force use of global 'pantheon-service' bucket for service discovery
-                # This ensures frontend and agents look in the same place despite subject prefix
-                bucket_name = "pantheon-service"
-
-                # Create KV bucket for service discovery
+            # ✅ Initialize JetStream only if enabled
+            if self.enable_jetstream:
+                # Initialize JetStream only for KV store
                 try:
-                    self._kv = await self._js.key_value(bucket_name)
-                except Exception:
-                    try:
-                        self._kv = await self._js.create_key_value(
-                            bucket=bucket_name
-                        )
-                        logger.debug(f"Created NATS KV bucket: {bucket_name}")
-                    except Exception as e:
-                        logger.warning(
-                            f"KV store creation failed: {e}, continuing without KV store"
-                        )
-                        self._kv = None
+                    self._js = self._nc.jetstream()
 
-            except Exception as e:
-                logger.warning(
-                    f"JetStream not available: {e}, continuing without KV store"
+                    # Determine dynamic bucket name based on subject_prefix
+                    # FIX: Force use of global 'pantheon-service' bucket for service discovery
+                    # This ensures frontend and agents look in the same place despite subject prefix
+                    bucket_name = "pantheon-service"
+
+                    # Create KV bucket for service discovery
+                    try:
+                        self._kv = await self._js.key_value(bucket_name)
+                    except Exception:
+                        try:
+                            self._kv = await self._js.create_key_value(
+                                bucket=bucket_name
+                            )
+                            logger.debug(f"Created NATS KV bucket: {bucket_name}")
+                        except Exception as e:
+                            logger.warning(
+                                f"KV store creation failed: {e}, continuing without KV store"
+                            )
+                            self._kv = None
+
+                except Exception as e:
+                    logger.warning(
+                        f"JetStream not available: {e}, continuing without KV store"
+                    )
+                    self._js = None
+                    self._kv = None
+            else:
+                # ✅ JetStream disabled - skip initialization
+                logger.info(
+                    "Skipping JetStream initialization (NATS_ENABLE_JETSTREAM=false), "
+                    "KV store will not be available"
                 )
                 self._js = None
                 self._kv = None
