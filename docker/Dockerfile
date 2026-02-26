@@ -11,31 +11,14 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     build-essential \
     # R environment (needed for compiling rpy2)
     r-base-dev \
-    # Playwright browser dependencies
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    libatspi2.0-0 \
-    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/* && \
     pip install uv
 
 WORKDIR /app
 
-ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+# Install venv outside /app so that "COPY --from=builder /app /app" in the
+# production stage copies only source code — no venv files mixed in.
+ENV UV_PROJECT_ENVIRONMENT=/venv
 
 # ── Layer 1: dependency files only ──────────────────────────────────────────
 # Copy only pyproject.toml + uv.lock so this layer is reused on code-only changes.
@@ -43,8 +26,10 @@ COPY pyproject.toml uv.lock ./
 
 # Install all Python dependencies (no project package itself yet).
 # BuildKit cache mount keeps uv's HTTP cache on the host across builds.
+# --extra r/knowledge/slack: install runtime extras only (dev extra excluded to skip pytest tools).
+# --no-dev: also excludes [dependency-groups] dev (ipdb, ipython, build tools, etc.).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --all-extras --no-install-project --python /usr/local/bin/python
+    uv sync --no-dev --extra r --extra knowledge --extra slack --no-install-project --python /usr/local/bin/python
 
 # ── Layer 2: single-cell analysis extras ────────────────────────────────────
 # These packages are fixed (not in pyproject.toml), so they are also cached
@@ -60,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Optimized single-cell stack (~120MB, adds ~3-4 min to build time)
 # Focuses on most frequently used packages (>70% usage rate)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python \
+    uv pip install --python /venv/bin/python \
     # Core data structures & framework (~55MB) - 95% usage
     anndata \
     scanpy \
@@ -112,13 +97,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Code-only changes never invalidate the expensive dependency layers above.
 COPY . /app/
 
-# Install the project package itself (all deps already cached → fast).
+# Sync again to pick up any lock-file changes introduced by the source COPY.
+# --no-install-project: do NOT install the pantheon package into /venv.
+# The project is found at runtime via PYTHONPATH=/app, so installing it into
+# the venv is unnecessary and would risk copying source files into /venv,
+# making Layer A (venv) change on every code commit.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --all-extras --python /usr/local/bin/python
+    uv sync --no-dev --extra r --extra knowledge --extra slack --no-install-project --python /usr/local/bin/python
 
-# Pre-compile all Python source files to .pyc bytecode.
-# This skips the compile step at runtime, reducing cold-start import time by ~1-2s.
-RUN /app/.venv/bin/python -m compileall -q /app/.venv/lib /app/pantheon 2>/dev/null || true
+# Pre-compile project source files to .pyc bytecode.
+# Only compile /app/pantheon (source), NOT the venv, so the venv directory stays
+# content-stable across code-only changes (critical for Docker layer caching).
+RUN /venv/bin/python -m compileall -q /app/pantheon 2>/dev/null || true
 
 # Production stage
 FROM python:3.11-slim-bookworm
@@ -164,38 +154,50 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g ajv ajv-formats && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv
+    && npm install -g ajv ajv-formats \
+    && npm cache clean --force \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy virtual environment from builder
-# Since both use python:3.11-slim, the symlink in .venv/bin/python -> /usr/local/bin/python is valid
-COPY --from=builder /app/.venv /app/.venv
+# Layer A — venv (~1-2GB, stable): only rebuilt when pyproject.toml / uv.lock changes.
+# Kept at /venv (same path as builder) to avoid the Docker overlay2 opaque-whiteout
+# problem: if we copied to /app/.venv first and then did "COPY /app /app", the second
+# COPY would create an opaque whiteout for /app, silently erasing /app/.venv.
+# Keeping the two COPYs at non-overlapping paths (/venv vs /app) eliminates the issue.
+# Both stages use python:3.11-slim, so venv symlinks remain valid.
+COPY --from=builder /venv /venv
+
+# Layer B — source (~10MB, changes every commit): copy all of /app from the builder.
+# /app in the builder contains only source and project files (no venv), so nothing
+# is accidentally left out and the venv layer above is never affected.
 COPY --from=builder /app /app
 
 # Set environment variables
 # Add /app to PYTHONPATH so 'import pantheon' works
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app:$PYTHONPATH" \
+ENV PATH="/venv/bin:$PATH" \
+    PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1 \
     # PYTHONDONTWRITEBYTECODE removed: .pyc files are pre-compiled in builder stage
     # and must remain readable at runtime to benefit from the compileall optimization.
     # Keep uv's package cache inside the image so 'uv run --with' hits it at runtime
     UV_CACHE_DIR=/app/.uv-cache \
+    # Install playwright browsers to an explicit path outside /root/.cache.
+    # This prevents accidental deletion and makes the installation location unambiguous.
+    PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright \
     # Use Playwright mirror for faster downloads in China
     PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
 
 # Install Playwright browsers (chromium only to reduce image size)
-# Using chromium is sufficient for most web scraping/automation tasks
-# Try multiple download sources with retries
-RUN export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright && \
-    /app/.venv/bin/playwright install chromium --with-deps || \
-    (export PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net && \
-     /app/.venv/bin/playwright install chromium --with-deps) || \
-    (unset PLAYWRIGHT_DOWNLOAD_HOST && \
-     /app/.venv/bin/playwright install chromium --with-deps)
+# Using chromium is sufficient for most web scraping/automation tasks.
+# PLAYWRIGHT_DOWNLOAD_HOST is already set in ENV above; the fallbacks override
+# it temporarily if the primary mirror is unreachable.
+RUN /venv/bin/playwright install chromium --with-deps || \
+    (PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net \
+     /venv/bin/playwright install chromium --with-deps) || \
+    (PLAYWRIGHT_DOWNLOAD_HOST= \
+     /venv/bin/playwright install chromium --with-deps)
 
 # ============================================
 # Pre-warm MCP Server Caches
@@ -208,6 +210,7 @@ RUN export PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright && 
 # - biomcp (uv run --with biomcp-python): Python environment cache
 RUN echo "Pre-warming context7 MCP server cache (downloading npm packages)..." && \
     npm install -g @upstash/context7-mcp && \
+    npm cache clean --force && \
     echo "context7 cache pre-warmed"
 
 # Pre-warm the 'uv run --with biomcp-python' cache by running the exact same
@@ -249,9 +252,6 @@ RUN curl -L https://github.com/Y2Z/monolith/releases/download/v2.7.0/monolith-x8
 # Copy entrypoint script (already copied with pantheon-agents/)
 RUN chmod +x /app/docker/docker-entrypoint.sh && \
     cp /app/docker/docker-entrypoint.sh /usr/local/bin/
-
-# Remove build-time cache residue that is not needed at runtime (~600MB saved)
-RUN rm -rf /root/.cache
 
 # Create workspace directory
 RUN mkdir -p /workspace
