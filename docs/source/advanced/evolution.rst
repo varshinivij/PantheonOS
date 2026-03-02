@@ -344,7 +344,7 @@ Integrate evolution into agent workflows:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import EvolutionToolSet
 
    agent = Agent(

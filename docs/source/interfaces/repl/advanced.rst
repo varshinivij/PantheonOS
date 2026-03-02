@@ -12,7 +12,7 @@ You can create and run the REPL programmatically:
 
    import asyncio
    from pantheon.repl import Repl
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(
@@ -37,7 +37,7 @@ Pass an Agent or Team directly:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.repl import Repl
 
    agent = Agent(name="assistant", ...)
@@ -133,7 +133,7 @@ Session Management
 
 .. code-block:: bash
 
-   python -m pantheon.repl --chat-id <previous-id>
+   pantheon cli --chat-id <previous-id>
 
 **Set Memory Directory**
 
@@ -189,6 +189,6 @@ Enable debug logging:
 
 .. code-block:: bash
 
-   PANTHEON_LOG_LEVEL=DEBUG python -m pantheon.repl
+   PANTHEON_LOG_LEVEL=DEBUG pantheon cli
 
 View logs in ``~/.pantheon/logs/``.

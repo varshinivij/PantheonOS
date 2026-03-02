@@ -22,7 +22,7 @@ Creating a Sequential Team
 .. code-block:: python
 
    from pantheon.team import SequentialTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create specialized agents
    researcher = Agent(
@@ -185,7 +185,7 @@ Research Pipeline
 .. code-block:: python
 
    from pantheon.team import SequentialTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import WebToolSet, FileManagerToolSet
 
    researcher = Agent(

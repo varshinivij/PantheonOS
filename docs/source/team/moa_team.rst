@@ -31,7 +31,7 @@ Creating a MoA Team
 .. code-block:: python
 
    from pantheon.team import MoATeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create proposer agents with diverse perspectives
    technical_expert = Agent(
@@ -246,7 +246,7 @@ Decision Making Team
 .. code-block:: python
 
    from pantheon.team import MoATeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Different analytical perspectives
    risk_analyst = Agent(

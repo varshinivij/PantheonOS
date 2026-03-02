@@ -10,7 +10,7 @@ Start the REPL with default settings:
 
 .. code-block:: bash
 
-   python -m pantheon.repl
+   pantheon cli
 
 You'll see a welcome message and prompt. Type your message and press Enter to chat with the agent.
 
@@ -28,16 +28,16 @@ Starting Options
 .. code-block:: bash
 
    # Use a specific team template
-   python -m pantheon.repl --template data_research_team
+   pantheon cli --template data_research_team
 
    # Set memory directory
-   python -m pantheon.repl --memory-dir ./my_chats
+   pantheon cli --memory-dir ./my_chats
 
    # Resume a previous chat
-   python -m pantheon.repl --chat-id abc123
+   pantheon cli --chat-id abc123
 
    # Quiet mode (less output)
-   python -m pantheon.repl --quiet
+   pantheon cli --quiet
 
 Key Features
 ------------

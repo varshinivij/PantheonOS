@@ -20,7 +20,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import KnowledgeToolSet
 
    # Create knowledge toolset
@@ -253,7 +253,7 @@ Building a Research Assistant
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import KnowledgeToolSet, FileManagerToolSet
 
    knowledge_tools = KnowledgeToolSet(name="knowledge")

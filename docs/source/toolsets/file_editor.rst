@@ -19,7 +19,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet
 
    # Create toolset with workspace path
@@ -301,7 +301,7 @@ File Editing Workflow
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet
 
    file_tools = FileManagerToolSet(name="files", path="./project")

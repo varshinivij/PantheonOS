@@ -17,10 +17,10 @@ The REPL is the fastest way to start using Pantheon. It provides a rich command-
 .. code-block:: bash
 
    # Start with default settings
-   python -m pantheon.repl
+   pantheon cli
 
    # Or specify a team template
-   python -m pantheon.repl --template data_research_team
+   pantheon cli --template data_research_team
 
 **Features:**
 
@@ -41,7 +41,7 @@ The ChatRoom provides a web-based interface accessible from any browser.
 .. code-block:: bash
 
    # Start the server
-   python -m pantheon.chatroom
+   pantheon ui
 
    # Then open in browser:
    # https://pantheon-ui.vercel.app/
@@ -65,7 +65,7 @@ Full programmatic control over agents and teams.
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(

@@ -76,10 +76,10 @@ Create ``.pantheon/agents/my_assistant.md``:
 .. code-block:: bash
 
    # REPL
-   python -m pantheon.repl --template my_assistant
+   pantheon cli --template my_assistant
 
    # ChatRoom
-   python -m pantheon.chatroom --template my_assistant
+   pantheon ui --template my_assistant
 
 .. code-block:: python
 

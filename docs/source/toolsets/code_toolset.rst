@@ -18,7 +18,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import CodeToolSet
 
    # Create code toolset
@@ -175,7 +175,7 @@ Exploring a Codebase
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import CodeToolSet, FileManagerToolSet
 
    code_tools = CodeToolSet(name="code", workspace_path="./my_project")

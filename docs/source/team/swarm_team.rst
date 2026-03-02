@@ -22,7 +22,7 @@ Creating a Swarm Team
 .. code-block:: python
 
    from pantheon.team import SwarmTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create specialized agents
    generalist = Agent(
@@ -153,7 +153,7 @@ Customer Support Swarm
 .. code-block:: python
 
    from pantheon.team import SwarmTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create support agents
    greeter = Agent(

@@ -41,7 +41,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import DatabaseAPIQueryToolSet
 
    # Create database API toolset
@@ -228,7 +228,7 @@ Agent-Driven Research
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import DatabaseAPIQueryToolSet
 
    db_tools = DatabaseAPIQueryToolSet(name="databases")

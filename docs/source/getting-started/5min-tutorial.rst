@@ -38,7 +38,7 @@ Step 3: Start Chatting (30 seconds)
 
 .. code-block:: bash
 
-   python -m pantheon.repl
+   pantheon cli
 
 You'll see a prompt. Type your message and press Enter:
 
@@ -51,7 +51,7 @@ You'll see a prompt. Type your message and press Enter:
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(
@@ -70,7 +70,7 @@ Make your agent more powerful by adding toolsets:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    agent = Agent(
@@ -96,7 +96,7 @@ Multiple agents working together:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.team import PantheonTeam
 
    researcher = Agent(

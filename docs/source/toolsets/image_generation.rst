@@ -18,7 +18,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import ImageGenerationToolSet
 
    # Create image generation toolset
@@ -173,7 +173,7 @@ Agent-Driven Image Creation
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import ImageGenerationToolSet, FileManagerToolSet
 
    image_tools = ImageGenerationToolSet(name="images")

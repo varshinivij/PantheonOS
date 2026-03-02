@@ -45,7 +45,7 @@ Programmatic Usage
 
    from pantheon.chatroom import ChatRoom
    from pantheon.team import PantheonTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    agents = [
        Agent(name="researcher", instructions="..."),

@@ -72,7 +72,7 @@ The Skillbook stores learned patterns:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.learning import Skillbook
 
    skillbook = Skillbook(".pantheon/skills")
@@ -134,7 +134,7 @@ Records agent interactions for later analysis:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.learning import TrajectoryTracker
 
    tracker = TrajectoryTracker(".pantheon/trajectories")

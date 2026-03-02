@@ -22,7 +22,7 @@ Creating a SwarmCenter Team
 .. code-block:: python
 
    from pantheon.team import SwarmCenterTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create triage agent (the central router)
    triage = Agent(
@@ -196,7 +196,7 @@ Development Team
 .. code-block:: python
 
    from pantheon.team import SwarmCenterTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, PythonInterpreterToolSet
 
    # Tech lead as triage

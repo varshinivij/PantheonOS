@@ -14,7 +14,7 @@ Creating an Agent
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    agent = Agent(
        name="assistant",

@@ -19,7 +19,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import IntegratedNotebookToolSet
 
    # Create notebook toolset
@@ -299,7 +299,7 @@ Data Analysis Workflow
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import IntegratedNotebookToolSet
 
    notebook_tools = IntegratedNotebookToolSet(name="notebook")

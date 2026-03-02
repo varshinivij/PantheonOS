@@ -30,8 +30,8 @@ Clone and Install
 
 .. code-block:: bash
 
-   git clone https://github.com/aristoteleo/pantheon-agents.git
-   cd pantheon-agents
+   git clone https://github.com/aristoteleo/PantheonOS.git
+   cd PantheonOS
    uv sync
 
 With Optional Dependencies
@@ -82,8 +82,8 @@ For the latest development version:
 
 .. code-block:: bash
 
-   git clone https://github.com/aristoteleo/pantheon-agents.git
-   cd pantheon-agents
+   git clone https://github.com/aristoteleo/PantheonOS.git
+   cd PantheonOS
    pip install -e ".[knowledge]"
 
 Development Installation
@@ -93,8 +93,8 @@ For contributors and developers:
 
 .. code-block:: bash
 
-   git clone https://github.com/aristoteleo/pantheon-agents.git
-   cd pantheon-agents
+   git clone https://github.com/aristoteleo/PantheonOS.git
+   cd PantheonOS
 
    # Using uv (recommended)
    uv sync --extra dev --extra knowledge
@@ -189,10 +189,10 @@ The easiest way to start using Pantheon:
 .. code-block:: bash
 
    # With uv
-   uv run python -m pantheon.repl
+   pantheon cli
 
    # With pip installation
-   python -m pantheon.repl
+   pantheon cli
 
 This launches the interactive REPL with default settings.
 
@@ -202,7 +202,7 @@ Verifying Installation
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(

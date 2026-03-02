@@ -107,13 +107,13 @@ Client Connection
 
 .. code-block:: bash
 
-   python -m pantheon.repl --remote nats://localhost:4222
+   pantheon cli --remote nats://localhost:4222
 
 **Python API**
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.remote import RemoteEndpoint
 
    endpoint = RemoteEndpoint(
@@ -280,7 +280,7 @@ Docker Deployment
 
      repl:
        build: .
-       command: python -m pantheon.repl --remote nats://nats:4222
+       command: pantheon cli --remote nats://nats:4222
        depends_on:
          - nats
          - worker

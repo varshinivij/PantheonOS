@@ -20,7 +20,7 @@ Quick Example
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(
@@ -47,7 +47,7 @@ The fundamental building block. Represents an AI-powered entity.
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    agent = Agent(
        name="assistant",
@@ -119,7 +119,7 @@ Integration
 .. code-block:: python
 
    from fastapi import FastAPI
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    app = FastAPI()
    agent = Agent(name="api_assistant", ...)

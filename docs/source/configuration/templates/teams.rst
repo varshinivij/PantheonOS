@@ -314,13 +314,13 @@ Usage
 
 .. code-block:: bash
 
-   python -m pantheon.repl --template developer_team
+   pantheon cli --template developer_team
 
 **ChatRoom:**
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom --template developer_team
+   pantheon ui --template developer_team
 
 **Python API:**
 

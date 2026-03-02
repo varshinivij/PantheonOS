@@ -18,7 +18,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import WebToolSet
 
    # Create web toolset
@@ -121,7 +121,7 @@ Research Workflow
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import WebToolSet
 
    web_tools = WebToolSet(name="web")

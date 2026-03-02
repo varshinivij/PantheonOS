@@ -233,7 +233,7 @@ Middleware
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.middleware import Middleware
 
    class LoggingMiddleware(Middleware):
@@ -268,7 +268,7 @@ Hooks
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    agent = Agent(name="assistant", ...)
 

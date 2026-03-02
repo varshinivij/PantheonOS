@@ -15,7 +15,7 @@ Quick Start
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom
+   pantheon ui
 
 **2. Copy the service ID** from the output:
 
@@ -50,10 +50,10 @@ ChatRoom reads configuration from ``.pantheon/``:
 .. code-block:: bash
 
    # Use a specific team template
-   python -m pantheon.chatroom --template data_research_team
+   pantheon ui --template data_research_team
 
    # Set memory directory
-   python -m pantheon.chatroom --memory-dir ./chats
+   pantheon ui --memory-dir ./chats
 
 Architecture
 ------------

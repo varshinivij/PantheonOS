@@ -27,20 +27,20 @@ The easiest way to start the REPL:
 
 .. code-block:: bash
 
-   python -m pantheon.repl
+   pantheon cli
 
 With options:
 
 .. code-block:: bash
 
    # Specify a team template
-   python -m pantheon.repl --team myteam
+   pantheon cli --team myteam
 
    # Specify memory directory
-   python -m pantheon.repl --memory-dir ./chats
+   pantheon cli --memory-dir ./chats
 
    # Resume a specific chat
-   python -m pantheon.repl --chat-id abc123
+   pantheon cli --chat-id abc123
 
 Programmatic Usage
 ~~~~~~~~~~~~~~~~~~
@@ -49,7 +49,7 @@ Programmatic Usage
 
    import asyncio
    from pantheon.repl import Repl
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(
@@ -70,7 +70,7 @@ With Teams
 
    from pantheon.repl import Repl
    from pantheon.team import PantheonTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agents = [
@@ -318,7 +318,7 @@ Development Workflow
 .. code-block:: python
 
    from pantheon.repl import Repl
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    async def dev_repl():
@@ -339,7 +339,7 @@ Data Analysis
 .. code-block:: python
 
    from pantheon.repl import Repl
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import IntegratedNotebookToolSet
 
    async def analysis_repl():

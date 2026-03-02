@@ -191,7 +191,7 @@ Using Built-in Toolsets
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    # Create toolsets
@@ -213,7 +213,7 @@ Using Built-in Toolsets
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    # Create agent first

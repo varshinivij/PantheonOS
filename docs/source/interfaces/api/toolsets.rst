@@ -10,7 +10,7 @@ Add toolsets at runtime using ``await agent.toolset()``:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    agent = Agent(

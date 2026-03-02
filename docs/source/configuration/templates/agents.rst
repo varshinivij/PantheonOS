@@ -238,13 +238,13 @@ Usage
 
 .. code-block:: bash
 
-   python -m pantheon.repl --template developer
+   pantheon cli --template developer
 
 **ChatRoom:**
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom --template developer
+   pantheon ui --template developer
 
 **Python API:**
 

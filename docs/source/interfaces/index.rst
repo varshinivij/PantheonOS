@@ -17,15 +17,15 @@ Overview
    * - **REPL**
      - Command-line interface with rich features
      - Developers, quick experiments
-     - ``python -m pantheon.repl``
+     - ``pantheon cli``
    * - **Web UI**
      - Browser-based visual interface
      - Demos, daily use
-     - ``python -m pantheon.chatroom``
+     - ``pantheon ui``
    * - **Python API**
      - Full programmatic control
      - Integrations, custom apps
-     - ``from pantheon import Agent``
+     - ``from pantheon.agent import Agent``
 
 Shared Features
 ---------------
@@ -58,7 +58,7 @@ REPL
 
 .. code-block:: bash
 
-   python -m pantheon.repl
+   pantheon cli
 
 Features:
 
@@ -72,7 +72,7 @@ Web UI
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom
+   pantheon ui
 
 Then open https://pantheon-ui.vercel.app/ and connect with the displayed service ID.
 
@@ -87,7 +87,7 @@ Python API
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet
 
    agent = Agent(

@@ -59,7 +59,7 @@ Create ``.pantheon/agents/helper.md``:
 
 .. code-block:: bash
 
-   python -m pantheon.repl --template helper
+   pantheon cli --template helper
 
 **Create a team:**
 

@@ -44,7 +44,7 @@ Select models by quality level:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Let Pantheon choose the best available model
    agent = Agent(model="high")      # Best quality
@@ -341,7 +341,7 @@ Python API
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Using tags (recommended)
    agent = Agent(model="normal")

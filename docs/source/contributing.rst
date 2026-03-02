@@ -11,15 +11,15 @@ Setting Up Development Environment
 
 1. **Fork the Repository**
 
-   Visit https://github.com/aristoteleo/pantheon-agents and click "Fork"
+   Visit https://github.com/aristoteleo/PantheonOS and click "Fork"
 
 2. **Clone Your Fork**
 
    .. code-block:: bash
 
       git clone https://github.com/YOUR_USERNAME/pantheon-agents.git
-      cd pantheon-agents
-      git remote add upstream https://github.com/aristoteleo/pantheon-agents.git
+      cd PantheonOS
+      git remote add upstream https://github.com/aristoteleo/PantheonOS.git
 
 3. **Create Development Environment**
 

@@ -311,7 +311,7 @@ Using Custom Teams
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        # Create agents

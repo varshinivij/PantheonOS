@@ -48,7 +48,8 @@ Relationships
 
 .. code-block:: python
 
-   from pantheon import Agent, Team
+   from pantheon.agent import Agent
+   from pantheon.team import Team
    from pantheon.toolsets import FileManagerToolSet
    from pantheon.memory import Memory
    from pantheon.providers import MCPProvider

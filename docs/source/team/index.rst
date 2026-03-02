@@ -33,7 +33,7 @@ Best for:
 .. code-block:: python
 
    from pantheon.team import PantheonTeam
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    researcher = Agent(name="researcher", instructions="...")
    analyst = Agent(name="analyst", instructions="...")
@@ -144,7 +144,7 @@ Here's a complete example using PantheonTeam:
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.team import PantheonTeam
 
    async def main():

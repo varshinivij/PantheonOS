@@ -30,7 +30,7 @@ Intelligent delegation where agents can call each other.
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.team import PantheonTeam
 
    researcher = Agent(

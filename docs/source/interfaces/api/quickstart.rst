@@ -22,7 +22,7 @@ Basic Agent
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def main():
        agent = Agent(
@@ -41,7 +41,7 @@ With Tools
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet, ShellToolSet
 
    async def main():
@@ -61,7 +61,7 @@ Custom Tools
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    agent = Agent(name="calculator", instructions="Do math.")
 
@@ -85,7 +85,7 @@ Teams
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.team import PantheonTeam
 
    researcher = Agent(name="researcher", instructions="Research topics.")

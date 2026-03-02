@@ -17,7 +17,7 @@ Add toolsets at runtime using ``await agent.toolset()``:
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import FileManagerToolSet
 
    agent = Agent(
@@ -227,7 +227,7 @@ Combining Multiple Toolsets
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import (
        FileManagerToolSet,
        ShellToolSet,
@@ -260,7 +260,7 @@ Data Analysis Setup
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import (
        IntegratedNotebookToolSet,
        FileManagerToolSet

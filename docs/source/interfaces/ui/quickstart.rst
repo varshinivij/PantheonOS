@@ -14,7 +14,7 @@ Step 1: Start ChatRoom
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom
+   pantheon ui
 
 You'll see output like:
 
@@ -48,7 +48,7 @@ ChatRoom uses team templates from ``.pantheon/teams/``. To use a specific templa
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom --template data_research_team
+   pantheon ui --template data_research_team
 
 Available options:
 
@@ -58,7 +58,7 @@ Available options:
    ls .pantheon/teams/
 
    # Use a template
-   python -m pantheon.chatroom --template <template_name>
+   pantheon ui --template <template_name>
 
 Creating Your First Template
 ----------------------------
@@ -90,7 +90,7 @@ Then start with your template:
 
 .. code-block:: bash
 
-   python -m pantheon.chatroom --template my_team
+   pantheon ui --template my_team
 
 Common Options
 --------------
@@ -98,13 +98,13 @@ Common Options
 .. code-block:: bash
 
    # Use specific memory directory
-   python -m pantheon.chatroom --memory-dir ./my_chats
+   pantheon ui --memory-dir ./my_chats
 
    # Use specific template
-   python -m pantheon.chatroom --template developer_team
+   pantheon ui --template developer_team
 
    # Quiet mode
-   python -m pantheon.chatroom --quiet
+   pantheon ui --quiet
 
 Troubleshooting
 ---------------

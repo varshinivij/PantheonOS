@@ -18,7 +18,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import PackageToolSet
 
    # Create package toolset
@@ -216,7 +216,7 @@ Agent-Driven Tool Discovery
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import PackageToolSet
 
    package_tools = PackageToolSet(name="packages")

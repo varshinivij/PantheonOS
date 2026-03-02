@@ -208,7 +208,7 @@ Integration Patterns
 .. code-block:: python
 
    from fastapi import FastAPI
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    app = FastAPI()
    agent = Agent(name="api", ...)
@@ -223,7 +223,7 @@ Integration Patterns
 .. code-block:: python
 
    import asyncio
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    async def background_agent():
        agent = Agent(name="background", ...)
@@ -240,7 +240,7 @@ Testing
 .. code-block:: python
 
    import pytest
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    @pytest.mark.asyncio
    async def test_agent_response():

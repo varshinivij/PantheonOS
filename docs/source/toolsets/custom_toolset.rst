@@ -396,7 +396,7 @@ With Agents
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
 
    # Create toolset
    todo_tools = TodoToolSet(name="todos", storage_path="./my_todos.json")

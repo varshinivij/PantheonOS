@@ -18,7 +18,7 @@ Component Architecture
 pantheon-agents
 ~~~~~~~~~~~~~~~
 
-Repository: https://github.com/aristoteleo/pantheon-agents
+Repository: https://github.com/aristoteleo/PantheonOS
 
 The core framework that provides the foundation for the entire system:
 

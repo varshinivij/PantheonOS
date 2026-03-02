@@ -172,7 +172,7 @@ Using MCP in Python API
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.providers import MCPProvider
 
    # Create agent
@@ -275,7 +275,7 @@ Enable debug logging:
 .. code-block:: bash
 
    export PANTHEON_LOG_LEVEL=DEBUG
-   python -m pantheon.repl
+   pantheon cli
 
 Connection Issues
 ~~~~~~~~~~~~~~~~~

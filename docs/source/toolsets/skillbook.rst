@@ -19,7 +19,7 @@ Basic Usage
 
 .. code-block:: python
 
-   from pantheon import Agent
+   from pantheon.agent import Agent
    from pantheon.toolsets import SkillbookToolSet
 
    # Create skillbook toolset
