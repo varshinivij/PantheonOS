@@ -1,11 +1,6 @@
-<!-- Banner placeholder — will be added later -->
-
 <div align="center">
 
-# PantheonOS
-
-***A framework for building distributed, evolvable multi-agent systems.***
-
+<img src="docs/source/_static/pantheon-github-banner.png" alt="PantheonOS — A framework for building distributed, evolvable multi-agent systems." width="100%" />
 
 [Official Site][official-site] · [Online App][online-app] · [Documents][docs] · [Feedback][github-issues-link]
 
