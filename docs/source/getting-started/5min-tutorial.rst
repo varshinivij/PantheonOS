@@ -56,8 +56,7 @@ You'll see a prompt. Type your message and press Enter:
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are a helpful assistant.",
-           model="gpt-4o-mini"
+           instructions="You are a helpful assistant."
        )
        await agent.chat()
 
@@ -75,8 +74,7 @@ Make your agent more powerful by adding toolsets:
 
    agent = Agent(
        name="developer",
-       instructions="You are a developer assistant. Help with coding tasks.",
-       model="gpt-4o"
+       instructions="You are a developer assistant. Help with coding tasks."
    )
 
    # Add toolsets at runtime

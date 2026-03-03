@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="analyst",
-       instructions="You are a data analyst. Use Jupyter notebooks for analysis.",
-       model="gpt-4o"
+       instructions="You are a data analyst. Use Jupyter notebooks for analysis."
    )
    await agent.toolset(notebook_tools)
 
@@ -311,8 +310,7 @@ Data Analysis Workflow
        2. Import required libraries
        3. Load and explore data
        4. Create visualizations
-       5. Document findings in markdown cells""",
-       model="gpt-4o"
+       5. Document findings in markdown cells"""
    )
    await analyst.toolset(notebook_tools)
 

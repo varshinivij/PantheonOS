@@ -32,8 +32,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="statistician",
-       instructions="You are a statistician who analyzes data using R.",
-       model="gpt-4o"
+       instructions="You are a statistician who analyzes data using R."
    )
    await agent.toolset(r_tools)
 

@@ -201,8 +201,7 @@ Using Built-in Toolsets
    # Create agent and add toolsets at runtime
    agent = Agent(
        name="developer",
-       instructions="You are a developer assistant.",
-       model="gpt-4o"
+       instructions="You are a developer assistant."
    )
    await agent.toolset(file_tools)
    await agent.toolset(shell_tools)
@@ -219,8 +218,7 @@ Using Built-in Toolsets
    # Create agent first
    agent = Agent(
        name="developer",
-       instructions="You are a developer assistant.",
-       model="gpt-4o"
+       instructions="You are a developer assistant."
    )
 
    # Add toolsets dynamically
@@ -260,8 +258,7 @@ Creating Custom Tools
    # Use with agent
    agent = Agent(
        name="assistant",
-       instructions="You are a helpful assistant.",
-       model="gpt-4o"
+       instructions="You are a helpful assistant."
    )
    await agent.toolset(MyToolSet(name="my_tools"))
 

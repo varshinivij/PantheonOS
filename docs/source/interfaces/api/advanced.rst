@@ -41,8 +41,7 @@ Providers abstract different tool sources:
 
    agent = Agent(
        name="assistant",
-       instructions="You are a helpful assistant.",
-       model="gpt-4o"
+       instructions="You are a helpful assistant."
    )
    await agent.mcp(name="mcp_tools", provider=mcp)
 
@@ -246,8 +245,7 @@ Testing
    async def test_agent_response():
        agent = Agent(
            name="test",
-           instructions="Always respond with 'OK'",
-           model="gpt-4o-mini"
+           instructions="Always respond with 'OK'"
        )
 
        response = await agent.run("Hello")

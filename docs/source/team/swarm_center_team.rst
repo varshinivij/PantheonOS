@@ -30,27 +30,23 @@ Creating a SwarmCenter Team
        instructions="""You are a task router. Analyze requests and delegate to:
        - researcher: For information gathering
        - developer: For code implementation
-       - writer: For documentation""",
-       model="gpt-4o"
+       - writer: For documentation"""
    )
 
    # Create specialized workers
    researcher = Agent(
        name="researcher",
-       instructions="Research information and provide findings.",
-       model="gpt-4o-mini"
+       instructions="Research information and provide findings."
    )
 
    developer = Agent(
        name="developer",
-       instructions="Implement code solutions.",
-       model="gpt-4o-mini"
+       instructions="Implement code solutions."
    )
 
    writer = Agent(
        name="writer",
-       instructions="Create documentation.",
-       model="gpt-4o-mini"
+       instructions="Create documentation."
    )
 
    # Create SwarmCenter team
@@ -205,8 +201,7 @@ Development Team
        instructions="""Route development tasks:
        - architect: System design and planning
        - developer: Code implementation
-       - tester: Testing and QA""",
-       model="gpt-4o"
+       - tester: Testing and QA"""
    )
 
    architect = Agent(
@@ -216,8 +211,7 @@ Development Team
 
    developer = Agent(
        name="developer",
-       instructions="Implement code based on specifications.",
-       model="gpt-4o"
+       instructions="Implement code based on specifications."
    )
    await developer.toolset(FileManagerToolSet("files"))
    await developer.toolset(PythonInterpreterToolSet("python"))
@@ -246,14 +240,12 @@ Research Team
        instructions="""Coordinate research:
        - literature_reviewer: Academic paper analysis
        - data_analyst: Data processing
-       - writer: Report writing""",
-       model="gpt-4o"
+       - writer: Report writing"""
    )
 
    literature_reviewer = Agent(
        name="literature_reviewer",
-       instructions="Review and summarize academic papers.",
-       model="gpt-4o"
+       instructions="Review and summarize academic papers."
    )
    await literature_reviewer.toolset(WebToolSet("web"))
 

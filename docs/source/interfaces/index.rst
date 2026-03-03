@@ -92,8 +92,7 @@ Python API
 
    agent = Agent(
        name="assistant",
-       instructions="You are helpful.",
-       model="gpt-4o-mini"
+       instructions="You are helpful."
    )
 
    # Add toolsets at runtime

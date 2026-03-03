@@ -151,20 +151,17 @@ Here's a complete example using PantheonTeam:
        # Create specialized agents
        researcher = Agent(
            name="researcher",
-           instructions="Research topics thoroughly using web search.",
-           model="gpt-4o-mini"
+           instructions="Research topics thoroughly using web search."
        )
 
        writer = Agent(
            name="writer",
-           instructions="Write clear, engaging content based on research.",
-           model="gpt-4o-mini"
+           instructions="Write clear, engaging content based on research."
        )
 
        editor = Agent(
            name="editor",
-           instructions="Polish and improve the text for clarity.",
-           model="gpt-4o-mini"
+           instructions="Polish and improve the text for clarity."
        )
 
        # Create team

@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="data_scientist",
-       instructions="You are a data scientist who can analyze data with Python.",
-       model="gpt-4o"
+       instructions="You are a data scientist who can analyze data with Python."
    )
    await agent.toolset(python_tools)
 

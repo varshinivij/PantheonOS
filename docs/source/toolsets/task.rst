@@ -28,8 +28,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="developer",
-       instructions="You manage tasks using structured workflows.",
-       model="gpt-4o"
+       instructions="You manage tasks using structured workflows."
    )
    await agent.toolset(task_tools)
 

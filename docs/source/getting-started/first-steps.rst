@@ -70,8 +70,7 @@ Full programmatic control over agents and teams.
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are a helpful assistant.",
-           model="gpt-4o-mini"
+           instructions="You are a helpful assistant."
        )
 
        # Single query

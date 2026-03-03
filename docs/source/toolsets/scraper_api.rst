@@ -47,8 +47,7 @@ Setting Up Scraper Toolset
        # Create agent with scraping capabilities
        agent = Agent(
            name="web_scraper",
-           instructions="Search the web and extract information from websites.",
-           model="gpt-4.1-mini"
+           instructions="Search the web and extract information from websites."
        )
        
        # Connect to scraper toolset
@@ -132,8 +131,7 @@ Research Assistant
        1. Search Google for relevant information
        2. Fetch top results
        3. Extract and summarize key points
-       4. Provide sources""",
-       model="gpt-4.1"
+       4. Provide sources"""
    )
    
    response = await researcher.run([{
@@ -152,8 +150,7 @@ News Aggregator
        1. Search for recent news articles
        2. Fetch article content
        3. Summarize key stories
-       4. Identify trends""",
-       model="gpt-4.1"
+       4. Identify trends"""
    )
    
    # Daily news briefing
@@ -173,8 +170,7 @@ Content Monitor
        1. Fetch specified URLs
        2. Compare with previous versions
        3. Identify changes
-       4. Alert on significant updates""",
-       model="gpt-4.1-mini"
+       4. Alert on significant updates"""
    )
    
    # Monitor competitor websites
@@ -215,8 +211,7 @@ Search and Analyze
        2. Fetch top 5 results
        3. Extract key information
        4. Synthesize findings
-       5. Provide analysis""",
-       model="gpt-4.1"
+       5. Provide analysis"""
    )
    
    # Comprehensive analysis

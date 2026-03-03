@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="developer",
-       instructions="Help manage files in the workspace.",
-       model="gpt-4o"
+       instructions="Help manage files in the workspace."
    )
    await agent.toolset(file_tools)
 
@@ -311,8 +310,7 @@ File Editing Workflow
        instructions="""You are a code editor. When editing files:
        1. Use read_file to see current content
        2. Use update_file for small changes
-       3. Use apply_patch for multiple changes""",
-       model="gpt-4o"
+       3. Use apply_patch for multiple changes"""
    )
    await agent.toolset(file_tools)
 

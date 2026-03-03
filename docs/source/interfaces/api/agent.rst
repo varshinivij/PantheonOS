@@ -18,8 +18,7 @@ Creating an Agent
 
    agent = Agent(
        name="assistant",
-       instructions="You are a helpful assistant.",
-       model="gpt-4o-mini"
+       instructions="You are a helpful assistant."
    )
 
 **With Toolsets**
@@ -30,8 +29,7 @@ Creating an Agent
 
    agent = Agent(
        name="developer",
-       instructions="You are a developer.",
-       model="gpt-4o"
+       instructions="You are a developer."
    )
 
    # Add toolsets using await agent.toolset()
@@ -126,8 +124,7 @@ Add a toolset to the agent at runtime.
 
    agent = Agent(
        name="developer",
-       instructions="You are a developer.",
-       model="gpt-4o"
+       instructions="You are a developer."
    )
 
    # Add toolsets dynamically
@@ -211,7 +208,7 @@ Custom Tools
            return eval(expression)
 
    # Add toolset at runtime
-   agent = Agent(name="calculator", instructions="...", model="gpt-4o")
+   agent = Agent(name="calculator", instructions="...")
    await agent.toolset(MyTools("math"))
 
 Model Selection
@@ -300,7 +297,7 @@ Only include tools the agent needs:
 .. code-block:: python
 
    # Good - specific tools
-   agent = Agent(name="dev", instructions="...", model="gpt-4o")
+   agent = Agent(name="dev", instructions="...")
    await agent.toolset(FileManagerToolSet("files"))
 
    # Avoid - too many tools can confuse the model

@@ -54,8 +54,7 @@ Programmatic Usage
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are helpful.",
-           model="gpt-4o"
+           instructions="You are helpful."
        )
 
        repl = Repl(agent=agent)
@@ -324,8 +323,7 @@ Development Workflow
    async def dev_repl():
        agent = Agent(
            name="developer",
-           instructions="You are a developer assistant.",
-           model="gpt-4o"
+           instructions="You are a developer assistant."
        )
        await agent.toolset(FileManagerToolSet("files"))
        await agent.toolset(ShellToolSet("shell"))
@@ -345,8 +343,7 @@ Data Analysis
    async def analysis_repl():
        agent = Agent(
            name="analyst",
-           instructions="You are a data analyst.",
-           model="gpt-4o"
+           instructions="You are a data analyst."
        )
        await agent.toolset(IntegratedNotebookToolSet("notebook"))
 

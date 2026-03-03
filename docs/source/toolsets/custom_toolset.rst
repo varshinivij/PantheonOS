@@ -208,8 +208,7 @@ Tools can call back to the LLM for intermediate processing:
        # Call the agent for intermediate sampling
        summary = await context.call_agent(
            messages=[{"role": "user", "content": f"Summarize: {data}"}],
-           system_prompt="You are a summarization expert.",
-           model="gpt-4o-mini"  # Optional: override model
+           system_prompt="You are a summarization expert."
        )
        return f"Summary: {summary}"
 
@@ -404,8 +403,7 @@ With Agents
    # Create agent and add toolset at runtime
    agent = Agent(
        name="assistant",
-       instructions="You help manage todo lists.",
-       model="gpt-4o"
+       instructions="You help manage todo lists."
    )
    await agent.toolset(todo_tools)
 
@@ -425,8 +423,7 @@ Multiple ToolSets
    # Create agent and add toolsets at runtime
    agent = Agent(
        name="developer",
-       instructions="You are a developer assistant.",
-       model="gpt-4o"
+       instructions="You are a developer assistant."
    )
    await agent.toolset(file_tools)
    await agent.toolset(shell_tools)

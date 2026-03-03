@@ -30,8 +30,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="artist",
-       instructions="You can generate images based on descriptions.",
-       model="gpt-4o"
+       instructions="You can generate images based on descriptions."
    )
    await agent.toolset(image_tools)
 
@@ -185,8 +184,7 @@ Agent-Driven Image Creation
        When asked to create images:
        1. Generate detailed prompts based on user requests
        2. Use generate_image to create the artwork
-       3. Save and describe the results""",
-       model="gpt-4o"
+       3. Save and describe the results"""
    )
    await artist.toolset(image_tools)
    await artist.toolset(file_tools)

@@ -25,8 +25,7 @@ Quick Example
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are a helpful assistant.",
-           model="gpt-4o-mini"
+           instructions="You are a helpful assistant."
        )
 
        # Single query
@@ -52,7 +51,6 @@ The fundamental building block. Represents an AI-powered entity.
    agent = Agent(
        name="assistant",
        instructions="...",
-       model="gpt-4o-mini",
        tools=[...]
    )
 
@@ -80,8 +78,7 @@ Extend agent capabilities with tools.
 
    agent = Agent(
        name="dev",
-       instructions="You are a developer.",
-       model="gpt-4o"
+       instructions="You are a developer."
    )
 
    # Add toolsets at runtime

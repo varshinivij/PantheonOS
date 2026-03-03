@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="assistant",
-       instructions="You can find and use available tools and packages.",
-       model="gpt-4o"
+       instructions="You can find and use available tools and packages."
    )
    await agent.toolset(package_tools)
 
@@ -226,8 +225,7 @@ Agent-Driven Tool Discovery
        instructions="""When users need functionality:
        1. Use search_tools to find relevant packages
        2. Explain what tools are available
-       3. Show how to use them with code examples""",
-       model="gpt-4o"
+       3. Show how to use them with code examples"""
    )
    await assistant.toolset(package_tools)
 

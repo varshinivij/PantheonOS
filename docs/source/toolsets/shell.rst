@@ -30,8 +30,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="developer",
-       instructions="Help run commands and manage processes.",
-       model="gpt-4o"
+       instructions="Help run commands and manage processes."
    )
    await agent.toolset(shell_tools)
 

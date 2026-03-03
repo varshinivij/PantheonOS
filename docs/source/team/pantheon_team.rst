@@ -28,20 +28,17 @@ Creating a PantheonTeam
    # Create specialized agents
    researcher = Agent(
        name="researcher",
-       instructions="Research topics thoroughly using available tools.",
-       model="gpt-4o-mini"
+       instructions="Research topics thoroughly using available tools."
    )
 
    analyst = Agent(
        name="analyst",
-       instructions="Analyze data and provide insights.",
-       model="gpt-4o-mini"
+       instructions="Analyze data and provide insights."
    )
 
    writer = Agent(
        name="writer",
-       instructions="Write clear, engaging content based on research.",
-       model="gpt-4o-mini"
+       instructions="Write clear, engaging content based on research."
    )
 
    # Create team - first agent is the entry point
@@ -193,23 +190,20 @@ Research Team
        name="researcher",
        instructions="""You are a research specialist.
        Use web search to find information.
-       Delegate analysis to the analyst when needed.""",
-       model="gpt-4o"
+       Delegate analysis to the analyst when needed."""
    )
    await researcher.toolset(WebToolSet("web"))
 
    analyst = Agent(
        name="analyst",
        instructions="""You analyze information and extract insights.
-       Focus on accuracy and supporting evidence.""",
-       model="gpt-4o"
+       Focus on accuracy and supporting evidence."""
    )
 
    writer = Agent(
        name="writer",
        instructions="""You write clear, well-structured reports.
-       Use markdown formatting.""",
-       model="gpt-4o"
+       Use markdown formatting."""
    )
    await writer.toolset(FileManagerToolSet("files"))
 
@@ -225,22 +219,19 @@ Development Team
 
    architect = Agent(
        name="architect",
-       instructions="Design system architecture and delegate implementation.",
-       model="gpt-4o"
+       instructions="Design system architecture and delegate implementation."
    )
 
    developer = Agent(
        name="developer",
-       instructions="Implement code based on specifications.",
-       model="gpt-4o"
+       instructions="Implement code based on specifications."
    )
    await developer.toolset(FileManagerToolSet("files"))
    await developer.toolset(PythonInterpreterToolSet("python"))
 
    reviewer = Agent(
        name="reviewer",
-       instructions="Review code for quality and best practices.",
-       model="gpt-4o"
+       instructions="Review code for quality and best practices."
    )
 
    dev_team = PantheonTeam([architect, developer, reviewer])

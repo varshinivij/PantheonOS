@@ -27,20 +27,17 @@ Creating a Swarm Team
    # Create specialized agents
    generalist = Agent(
        name="generalist",
-       instructions="Handle general queries. Transfer specialized tasks to experts.",
-       model="gpt-4o-mini"
+       instructions="Handle general queries. Transfer specialized tasks to experts."
    )
 
    tech_expert = Agent(
        name="tech_expert",
-       instructions="Handle technical questions about programming.",
-       model="gpt-4o"
+       instructions="Handle technical questions about programming."
    )
 
    creative_expert = Agent(
        name="creative_expert",
-       instructions="Handle creative tasks like writing.",
-       model="gpt-4o"
+       instructions="Handle creative tasks like writing."
    )
 
    # Define transfer functions - return an Agent to transfer control

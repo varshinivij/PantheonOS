@@ -27,8 +27,7 @@ Basic Agent
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are a helpful assistant.",
-           model="gpt-4o-mini"
+           instructions="You are a helpful assistant."
        )
 
        response = await agent.run("Hello!")
@@ -47,8 +46,7 @@ With Tools
    async def main():
        agent = Agent(
            name="developer",
-           instructions="You are a developer assistant.",
-           model="gpt-4o"
+           instructions="You are a developer assistant."
        )
        await agent.toolset(FileManagerToolSet("files"))
        await agent.toolset(ShellToolSet("shell"))

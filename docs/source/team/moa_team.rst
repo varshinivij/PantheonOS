@@ -36,27 +36,23 @@ Creating a MoA Team
    # Create proposer agents with diverse perspectives
    technical_expert = Agent(
        name="technical_expert",
-       instructions="Provide technical analysis focusing on implementation details.",
-       model="gpt-4o-mini"
+       instructions="Provide technical analysis focusing on implementation details."
    )
 
    business_expert = Agent(
        name="business_expert",
-       instructions="Analyze from a business perspective, considering ROI and strategy.",
-       model="gpt-4o-mini"
+       instructions="Analyze from a business perspective, considering ROI and strategy."
    )
 
    user_expert = Agent(
        name="user_expert",
-       instructions="Focus on user experience and usability aspects.",
-       model="gpt-4o-mini"
+       instructions="Focus on user experience and usability aspects."
    )
 
    # Create aggregator
    aggregator = Agent(
        name="aggregator",
-       instructions="Synthesize expert opinions into a comprehensive response.",
-       model="gpt-4o"
+       instructions="Synthesize expert opinions into a comprehensive response."
    )
 
    # Create MoA team
@@ -251,20 +247,17 @@ Decision Making Team
    # Different analytical perspectives
    risk_analyst = Agent(
        name="risk_analyst",
-       instructions="Analyze risks and potential negative outcomes.",
-       model="gpt-4o"
+       instructions="Analyze risks and potential negative outcomes."
    )
 
    opportunity_analyst = Agent(
        name="opportunity_analyst",
-       instructions="Identify opportunities and benefits.",
-       model="gpt-4o"
+       instructions="Identify opportunities and benefits."
    )
 
    feasibility_analyst = Agent(
        name="feasibility_analyst",
-       instructions="Assess technical and financial feasibility.",
-       model="gpt-4o"
+       instructions="Assess technical and financial feasibility."
    )
 
    # Decision synthesizer
@@ -274,8 +267,7 @@ Decision Making Team
        1. Summary of each perspective
        2. Key consensus points
        3. Major disagreements
-       4. Final recommendation""",
-       model="gpt-4o"
+       4. Final recommendation"""
    )
 
    decision_team = MoATeam(
@@ -295,26 +287,22 @@ Use the same model with different instructions:
    # Same model, different perspectives
    analyst1 = Agent(
        name="conservative_analyst",
-       instructions="Take a conservative, risk-averse approach.",
-       model="gpt-4o"
+       instructions="Take a conservative, risk-averse approach."
    )
 
    analyst2 = Agent(
        name="optimistic_analyst",
-       instructions="Focus on growth opportunities and potential.",
-       model="gpt-4o"
+       instructions="Focus on growth opportunities and potential."
    )
 
    analyst3 = Agent(
        name="balanced_analyst",
-       instructions="Provide a balanced, objective analysis.",
-       model="gpt-4o"
+       instructions="Provide a balanced, objective analysis."
    )
 
    aggregator = Agent(
        name="synthesizer",
-       instructions="Combine perspectives into a balanced conclusion.",
-       model="gpt-4o"
+       instructions="Combine perspectives into a balanced conclusion."
    )
 
    self_moa = MoATeam(
@@ -331,8 +319,7 @@ Research Synthesis Team
 
    literature_reviewer = Agent(
        name="literature_reviewer",
-       instructions="Review academic sources and cite findings.",
-       model="gpt-4o"
+       instructions="Review academic sources and cite findings."
    )
    await literature_reviewer.toolset(WebToolSet("web"))
 

@@ -15,8 +15,7 @@ Add toolsets at runtime using ``await agent.toolset()``:
 
    agent = Agent(
        name="developer",
-       instructions="You are a developer assistant.",
-       model="gpt-4o"
+       instructions="You are a developer assistant."
    )
 
    # Add toolsets at runtime (name parameter is required)
@@ -163,8 +162,7 @@ Combining Toolsets
 
    agent = Agent(
        name="full_stack",
-       instructions="You are a full-stack developer.",
-       model="gpt-4o"
+       instructions="You are a full-stack developer."
    )
    await agent.toolset(FileManagerToolSet("files"))
    await agent.toolset(ShellToolSet("shell"))

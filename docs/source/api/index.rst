@@ -42,8 +42,7 @@ Basic Usage
    # Create an agent
    agent = Agent(
        name="my_agent",
-       instructions="You are a helpful assistant.",
-       model="gpt-4o-mini"
+       instructions="You are a helpful assistant."
    )
 
    # Use in a team

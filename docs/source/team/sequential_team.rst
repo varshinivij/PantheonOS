@@ -27,20 +27,17 @@ Creating a Sequential Team
    # Create specialized agents
    researcher = Agent(
        name="researcher",
-       instructions="Research the topic and gather relevant information.",
-       model="gpt-4o-mini"
+       instructions="Research the topic and gather relevant information."
    )
 
    analyst = Agent(
        name="analyst",
-       instructions="Analyze the research and identify key insights.",
-       model="gpt-4o-mini"
+       instructions="Analyze the research and identify key insights."
    )
 
    writer = Agent(
        name="writer",
-       instructions="Create a well-structured report based on the analysis.",
-       model="gpt-4o-mini"
+       instructions="Create a well-structured report based on the analysis."
    )
 
    # Create sequential team
@@ -190,21 +187,18 @@ Research Pipeline
 
    researcher = Agent(
        name="researcher",
-       instructions="Research the topic using web search.",
-       model="gpt-4o"
+       instructions="Research the topic using web search."
    )
    await researcher.toolset(WebToolSet("web"))
 
    analyst = Agent(
        name="analyst",
-       instructions="Analyze the research findings and extract insights.",
-       model="gpt-4o"
+       instructions="Analyze the research findings and extract insights."
    )
 
    writer = Agent(
        name="writer",
-       instructions="Write a comprehensive report.",
-       model="gpt-4o"
+       instructions="Write a comprehensive report."
    )
    await writer.toolset(FileManagerToolSet("files"))
 

@@ -85,8 +85,7 @@ Programmatic Deployment
    # Connect agent to the service
    rag_agent = Agent(
        name="knowledge_assistant",
-       instructions="Answer questions using the vector knowledge base.",
-       model="gpt-4.1"
+       instructions="Answer questions using the vector knowledge base."
    )
    await rag_agent.remote_toolset(service_name="knowledge_base")
 
@@ -235,8 +234,7 @@ Example: Knowledge Base Assistant
                3. Explain what databases are available
                
                Always cite the source documents when providing information.
-               """,
-               model="gpt-4.1"
+               """
            )
            
            # Connect to vector database service

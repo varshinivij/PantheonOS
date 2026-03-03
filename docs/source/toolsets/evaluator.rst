@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="code_reviewer",
-       instructions="You analyze and evaluate code quality.",
-       model="gpt-4o"
+       instructions="You analyze and evaluate code quality."
    )
    await agent.toolset(eval_tools)
 

@@ -31,8 +31,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="skill_manager",
-       instructions="You manage and learn from conversations.",
-       model="gpt-4o"
+       instructions="You manage and learn from conversations."
    )
    await agent.toolset(skillbook_tools)
 

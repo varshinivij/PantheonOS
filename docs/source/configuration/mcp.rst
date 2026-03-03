@@ -178,8 +178,7 @@ Using MCP in Python API
    # Create agent
    agent = Agent(
        name="assistant",
-       instructions="You are a helpful assistant.",
-       model="gpt-4o"
+       instructions="You are a helpful assistant."
    )
 
    # Add MCP provider at runtime

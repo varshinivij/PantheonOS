@@ -53,8 +53,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="bioinformatician",
-       instructions="You can query biological databases using natural language.",
-       model="gpt-4o"
+       instructions="You can query biological databases using natural language."
    )
    await agent.toolset(db_tools)
 
@@ -239,8 +238,7 @@ Agent-Driven Research
        1. Use list_databases to find appropriate databases
        2. Use database_info to understand query options
        3. Use query to search for relevant data
-       4. Synthesize findings into comprehensive answers""",
-       model="gpt-4o"
+       4. Synthesize findings into comprehensive answers"""
    )
    await researcher.toolset(db_tools)
 

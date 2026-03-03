@@ -207,8 +207,7 @@ Verifying Installation
    async def main():
        agent = Agent(
            name="test",
-           instructions="Say hello!",
-           model="gpt-4o-mini"
+           instructions="Say hello!"
        )
        response = await agent.run("Hello!")
        print(response.content)

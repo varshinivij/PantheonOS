@@ -30,8 +30,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="code_explorer",
-       instructions="You can explore and understand code structure.",
-       model="gpt-4o"
+       instructions="You can explore and understand code structure."
    )
    await agent.toolset(code_tools)
 
@@ -186,8 +185,7 @@ Exploring a Codebase
        instructions="""You are a code exploration assistant. When analyzing code:
        1. Use view_file_outline to understand file structure
        2. Use view_code_item to examine specific symbols
-       3. Explain the code's purpose and how components interact""",
-       model="gpt-4o"
+       3. Explain the code's purpose and how components interact"""
    )
    await explorer.toolset(code_tools)
    await explorer.toolset(file_tools)

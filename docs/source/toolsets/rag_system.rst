@@ -538,8 +538,7 @@ Connect the toolset to an agent as a remote service::
         # Create agent
         agent = Agent(
             name="bioinformatics_expert",
-            instructions="You are a single-cell analysis expert. Use get_vector_db_info first to understand the database, then query_vector_db to find relevant information.",
-            model="gpt-4"
+            instructions="You are a single-cell analysis expert. Use get_vector_db_info first to understand the database, then query_vector_db to find relevant information."
         )
         
         # Connect agent to toolset

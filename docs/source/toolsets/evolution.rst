@@ -33,8 +33,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="optimizer",
-       instructions="You help users optimize their code through evolution.",
-       model="gpt-4o"
+       instructions="You help users optimize their code through evolution."
    )
    await agent.toolset(evolution_tools)
 

@@ -32,8 +32,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="scientist",
-       instructions="You are a scientist who analyzes data using Julia.",
-       model="gpt-4o"
+       instructions="You are a scientist who analyzes data using Julia."
    )
    await agent.toolset(julia_tools)
 

@@ -32,8 +32,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="researcher",
-       instructions="You can search and manage knowledge bases.",
-       model="gpt-4o"
+       instructions="You can search and manage knowledge bases."
    )
    await agent.toolset(knowledge_tools)
 
@@ -264,8 +263,7 @@ Building a Research Assistant
        instructions="""You are a research assistant. When asked questions:
        1. Search the knowledge base for relevant information
        2. Synthesize findings into a comprehensive answer
-       3. Cite sources from the search results""",
-       model="gpt-4o"
+       3. Cite sources from the search results"""
    )
    await researcher.toolset(knowledge_tools)
    await researcher.toolset(file_tools)

@@ -22,8 +22,7 @@ Add toolsets at runtime using ``await agent.toolset()``:
 
    agent = Agent(
        name="developer",
-       instructions="You are a developer.",
-       model="gpt-4o"
+       instructions="You are a developer."
    )
    await agent.toolset(FileManagerToolSet("files"))
 
@@ -243,8 +242,7 @@ Combining Multiple Toolsets
            - Read, write, and edit files
            - Run shell commands
            - Execute Python code
-           - Search the web for information""",
-           model="gpt-4o"
+           - Search the web for information"""
        )
 
        # Add toolsets at runtime
@@ -271,8 +269,7 @@ Data Analysis Setup
            name="analyst",
            instructions="""You are a data analyst.
            Use Jupyter notebooks for analysis.
-           Document your work with markdown cells.""",
-           model="gpt-4o"
+           Document your work with markdown cells."""
        )
 
        # Add toolsets at runtime

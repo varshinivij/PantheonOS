@@ -108,8 +108,7 @@ Basic Agent
 
    agent = Agent(
        name="assistant",
-       instructions="You are a helpful AI assistant.",
-       model="gpt-4o-mini"
+       instructions="You are a helpful AI assistant."
    )
 
    # Interactive chat
@@ -172,8 +171,7 @@ Multi-Model Fallback
 
    agent = Agent(
        name="robust_agent",
-       instructions="Handle tasks reliably.",
-       model=["gpt-4", "gpt-4o-mini"]  # Try GPT-4 first, fallback to mini
+       instructions="Handle tasks reliably."
    )
 
 Remote Toolset

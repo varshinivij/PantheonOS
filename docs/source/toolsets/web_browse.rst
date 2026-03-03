@@ -27,8 +27,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="researcher",
-       instructions="You can search the web and analyze content.",
-       model="gpt-4o"
+       instructions="You can search the web and analyze content."
    )
    await agent.toolset(web_tools)
 
@@ -132,8 +131,7 @@ Research Workflow
        1. Search for multiple sources
        2. Visit relevant links
        3. Extract and synthesize information
-       4. Provide comprehensive analysis with citations""",
-       model="gpt-4o"
+       4. Provide comprehensive analysis with citations"""
    )
    await research_agent.toolset(web_tools)
 
@@ -151,8 +149,7 @@ News Monitoring
        instructions="""Monitor news on specific topics:
        1. Search for recent news using time_limit
        2. Fetch full articles
-       3. Summarize key developments""",
-       model="gpt-4o"
+       3. Summarize key developments"""
    )
    await news_agent.toolset(web_tools)
 

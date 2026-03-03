@@ -17,8 +17,7 @@ You can create and run the REPL programmatically:
    async def main():
        agent = Agent(
            name="assistant",
-           instructions="You are helpful.",
-           model="gpt-4o"
+           instructions="You are helpful."
        )
 
        repl = Repl(agent=agent)

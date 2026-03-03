@@ -58,7 +58,6 @@ Relationships
    agent = Agent(
        name="assistant",
        instructions="You are a helpful assistant.",
-       model="gpt-4o",
        memory=Memory()
    )
    # Add toolsets at runtime
@@ -73,8 +72,7 @@ Relationships
    # Providers connect to external tools via MCP
    agent_with_mcp = Agent(
        name="github_agent",
-       instructions="You help with GitHub operations.",
-       model="gpt-4o"
+       instructions="You help with GitHub operations."
    )
    await agent_with_mcp.mcp(
        name="github",

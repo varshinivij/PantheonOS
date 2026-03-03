@@ -30,8 +30,7 @@ Basic Usage
    # Create agent and add toolset at runtime
    agent = Agent(
        name="file_handler",
-       instructions="You can transfer files.",
-       model="gpt-4o"
+       instructions="You can transfer files."
    )
    await agent.toolset(transfer_tools)
 
