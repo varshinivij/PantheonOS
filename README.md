@@ -16,7 +16,7 @@
 
 [![][website-shield]][website-link]
 [![][online-app-shield]][online-app]
-[![][manuscript-shield]][manuscript-link]<br/>
+[![][manuscript-shield]][manuscript-link]
 [![][slack-shield]][slack-link]
 [![][discord-shield]][discord-link]
 [![][x-shield]][x-link]
@@ -25,7 +25,7 @@
 [![][github-forks-shield]][github-forks-link]
 [![][github-stars-shield]][github-stars-link]
 [![][github-issues-shield]][github-issues-link]
-[![][github-license-shield]][github-license-link]<br/>
+[![][github-license-shield]][github-license-link]
 [![][pypi-shield]][pypi-link]
 [![][python-shield]][python-link]
 [![][status-shield]]()

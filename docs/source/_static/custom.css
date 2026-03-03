@@ -372,6 +372,18 @@ h1, h2, h3, h4, h5, h6 {
 /* ===== Sidebar ===== */
 .sidebar-brand img, .navbar-brand img {
     max-width: 60px !important;
+    background: transparent !important;
+}
+
+.sidebar-brand, .navbar-brand {
+    background: transparent !important;
+}
+
+/* Override theme forcing white bg on images in dark mode */
+html[data-theme="dark"] .sidebar-brand img,
+html[data-theme="dark"] .navbar-brand img,
+html[data-theme="dark"] .bd-content img:not(.only-dark, .dark-light) {
+    background-color: transparent !important;
 }
 
 /* ===== Navbar Icons - Unified Styling ===== */
