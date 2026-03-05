@@ -420,7 +420,7 @@ class ReplUI:
         self.console.print(table)
 
     async def print_greeting(self):
-        self.console.print("[purple]Aristotle © 2025[/purple]")
+        self.console.print("[purple]Aristotle © 2025-2026[/purple]")
         print_banner(self.console)
         self.console.print()
         self.console.print(
