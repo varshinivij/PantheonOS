@@ -1070,7 +1070,6 @@ class PantheonInputApp:
             usage_display = f"ctx: {self._token_usage_pct:.0f}%"
         if self._total_cost and self._total_cost > 0:
             usage_display += f" | cost: ${self._total_cost:.4f}"
-        status = "processing..." if self._is_processing else "ready"
 
         # Background tasks indicator
         bg_running, bg_total = self._get_bg_task_counts()
@@ -1086,12 +1085,10 @@ class PantheonInputApp:
         title = self._get_term_title()
         set_title(title)
 
-        # Define parts for the new HTML structure
         model_part = f"⏺ {self._model_name} | agent: {self._current_agent}"
-        status_part = f"{status} | {usage_display}{bg_part}"
 
         return HTML(
-            f'<style class="status-bar">{model_part} | {status_part}</style>'
+            f'<style class="status-bar">{model_part} | {usage_display}{bg_part}</style>'
         )
 
     def start_processing(self, input_tokens: int = 0):
