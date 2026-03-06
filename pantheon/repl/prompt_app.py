@@ -601,6 +601,47 @@ def create_key_bindings(app_instance: "PantheonInputApp") -> KeyBindings:
                 repl.display_config.mode = DisplayMode.COMPACT
                 print("\n[Switched to COMPACT mode]")
 
+    # --- Background task panel bindings ---
+    is_bg_panel = Condition(lambda: getattr(app_instance, "_bg_panel_visible", False))
+
+    @kb.add("down", filter=~is_processing & ~is_bg_panel)
+    def _(event):
+        """Down arrow: open bg panel when input is empty and cursor at end."""
+        buffer = event.current_buffer
+        # Only toggle if input is empty or cursor is at the last line
+        text = buffer.text
+        cursor = buffer.cursor_position
+        if not text.strip() or cursor >= len(text):
+            app_instance.toggle_bg_panel()
+        else:
+            # Default behavior: move cursor down in multiline input
+            buffer.cursor_down()
+
+    @kb.add("down", filter=is_bg_panel)
+    def _(event):
+        """Down arrow in bg panel: move selection down."""
+        app_instance.bg_panel_move(1)
+
+    @kb.add("up", filter=is_bg_panel)
+    def _(event):
+        """Up arrow in bg panel: move selection up."""
+        app_instance.bg_panel_move(-1)
+
+    @kb.add("escape", filter=is_bg_panel & ~is_processing)
+    def _(event):
+        """Escape in bg panel: close panel."""
+        app_instance._bg_panel_visible = False
+        try:
+            app_instance.app.renderer.erase()
+        except Exception:
+            pass
+        app_instance.app.invalidate()
+
+    @kb.add("c", filter=is_bg_panel & ~is_processing)
+    def _(event):
+        """c in bg panel: cancel selected task."""
+        app_instance.bg_panel_cancel_selected()
+
     return kb
 
 
@@ -657,6 +698,10 @@ class PantheonInputApp:
         # Task panel state
         self._task_panel_visible = False
         self._task_panel_content = ""  # Pre-rendered ANSI content
+
+        # Background task panel state
+        self._bg_panel_visible = False
+        self._bg_panel_selected = 0  # Selected task index
 
         # Style
         self.style = Style.from_dict(
@@ -724,6 +769,7 @@ class PantheonInputApp:
         )
         self.status_control = FormattedTextControl(text=self.get_status_formatted_text)
         self.task_panel_control = FormattedTextControl(text=self._get_task_panel_text)
+        self.bg_panel_control = FormattedTextControl(text=self._get_bg_panel_text)
 
         self.root_container = HSplit(
             [
@@ -751,6 +797,14 @@ class PantheonInputApp:
                 ),
                 # Dynamic Input Container
                 DynamicContainer(self._get_input_container),
+                # Background task panel (toggled by down arrow)
+                ConditionalContainer(
+                    Window(
+                        content=self.bg_panel_control,
+                        height=self._get_bg_panel_height,
+                    ),
+                    filter=Condition(lambda: self._bg_panel_visible),
+                ),
                 # Status Bar below input (model/agent info)
                 Window(content=self.status_control, height=1, style="class:status-bar"),
             ]
@@ -1072,14 +1126,15 @@ class PantheonInputApp:
             usage_display += f" | cost: ${self._total_cost:.4f}"
         status = "processing..." if self._is_processing else "ready"
 
-        # Background tasks indicator (colored)
+        # Background tasks indicator (colored, with keyboard hint)
         bg_running, bg_total = self._get_bg_task_counts()
         bg_part = ""
         if bg_total > 0:
+            hint = ' <ansigray>[↓]</ansigray>'
             if bg_running > 0:
-                bg_part = f' | <ansiyellow>bg: {bg_running} running</ansiyellow>'
+                bg_part = f' | <ansiyellow>bg: {bg_running} running</ansiyellow>{hint}'
             else:
-                bg_part = f' | <ansigreen>bg: {bg_total} done</ansigreen>'
+                bg_part = f' | <ansigreen>bg: {bg_total} done</ansigreen>{hint}'
 
         # Update terminal title as part of status refresh
         # This is a good place because it's called on every render/invalidate
@@ -1190,6 +1245,128 @@ class PantheonInputApp:
         """Hide task panel (no active task)."""
         self._task_panel_visible = False
         self._task_panel_content = ""
+        self.app.invalidate()
+
+    # ===== Background Task Panel =====
+
+    def _get_all_bg_tasks(self) -> list:
+        """Collect all background tasks from all agents."""
+        tasks = []
+        try:
+            team = getattr(self.repl, "_team", None)
+            if team and hasattr(team, "agents"):
+                for agent in team.agents.values():
+                    bg_mgr = getattr(agent, "_bg_manager", None)
+                    if bg_mgr:
+                        tasks.extend(bg_mgr.list_tasks())
+        except Exception:
+            pass
+        # Sort: running first, then by created_at descending
+        tasks.sort(key=lambda t: (0 if t.status == "running" else 1, -t.created_at))
+        return tasks
+
+    def _get_bg_panel_height(self) -> Dimension:
+        """Dynamic height for bg panel."""
+        tasks = self._get_all_bg_tasks()
+        # Header(1) + tasks + footer(1), capped at 12
+        n = min(len(tasks), 10)
+        return Dimension(min=3, max=n + 2, preferred=n + 2)
+
+    def _get_bg_panel_text(self):
+        """Render background task panel as formatted text."""
+        tasks = self._get_all_bg_tasks()
+        if not tasks:
+            return HTML('<ansigray> No background tasks </ansigray>')
+
+        # Clamp selection
+        if self._bg_panel_selected >= len(tasks):
+            self._bg_panel_selected = len(tasks) - 1
+        if self._bg_panel_selected < 0:
+            self._bg_panel_selected = 0
+
+        lines = []
+        lines.append('<ansiblue>─── Background Tasks (↑↓ navigate, c=cancel, esc=close) ───</ansiblue>')
+
+        for i, task in enumerate(tasks):
+            is_selected = (i == self._bg_panel_selected)
+            prefix = " ► " if is_selected else "   "
+
+            # Status with color
+            if task.status == "running":
+                elapsed = time.time() - task.created_at
+                status_str = f'<ansiyellow>running</ansiyellow> ({elapsed:.0f}s)'
+            elif task.status == "completed":
+                status_str = '<ansigreen>completed</ansigreen>'
+            elif task.status == "failed":
+                status_str = '<ansired>failed</ansired>'
+            elif task.status == "cancelled":
+                status_str = '<ansigray>cancelled</ansigray>'
+            else:
+                status_str = task.status
+
+            # Result preview for completed/failed
+            detail = ""
+            if task.status == "completed" and task.result is not None:
+                preview = str(task.result)[:80].replace('<', '&lt;').replace('>', '&gt;')
+                detail = f' <ansigray>→ {preview}</ansigray>'
+            elif task.status == "failed" and task.error:
+                preview = task.error[:80].replace('<', '&lt;').replace('>', '&gt;')
+                detail = f' <ansired>→ {preview}</ansired>'
+
+            tool_name = task.tool_name.replace('<', '&lt;').replace('>', '&gt;')
+            task_id = task.task_id.replace('<', '&lt;').replace('>', '&gt;')
+
+            if is_selected:
+                lines.append(
+                    f'<style bg="ansiblue" fg="ansiwhite">{prefix}{task_id} [{tool_name}] {status_str}{detail}</style>'
+                )
+            else:
+                lines.append(
+                    f'{prefix}<ansiwhite>{task_id}</ansiwhite> [{tool_name}] {status_str}{detail}'
+                )
+
+        return HTML('\n'.join(lines))
+
+    def toggle_bg_panel(self):
+        """Toggle background task panel visibility."""
+        if self._bg_panel_visible:
+            self._bg_panel_visible = False
+        else:
+            tasks = self._get_all_bg_tasks()
+            if tasks:
+                self._bg_panel_visible = True
+                self._bg_panel_selected = 0
+        try:
+            self.app.renderer.erase()
+        except Exception:
+            pass
+        self.app.invalidate()
+
+    def bg_panel_move(self, delta: int):
+        """Move selection in bg panel."""
+        tasks = self._get_all_bg_tasks()
+        if not tasks:
+            return
+        self._bg_panel_selected = max(0, min(len(tasks) - 1, self._bg_panel_selected + delta))
+        self.app.invalidate()
+
+    def bg_panel_cancel_selected(self):
+        """Cancel the selected background task."""
+        tasks = self._get_all_bg_tasks()
+        if not tasks or self._bg_panel_selected >= len(tasks):
+            return
+        task = tasks[self._bg_panel_selected]
+        if task.status == "running":
+            try:
+                team = getattr(self.repl, "_team", None)
+                if team and hasattr(team, "agents"):
+                    for agent in team.agents.values():
+                        bg_mgr = getattr(agent, "_bg_manager", None)
+                        if bg_mgr and bg_mgr.get(task.task_id):
+                            bg_mgr.cancel(task.task_id)
+                            break
+            except Exception:
+                pass
         self.app.invalidate()
 
     def set_input_text(self, text: str):
