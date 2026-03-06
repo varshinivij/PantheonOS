@@ -229,36 +229,16 @@ class Repl(ReplUI):
                 self.console.print(f"[red]Template file not found: {p}[/red]")
 
     def _setup_bg_complete_hooks(self):
-        """Hook background task completion into REPL message queue.
+        """Wire bg task completion → REPL message_queue.
 
-        When a background task finishes, a notification is pushed to the
-        message_queue so the agent automatically processes it on the next turn.
+        Uses Agent.setup_bg_notify_queue() to push notifications into the
+        REPL's message_queue, triggering _processing_loop on completion.
         """
         if not self._team or not self.message_queue:
             return
-
-        queue = self.message_queue
-
-        def _on_bg_complete(bg_task):
-            status = bg_task.status
-            result_preview = ""
-            if bg_task.result is not None:
-                result_preview = str(bg_task.result)[:200]
-            elif bg_task.error:
-                result_preview = bg_task.error[:200]
-
-            notif = (
-                f"[Background task '{bg_task.task_id}' ({bg_task.tool_name}) "
-                f"{status}. Result: {result_preview}]"
-            )
-            try:
-                queue.put_nowait(notif)
-            except Exception:
-                pass
-
         for agent in self._team.agents.values():
-            if hasattr(agent, "_bg_manager"):
-                agent._bg_manager.on_complete = _on_bg_complete
+            if hasattr(agent, "setup_bg_notify_queue"):
+                agent.setup_bg_notify_queue(self.message_queue)
 
     def _setup_signal_handlers(self):
         """Setup signal handlers for better interrupt management."""

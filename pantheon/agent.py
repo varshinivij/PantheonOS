@@ -541,6 +541,9 @@ class Agent:
         self._max_tool_content_length_override = max_tool_content_length
 
         self.events_queue: asyncio.Queue = asyncio.Queue()
+        # Input queue for run_loop() — messages/notifications enter here
+        self.input_queue: asyncio.Queue = asyncio.Queue()
+        self._loop_running: bool = False
         self.force_litellm = force_litellm
         self.icon = icon
 
@@ -2277,6 +2280,120 @@ IMPORTANT: You are operating in a restricted workspace environment.
                 content=content,
                 details=run_result,
             )
+
+    # ===== Event-Driven Loop =====
+
+    async def run_loop(
+        self,
+        process_chunk: Callable | None = None,
+        process_step_message: Callable | None = None,
+        check_stop: Callable | None = None,
+        context_variables: dict | None = None,
+        memory: Memory | None = None,
+        tool_timeout: int | None = None,
+        model: str | list[str] | None = None,
+        on_response: Callable | None = None,
+        on_error: Callable | None = None,
+    ) -> None:
+        """Persistent event-driven loop consuming messages from input_queue.
+
+        Blocks until stop_loop() is called or the task is cancelled.
+        Each message dequeued triggers a full agent.run() cycle.
+        Background task completions auto-enqueue notifications, so the
+        agent is automatically triggered when bg tasks finish.
+
+        Args:
+            process_chunk: Streaming chunk callback (forwarded to run()).
+            process_step_message: Step message callback (forwarded to run()).
+            check_stop: Stop check callback (forwarded to run()).
+            context_variables: Shared context variables for all runs.
+            memory: Memory instance to use.
+            tool_timeout: Tool timeout (forwarded to run()).
+            model: Model override (forwarded to run()).
+            on_response: Callback(AgentResponse) after each successful run.
+            on_error: Callback(Exception) when a run fails.
+        """
+        self._loop_running = True
+        self._bg_manager.on_complete = self._on_bg_task_complete_for_loop
+
+        try:
+            while self._loop_running:
+                msg = await self.input_queue.get()
+                if msg is None:  # Sentinel from stop_loop()
+                    self.input_queue.task_done()
+                    break
+                try:
+                    response = await self.run(
+                        msg=msg,
+                        process_chunk=process_chunk,
+                        process_step_message=process_step_message,
+                        check_stop=check_stop,
+                        context_variables=context_variables,
+                        memory=memory,
+                        tool_timeout=tool_timeout,
+                        model=model,
+                    )
+                    if on_response:
+                        await run_func(on_response, response)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"run_loop error: {e}")
+                    if on_error:
+                        try:
+                            await run_func(on_error, e)
+                        except Exception:
+                            pass
+                finally:
+                    self.input_queue.task_done()
+        finally:
+            self._loop_running = False
+            self._bg_manager.on_complete = None
+
+    def stop_loop(self):
+        """Signal run_loop() to exit after current iteration."""
+        self._loop_running = False
+        self.input_queue.put_nowait(None)  # Sentinel to unblock .get()
+
+    def _on_bg_task_complete_for_loop(self, bg_task):
+        """Push lightweight trigger to input_queue on bg task completion.
+
+        The real task data comes from drain_notifications() in _run_stream
+        (ephemeral message injection, already implemented).
+        """
+        try:
+            self.input_queue.put_nowait(
+                f"[Background task '{bg_task.task_id}' ({bg_task.tool_name}) "
+                f"completed with status: {bg_task.status}]"
+            )
+        except Exception:
+            pass
+
+    def setup_bg_notify_queue(self, queue: asyncio.Queue):
+        """Wire bg task completion to an external asyncio.Queue.
+
+        Alternative to run_loop() for frontends that manage their own
+        event loops (e.g. REPL with prompt_toolkit, ChatRoom server).
+
+        Args:
+            queue: The asyncio.Queue to push notification strings into.
+        """
+        def _on_complete(bg_task):
+            status = bg_task.status
+            result_preview = ""
+            if bg_task.result is not None:
+                result_preview = str(bg_task.result)[:200]
+            elif bg_task.error:
+                result_preview = bg_task.error[:200]
+            notif = (
+                f"[Background task '{bg_task.task_id}' ({bg_task.tool_name}) "
+                f"{status}. Result: {result_preview}]"
+            )
+            try:
+                queue.put_nowait(notif)
+            except Exception:
+                pass
+        self._bg_manager.on_complete = _on_complete
 
     # FIX: agent should not call REPL, REPL call agent instead
     async def chat(self, message: str | dict | None = None):

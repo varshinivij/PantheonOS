@@ -1116,6 +1116,50 @@ class ChatRoom(ToolSet):
         except Exception as e:
             logger.error(f"Background chat rename failed: {e}")
 
+    def _setup_bg_auto_notify(self, chat_id: str, team):
+        """Wire bg task completion to auto-trigger a new chat turn.
+
+        When a background task completes after chat() has returned (agent idle),
+        this schedules a new chat() call with a notification message so the
+        agent automatically reports results to the user/frontend.
+
+        If chat() is still running (agent busy), the notification is handled
+        by the existing ephemeral injection in Agent._run_stream instead.
+        """
+        chatroom_self = self
+
+        def _on_bg_complete(bg_task):
+            status = bg_task.status
+            result_preview = ""
+            if bg_task.result is not None:
+                result_preview = str(bg_task.result)[:200]
+            elif bg_task.error:
+                result_preview = bg_task.error[:200]
+
+            notif_text = (
+                f"[Background task '{bg_task.task_id}' ({bg_task.tool_name}) "
+                f"{status}. Result: {result_preview}]"
+            )
+
+            async def _auto_chat():
+                try:
+                    await chatroom_self.chat(
+                        chat_id=chat_id,
+                        message=[{"role": "user", "content": notif_text}],
+                    )
+                except Exception as e:
+                    logger.warning(f"Auto bg notification chat failed: {e}")
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_auto_chat())
+            except RuntimeError:
+                pass
+
+        for agent in team.agents.values():
+            if hasattr(agent, "_bg_manager"):
+                agent._bg_manager.on_complete = _on_bg_complete
+
     @tool
     async def chat(
         self,
@@ -1157,6 +1201,11 @@ class ChatRoom(ToolSet):
 
         async def team_getter():
             return await self.get_team_for_chat(chat_id)
+
+        # Wire bg task auto-notification for this chat
+        # Resolve team early so we can set on_complete hooks before agent runs
+        team = await self.get_team_for_chat(chat_id)
+        self._setup_bg_auto_notify(chat_id, team)
 
         # Inject workdir from project metadata if available
         project = memory.extra_data.get("project", {})

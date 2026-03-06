@@ -580,3 +580,164 @@ class TestAgentBackgroundToolsRegistration:
 
         agent = Agent(name="test", instructions="test")
         assert isinstance(agent._tool_output_buffers, dict)
+
+    def test_input_queue_and_loop_state_initialized(self):
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        assert isinstance(agent.input_queue, asyncio.Queue)
+        assert agent._loop_running is False
+
+
+# =============================================================================
+# setup_bg_notify_queue tests
+# =============================================================================
+
+
+class TestSetupBgNotifyQueue:
+    @pytest.mark.asyncio
+    async def test_notify_queue_receives_on_complete(self):
+        """setup_bg_notify_queue wires on_complete to push to external queue."""
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        queue = asyncio.Queue()
+        agent.setup_bg_notify_queue(queue)
+
+        async def _work():
+            return "result123"
+
+        agent._bg_manager.start("my_tool", "tc_1", {}, _work())
+        await asyncio.sleep(0.1)
+
+        assert not queue.empty()
+        notif = queue.get_nowait()
+        assert "my_tool" in notif
+        assert "completed" in notif
+
+    @pytest.mark.asyncio
+    async def test_notify_queue_receives_failure(self):
+        """setup_bg_notify_queue reports failures too."""
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        queue = asyncio.Queue()
+        agent.setup_bg_notify_queue(queue)
+
+        async def _fail():
+            raise RuntimeError("boom")
+
+        agent._bg_manager.start("failing_tool", "tc_2", {}, _fail())
+        await asyncio.sleep(0.1)
+
+        assert not queue.empty()
+        notif = queue.get_nowait()
+        assert "failing_tool" in notif
+        assert "failed" in notif
+
+
+# =============================================================================
+# run_loop tests
+# =============================================================================
+
+
+class TestRunLoop:
+    @pytest.mark.asyncio
+    async def test_run_loop_processes_message(self):
+        """run_loop consumes from input_queue and calls run()."""
+        from unittest.mock import AsyncMock, patch
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        responses = []
+
+        mock_response = AsyncMock()
+        mock_response.content = "hello"
+
+        with patch.object(agent, "run", new_callable=AsyncMock, return_value=mock_response):
+            agent.input_queue.put_nowait("test message")
+            # Schedule stop after a short delay
+            async def _stop_later():
+                await asyncio.sleep(0.2)
+                agent.stop_loop()
+            asyncio.create_task(_stop_later())
+
+            await agent.run_loop(
+                on_response=lambda r: responses.append(r),
+            )
+
+        assert len(responses) == 1
+        assert responses[0] == mock_response
+
+    @pytest.mark.asyncio
+    async def test_stop_loop_exits_cleanly(self):
+        """stop_loop sends sentinel and loop exits."""
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+
+        async def _stop_soon():
+            await asyncio.sleep(0.1)
+            agent.stop_loop()
+
+        asyncio.create_task(_stop_soon())
+        await agent.run_loop()  # Should return quickly
+
+        assert agent._loop_running is False
+        assert agent._bg_manager.on_complete is None
+
+    @pytest.mark.asyncio
+    async def test_run_loop_error_callback(self):
+        """run_loop calls on_error when run() raises."""
+        from unittest.mock import AsyncMock, patch
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        errors = []
+
+        with patch.object(
+            agent, "run", new_callable=AsyncMock,
+            side_effect=RuntimeError("fail")
+        ):
+            agent.input_queue.put_nowait("bad message")
+            async def _stop():
+                await asyncio.sleep(0.2)
+                agent.stop_loop()
+            asyncio.create_task(_stop())
+
+            await agent.run_loop(on_error=lambda e: errors.append(e))
+
+        assert len(errors) == 1
+        assert isinstance(errors[0], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_run_loop_bg_auto_notify(self):
+        """Background task completion auto-enqueues to input_queue in run_loop mode."""
+        from pantheon.agent import Agent
+
+        agent = Agent(name="test", instructions="test")
+        received_msgs = []
+
+        original_run = agent.run
+
+        async def mock_run(msg, **kwargs):
+            received_msgs.append(msg)
+
+        from unittest.mock import AsyncMock, patch
+        with patch.object(agent, "run", side_effect=mock_run):
+            # Start run_loop
+            async def _run_and_stop():
+                await asyncio.sleep(0.05)
+                # Simulate a bg task completing
+                async def _bg_work():
+                    return "bg_done"
+                agent._bg_manager.start("bg_tool", "tc_bg", {}, _bg_work())
+                await asyncio.sleep(0.3)
+                agent.stop_loop()
+
+            asyncio.create_task(_run_and_stop())
+            await agent.run_loop()
+
+        # Should have received the bg completion notification
+        assert len(received_msgs) >= 1
+        assert any("bg_tool" in str(m) for m in received_msgs)
