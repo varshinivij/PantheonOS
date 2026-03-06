@@ -1072,14 +1072,14 @@ class PantheonInputApp:
             usage_display += f" | cost: ${self._total_cost:.4f}"
         status = "processing..." if self._is_processing else "ready"
 
-        # Background tasks indicator
+        # Background tasks indicator (colored)
         bg_running, bg_total = self._get_bg_task_counts()
         bg_part = ""
         if bg_total > 0:
             if bg_running > 0:
-                bg_part = f" | bg: {bg_running} running"
+                bg_part = f' | <ansiyellow>bg: {bg_running} running</ansiyellow>'
             else:
-                bg_part = f" | bg: {bg_total} done"
+                bg_part = f' | <ansigreen>bg: {bg_total} done</ansigreen>'
 
         # Update terminal title as part of status refresh
         # This is a good place because it's called on every render/invalidate
