@@ -1129,11 +1129,6 @@ class ChatRoom(ToolSet):
         chatroom_self = self
 
         def _on_bg_complete(bg_task):
-            # In UI mode (NATS streaming available), skip auto-chat notification
-            # since the UI receives real-time bg_task_update events instead.
-            if chatroom_self._nats_adapter is not None:
-                return
-
             status = bg_task.status
             result_preview = ""
             if bg_task.result is not None:
@@ -1142,8 +1137,10 @@ class ChatRoom(ToolSet):
                 result_preview = bg_task.error[:200]
 
             notif_text = (
+                f"<bg_task_notification>"
                 f"[Background task '{bg_task.task_id}' ({bg_task.tool_name}) "
                 f"{status}. Result: {result_preview}]"
+                f"</bg_task_notification>"
             )
 
             async def _auto_chat():
