@@ -1524,16 +1524,32 @@ class Repl(ReplUI):
                 # Format answers as user message
                 answer_text = self._format_question_answers(result.answers)
 
-                self.console.print(f"[green]✓ Submitted {len(result.answers)} answer(s)[/green]")
+                if result.answers:
+                    self.console.print(f"[green]✓ Submitted {len(result.answers)} answer(s)[/green]")
+                else:
+                    self.console.print("[green]✓ Approved[/green]")
 
                 # Put answer message in queue - this simulates user input
                 if self.message_queue:
                     await self.message_queue.put(answer_text)
                 else:
-                    # Fallback: direct call
                     await self._chatroom.chat(
                         chat_id=self._chat_id,
                         message=answer_text,
+                    )
+            elif result.feedback:
+                # User provided rejection feedback
+                from .user_response import UserResponseFormatter
+                feedback_text = UserResponseFormatter.format_rejection(result.feedback)
+
+                self.console.print(f"[yellow]→ Feedback sent[/yellow]")
+
+                if self.message_queue:
+                    await self.message_queue.put(feedback_text)
+                else:
+                    await self._chatroom.chat(
+                        chat_id=self._chat_id,
+                        message=feedback_text,
                     )
             else:
                 # User cancelled

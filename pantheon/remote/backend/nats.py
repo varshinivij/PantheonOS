@@ -518,7 +518,8 @@ class NATSRemoteWorker(RemoteWorker):
 
     async def _ping(self) -> dict:
         """Ping function for connection checking"""
-        return {"status": "ok", "service_id": self._service_id}
+        from pantheon import __version__
+        return {"status": "ok", "service_id": self._service_id, "version": __version__}
 
     def register(self, func: Callable, **kwargs):
         """Register function"""

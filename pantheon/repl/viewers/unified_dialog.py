@@ -60,6 +60,7 @@ class DialogResult:
     """Result from unified dialog."""
     submitted: bool  # True if submitted, False if cancelled
     answers: List[Dict[str, Any]]  # Question answers
+    feedback: str = ""  # Rejection feedback (when user provides feedback instead of submitting)
 
 
 STYLE = Style.from_dict({
@@ -126,9 +127,11 @@ class UnifiedReviewDialog:
 
         # State
         self.current_tab_idx = 0
-        self.selected_button_idx = 0  # 0=Submit, 1=Cancel
+        self.selected_button_idx = 0  # 0=Submit, 1=Feedback, 2=Cancel
         self.validation_error = ""
         self.result: Optional[DialogResult] = None
+        self.feedback_mode = False  # True when user is typing feedback
+        self.feedback_text = ""  # User's rejection feedback
 
         self.app: Optional[Application] = None
 
@@ -660,17 +663,36 @@ class UnifiedReviewDialog:
             height=1,
         )
 
+        # Feedback input area (shown when feedback mode is active)
+        def get_feedback_text():
+            if not self.feedback_mode:
+                return ""
+            text = self.feedback_text or ""
+            display = text + "█"  # cursor
+            return HTML(
+                f'<question.header>  Feedback: </question.header>'
+                f'<input>{display}</input>'
+            )
+
+        feedback_window = Window(
+            content=FormattedTextControl(get_feedback_text),
+            height=lambda: 2 if self.feedback_mode else 0,
+        )
+
         # Buttons
         def get_buttons_text():
-            items = [('', '          ')]
-            buttons = ['Submit Answers', 'Cancel']
+            items = [('', '     ')]
+            if self.feedback_mode:
+                buttons = ['Send Feedback', 'Back']
+            else:
+                buttons = ['Submit', 'Provide Feedback', 'Cancel']
 
             for i, btn in enumerate(buttons):
                 if i == self.selected_button_idx:
                     items.append(('class:button.selected', f' {btn} '))
                 else:
                     items.append(('class:button', f' {btn} '))
-                items.append(('', '      '))
+                items.append(('', '   '))
 
             return FormattedText(items)
 
@@ -703,6 +725,7 @@ class UnifiedReviewDialog:
                     content_container,
                     Window(height=1),
                     error_window,
+                    feedback_window,
                     buttons_window,
                     footer_window,
                 ]),
@@ -719,6 +742,9 @@ class UnifiedReviewDialog:
         for i in range(1, 10):
             @kb.add(str(i))
             def switch_by_number(event, idx=i-1):
+                if self.feedback_mode:
+                    self.feedback_text += str(idx + 1)
+                    return
                 if self._is_text_input_active():
                     # In text input mode, allow number input
                     tab = self._get_current_tab()
@@ -746,8 +772,11 @@ class UnifiedReviewDialog:
         @kb.add('down')
         @kb.add('j')
         def scroll_or_navigate_down(event):
+            if self.feedback_mode:
+                if event.key_sequence[0].key == 'j':
+                    self.feedback_text += 'j'
+                return
             if self._is_text_input_active():
-                # In text input mode, 'j' inputs the character
                 tab = self._get_current_tab()
                 if tab and event.key_sequence[0].key == 'j':
                     tab.text_answer += 'j'
@@ -776,8 +805,11 @@ class UnifiedReviewDialog:
         @kb.add('up')
         @kb.add('k')
         def scroll_or_navigate_up(event):
+            if self.feedback_mode:
+                if event.key_sequence[0].key == 'k':
+                    self.feedback_text += 'k'
+                return
             if self._is_text_input_active():
-                # In text input mode, 'k' inputs the character
                 tab = self._get_current_tab()
                 if tab and event.key_sequence[0].key == 'k':
                     tab.text_answer += 'k'
@@ -794,8 +826,11 @@ class UnifiedReviewDialog:
         @kb.add('pagedown')
         @kb.add(' ')
         def page_down_or_select(event):
+            if self.feedback_mode:
+                if event.key_sequence[0].key == ' ':
+                    self.feedback_text += ' '
+                return
             if self._is_text_input_active():
-                # In text input mode, space inputs a space character
                 tab = self._get_current_tab()
                 if tab and event.key_sequence[0].key == ' ':
                     tab.text_answer += ' '
@@ -851,10 +886,11 @@ class UnifiedReviewDialog:
         @kb.add('left')
         @kb.add('h')
         def prev_button(event):
-            if self._is_text_input_active():
-                # In text input mode, 'h' inputs the character
+            if self._is_text_input_active() or self.feedback_mode:
                 tab = self._get_current_tab()
-                if tab and event.key_sequence[0].key == 'h':
+                if self.feedback_mode and event.key_sequence[0].key == 'h':
+                    self.feedback_text += 'h'
+                elif tab and event.key_sequence[0].key == 'h':
                     tab.text_answer += 'h'
                 return
             self.selected_button_idx = max(0, self.selected_button_idx - 1)
@@ -862,17 +898,37 @@ class UnifiedReviewDialog:
         @kb.add('right')
         @kb.add('l')
         def next_button(event):
-            if self._is_text_input_active():
-                # In text input mode, 'l' inputs the character
+            if self._is_text_input_active() or self.feedback_mode:
                 tab = self._get_current_tab()
-                if tab and event.key_sequence[0].key == 'l':
+                if self.feedback_mode and event.key_sequence[0].key == 'l':
+                    self.feedback_text += 'l'
+                elif tab and event.key_sequence[0].key == 'l':
                     tab.text_answer += 'l'
                 return
-            self.selected_button_idx = min(1, self.selected_button_idx + 1)
+            max_btn = 1 if self.feedback_mode else 2
+            self.selected_button_idx = min(max_btn, self.selected_button_idx + 1)
 
         # Submit
         @kb.add('enter')
         def submit(event):
+            if self.feedback_mode:
+                # In feedback mode
+                if self.selected_button_idx == 0:  # Send Feedback
+                    if self.feedback_text.strip():
+                        self.result = DialogResult(
+                            submitted=False,
+                            answers=[],
+                            feedback=self.feedback_text.strip()
+                        )
+                        event.app.exit()
+                    else:
+                        self.validation_error = "Please enter feedback before sending"
+                else:  # Back
+                    self.feedback_mode = False
+                    self.selected_button_idx = 1  # Return focus to "Provide Feedback"
+                    self.validation_error = ""
+                return
+
             if self._is_text_input_active():
                 # In text input mode, enter adds a newline
                 tab = self._get_current_tab()
@@ -887,6 +943,10 @@ class UnifiedReviewDialog:
                         answers=self._collect_answers()
                     )
                     event.app.exit()
+            elif self.selected_button_idx == 1:  # Provide Feedback
+                self.feedback_mode = True
+                self.selected_button_idx = 0  # Focus "Send Feedback"
+                self.validation_error = ""
             else:  # Cancel
                 self.result = DialogResult(submitted=False, answers=[])
                 event.app.exit()
@@ -896,29 +956,44 @@ class UnifiedReviewDialog:
         @kb.add('q')
         @kb.add('c-c')
         def cancel(event):
+            if self.feedback_mode and event.key_sequence[0].key == 'q':
+                self.feedback_text += 'q'
+                return
             if self._is_text_input_active() and event.key_sequence[0].key == 'q':
-                # In text input mode, 'q' inputs the character
                 tab = self._get_current_tab()
                 if tab:
                     tab.text_answer += 'q'
                 return
+            if self.feedback_mode and event.key_sequence[0].key == 'escape':
+                # Esc in feedback mode goes back to normal mode
+                self.feedback_mode = False
+                self.selected_button_idx = 1
+                self.validation_error = ""
+                return
             self.result = DialogResult(submitted=False, answers=[])
             event.app.exit()
 
-        # Text input for questions
+        # Text input for questions and feedback
         @kb.add('<any>')
         def handle_text_input(event):
-            """Handle text input for question tabs."""
+            """Handle text input for question tabs and feedback mode."""
+            char = event.data
+            if not char or len(char) != 1 or not char.isprintable():
+                return
+            if self.feedback_mode:
+                self.feedback_text += char
+                return
             tab = self._get_current_tab()
             if tab and tab.type == TabType.QUESTION:
-                char = event.data
-                # Only handle printable characters
-                if char and len(char) == 1 and char.isprintable():
-                    tab.text_answer += char
+                tab.text_answer += char
 
         @kb.add('backspace')
         def handle_backspace(event):
-            """Handle backspace for text input."""
+            """Handle backspace for text input and feedback mode."""
+            if self.feedback_mode:
+                if self.feedback_text:
+                    self.feedback_text = self.feedback_text[:-1]
+                return
             tab = self._get_current_tab()
             if tab and tab.type == TabType.QUESTION:
                 if tab.text_answer:

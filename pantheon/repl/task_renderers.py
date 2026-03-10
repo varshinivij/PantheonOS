@@ -14,6 +14,7 @@ import shutil
 from typing import TYPE_CHECKING, Optional
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
@@ -127,6 +128,8 @@ class TaskUIRenderer:
         # Notebook
         "open_notebook": "notebook_path",
         "save_notebook": "notebook_path",
+        # Think
+        "think": "thought",
     }
     
     # Generic key params to try if function not in KEY_PARAMS
@@ -479,25 +482,37 @@ class TaskUIRenderer:
     
     def _format_tool_info(self, tool_info: ToolCallInfo) -> str:
         """Format a ToolCallInfo for display.
-        
+
         Note: key_param is already truncated in _get_key_param_value.
-        
+
         Args:
             tool_info: The ToolCallInfo to format
-            
+
         Returns:
             Formatted string with Rich markup
         """
+        func_name = self._get_func_name(tool_info.name)
+
+        # Special rendering for think tool
+        if func_name == "think":
+            icon = "💭" if not tool_info.is_running else "⟳"
+            thought = tool_info.key_param or ""
+            # Show first line only, clean up
+            first_line = thought.split("\n")[0].strip()
+            if first_line:
+                return f"{icon} [dim italic]{first_line}[/dim italic]"
+            return f"{icon} [dim italic]thinking...[/dim italic]"
+
         status = "⟳" if tool_info.is_running else "✓"
         status_color = "cyan" if tool_info.is_running else "green"
-        
+
         # Use common formatting
         base = self._format_tool_base(tool_info.name)
-        
+
         # Add key param (already truncated in _get_key_param_value)
         if tool_info.key_param:
             return f"[{status_color}]{status}[/{status_color}] {base} : [dim]{tool_info.key_param}[/dim]"
-        
+
         return f"[{status_color}]{status}[/{status_color}] {base}"
     
     def on_notify_user(self):
@@ -658,19 +673,20 @@ class NotifyUIRenderer:
         if isinstance(paths, str):
             paths = [paths]
         
-        # Build content
-        content_parts = []
-        
+        # Build content — render message as Markdown
+        renderables = []
+
         if message:
-            content_parts.append(message)
-        
+            renderables.append(Markdown(message))
+
         if paths:
-            content_parts.append("")
-            content_parts.append("[bold]📄 Files to review:[/bold]")
+            path_parts = ["[bold]📄 Files to review:[/bold]"]
             for p in paths:
-                content_parts.append(f"  • {p}")
-        
-        content = "\n".join(content_parts)
+                path_parts.append(f"  • {p}")
+            renderables.append(Text(""))
+            renderables.append(Text.from_markup("\n".join(path_parts)))
+
+        content = Group(*renderables) if renderables else Text("")
         
         # Panel styling - simpler for blocked notifications (interactive dialog follows)
         if blocked:
