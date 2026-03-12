@@ -479,14 +479,10 @@ class StoreSeed:
                 manifest.json          # Index of all packages
                 skills/
                     factory/
-                        omics_quality_control.md
+                        omics_quality_control/SKILL.md
                         ...
                     labclaw/
-                        labclaw_scanpy.md
-                        ...
-                    openclaw-medical/
-                        ...
-                    claude-scientific/
+                        labclaw_scanpy/SKILL.md
                         ...
                 agents/
                     researcher.md
@@ -504,7 +500,10 @@ class StoreSeed:
         skills_dir.mkdir(parents=True, exist_ok=True)
         console.print(f"\n[bold]Factory Skills[/bold]: {len(skills)}")
         for skill in skills:
-            fpath = skills_dir / f"{skill['store_name']}.md"
+            # Always use {name}/SKILL.md directory format
+            skill_out_dir = skills_dir / skill["store_name"]
+            skill_out_dir.mkdir(parents=True, exist_ok=True)
+            fpath = skill_out_dir / "SKILL.md"
             fpath.write_text(skill["content"], encoding="utf-8")
             entry = {
                 "name": skill["store_name"],
@@ -517,15 +516,13 @@ class StoreSeed:
                 "source_url": None,
                 "file": str(fpath.relative_to(out)).replace("\\", "/"),
             }
-            # Save bundled skill files (for skill groups)
+            # Save bundled skill files
             files = skill.get("files", {})
             if files:
-                bundled_dir = skills_dir / f"{skill['store_name']}_bundled"
-                bundled_dir.mkdir(parents=True, exist_ok=True)
                 bundled_files = {}
                 for rel_path, content in files.items():
                     bf_name = hashlib.md5(rel_path.encode()).hexdigest()[:12] + Path(rel_path).suffix
-                    bf = bundled_dir / bf_name
+                    bf = skill_out_dir / bf_name
                     bf.write_text(content, encoding="utf-8")
                     bundled_files[rel_path] = str(bf.relative_to(out)).replace("\\", "/")
                 entry["bundled_files"] = bundled_files
@@ -603,7 +600,10 @@ class StoreSeed:
                            console=console) as progress:
                 task = progress.add_task(f"Saving {source_name}...", total=len(ext_skills))
                 for skill in ext_skills:
-                    fpath = ext_dir / f"{skill['store_name']}.md"
+                    # Always use {name}/SKILL.md directory format
+                    skill_out_dir = ext_dir / skill["store_name"]
+                    skill_out_dir.mkdir(parents=True, exist_ok=True)
+                    fpath = skill_out_dir / "SKILL.md"
                     fpath.write_text(skill["content"], encoding="utf-8")
                     entry = {
                         "name": skill["store_name"],
@@ -619,12 +619,10 @@ class StoreSeed:
                     # Save bundled skill files
                     files = skill.get("files", {})
                     if files:
-                        bundled_dir = ext_dir / f"{skill['store_name']}_bundled"
-                        bundled_dir.mkdir(parents=True, exist_ok=True)
                         bundled_files = {}
                         for rel_path, content in files.items():
                             bf_name = hashlib.md5(rel_path.encode()).hexdigest()[:12] + Path(rel_path).suffix
-                            bf = bundled_dir / bf_name
+                            bf = skill_out_dir / bf_name
                             bf.write_text(content, encoding="utf-8")
                             bundled_files[rel_path] = str(bf.relative_to(out)).replace("\\", "/")
                         entry["bundled_files"] = bundled_files
