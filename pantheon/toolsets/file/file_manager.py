@@ -1563,79 +1563,76 @@ class FileManagerToolSet(FileManagerToolSetBase):
             return {"success": False, "error": f"Not a LaTeX file: {file_path}"}
 
         async with self._latex_semaphore:
-            with tempfile.TemporaryDirectory(prefix="latex-") as tmpdir:
-                # Copy source file to temp dir
-                tex_name = source_path.name
-                tex_tmp = os.path.join(tmpdir, tex_name)
-                shutil.copy2(str(source_path), tex_tmp)
+            # Compile in the source file's directory so relative paths
+            # (including ../ references) resolve correctly.
+            source_dir = str(source_path.parent)
+            tex_name = source_path.name
 
-                # Also copy any sibling files that might be referenced
-                # (images, bib files, cls files, etc.)
-                for sibling in source_path.parent.iterdir():
-                    if sibling != source_path and sibling.is_file():
-                        try:
-                            shutil.copy2(str(sibling), os.path.join(tmpdir, sibling.name))
-                        except Exception:
-                            pass  # Skip files that can't be copied
+            # Build compilation command
+            if compiler == "tectonic":
+                cmd = ["tectonic", tex_name]
+            else:
+                # pdflatex / xelatex / lualatex
+                cmd = [
+                    compiler,
+                    "-interaction=nonstopmode",
+                    tex_name,
+                ]
 
-                # Build compilation command
-                if compiler == "tectonic":
-                    cmd = ["tectonic", tex_tmp]
-                else:
-                    # pdflatex / xelatex / lualatex
-                    cmd = [
-                        compiler,
-                        "-interaction=nonstopmode",
-                        "-output-directory",
-                        tmpdir,
-                        tex_name,
-                    ]
+            # Run compiler in the source directory
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=source_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-                # Run compiler
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    cwd=tmpdir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=60
                 )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return {
+                    "success": False,
+                    "error": "Compilation timed out (60s limit).",
+                }
 
-                try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=60
-                    )
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
-                    return {
-                        "success": False,
-                        "error": "Compilation timed out (60s limit).",
-                    }
+            # Check for output PDF
+            pdf_name = tex_name.rsplit(".", 1)[0] + ".pdf"
+            pdf_src = source_path.parent / pdf_name
 
-                # Check for output PDF
-                pdf_name = tex_name.rsplit(".", 1)[0] + ".pdf"
-                pdf_tmp = os.path.join(tmpdir, pdf_name)
-
-                if os.path.exists(pdf_tmp):
-                    # Copy PDF to output directory
-                    self._latex_output_dir.mkdir(parents=True, exist_ok=True)
-                    output_path = self._latex_output_dir / pdf_name
-                    shutil.copy2(pdf_tmp, str(output_path))
-                    return {
-                        "success": True,
-                        "pdf_path": str(output_path),
-                    }
-                else:
-                    # Compilation failed - return error info
-                    output = (stdout or b"").decode("utf-8", errors="replace")
-                    err = (stderr or b"").decode("utf-8", errors="replace")
-                    combined = f"{output}\n{err}".strip()
-                    if len(combined) > 3000:
-                        combined = combined[-3000:]
-                    return {
-                        "success": False,
-                        "error": "Compilation failed. See log for details.",
-                        "log": combined,
-                    }
+            if pdf_src.exists():
+                # Move PDF to output directory
+                self._latex_output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = self._latex_output_dir / pdf_name
+                shutil.copy2(str(pdf_src), str(output_path))
+                # Clean up build artifacts in source directory
+                for ext in ('.aux', '.log', '.out', '.toc', '.fls', '.fdb_latexmk', '.synctex.gz'):
+                    artifact = source_path.with_suffix(ext)
+                    if artifact.exists():
+                        try:
+                            artifact.unlink()
+                        except Exception:
+                            pass
+                pdf_src.unlink(missing_ok=True)
+                return {
+                    "success": True,
+                    "pdf_path": str(output_path),
+                }
+            else:
+                # Compilation failed - return error info
+                output = (stdout or b"").decode("utf-8", errors="replace")
+                err = (stderr or b"").decode("utf-8", errors="replace")
+                combined = f"{output}\n{err}".strip()
+                if len(combined) > 3000:
+                    combined = combined[-3000:]
+                return {
+                    "success": False,
+                    "error": "Compilation failed. See log for details.",
+                    "log": combined,
+                }
 
 
 __all__ = ["FileManagerToolSet"]
