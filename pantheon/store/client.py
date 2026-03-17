@@ -1,5 +1,6 @@
 """HTTP client for Pantheon Store API."""
 
+import os
 import httpx
 from typing import Optional
 from .auth import StoreAuth
@@ -13,7 +14,7 @@ class StoreClient:
 
     def __init__(self, hub_url: str = None, auth: StoreAuth = None):
         self.auth = auth or StoreAuth()
-        self.hub_url = (hub_url or self.auth.hub_url or DEFAULT_HUB_URL).rstrip("/")
+        self.hub_url = (hub_url or os.environ.get("PANTHEON_HUB_URL") or self.auth.hub_url or DEFAULT_HUB_URL).rstrip("/")
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
