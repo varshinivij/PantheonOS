@@ -3,6 +3,7 @@
 block_cipher = None
 
 from PyInstaller.utils.hooks import copy_metadata, collect_data_files
+import os, tempfile
 
 datas = [
     ('pantheon/factory/templates', 'pantheon/factory/templates'),
@@ -11,8 +12,20 @@ datas = [
     ('pantheon/toolsets/knowledge/config.yaml', 'pantheon/toolsets/knowledge'),
 ]
 datas += copy_metadata('fastmcp')
-# litellm needs its JSON data files (model costs, tokenizers, etc.)
 datas += collect_data_files('litellm', includes=['**/*.json'])
+# fakeredis: model/_command_info.py loads os.path.join(dirname(__file__), '..', 'commands.json')
+# PyInstaller must include the JSON so the relative path resolves at runtime.
+datas += collect_data_files('fakeredis', includes=['commands.json'])
+
+# Runtime hook: ensure fakeredis/model/ dir exists so ../commands.json resolves.
+_rthook = tempfile.NamedTemporaryFile('w', suffix='.py', delete=False)
+_rthook.write(
+    "import sys, os\n"
+    "d = getattr(sys, '_MEIPASS', None)\n"
+    "if d:\n"
+    "    os.makedirs(os.path.join(d, 'fakeredis', 'model'), exist_ok=True)\n"
+)
+_rthook.close()
 
 a = Analysis(
     ['pantheon/chatroom/__main__.py'],
@@ -50,9 +63,9 @@ a = Analysis(
         'importlib.metadata',
         'importlib_metadata',
     ],
-    hookspath=['hooks'],
+    hookspath=[],
     hooksconfig={},
-    runtime_hooks=['hooks/rthook_fakeredis.py'],
+    runtime_hooks=[_rthook.name],
     excludes=[
         # ── Knowledge / vector DB (lancedb only used in RAG toolset, lazy import) ──
         'lancedb', 'lance', 'pyarrow', 'llama_index', 'qdrant_client',
