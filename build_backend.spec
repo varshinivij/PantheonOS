@@ -3,7 +3,7 @@
 block_cipher = None
 
 from PyInstaller.utils.hooks import copy_metadata, collect_data_files
-import os, tempfile
+import os, sys, tempfile
 
 datas = [
     ('pantheon/factory/templates', 'pantheon/factory/templates'),
@@ -106,7 +106,7 @@ exe = EXE(
     name='pantheon-backend',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,
+    strip=sys.platform != 'win32',  # MinGW strip corrupts MSVC-built DLLs on Windows
     upx=True,
     upx_exclude=[
         'python3*.dll',
