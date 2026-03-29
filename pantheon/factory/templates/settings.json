@@ -166,7 +166,7 @@
     // Learning is a long-term memory system that learns from conversation trajectories
     "learning": {
         // Enable learning system (extract skills from trajectories of each user request/response run)
-        "enable_learning": true,
+        "enable_learning": false,
         // Enable skill injection into agent system prompts (user_rules, user-defined strategies, high-score skills)
         "enable_injection": true,
         // Enable dynamic skill injection (context injectors), defaults to enable_injection if omitted
