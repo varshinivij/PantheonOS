@@ -397,6 +397,20 @@ class AnthropicAdapter(BaseAdapter):
 
                         elif delta_obj.type == "thinking_delta":
                             thinking_text = delta_obj.thinking
+
+                            # Write into chunks so stream_chunk_builder captures it
+                            chunk_dict = {
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "role": "assistant",
+                                        "reasoning_content": thinking_text,
+                                    },
+                                    "finish_reason": None,
+                                }],
+                            }
+                            collected_chunks.append(chunk_dict)
+
                             if process_chunk:
                                 await run_func(process_chunk, {
                                     "role": "assistant",

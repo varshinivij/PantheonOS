@@ -223,11 +223,19 @@ class GeminiAdapter(BaseAdapter):
         if modalities:
             config_kwargs["response_modalities"] = modalities
 
-        # Reasoning effort → thinking config
+        # Reasoning / thinking config
         reasoning_effort = kwargs.pop("reasoning_effort", None)
-        if reasoning_effort:
+        thinking = kwargs.pop("thinking", None)
+        if thinking and isinstance(thinking, dict):
+            budget = thinking.get("budget_tokens", -1)
             config_kwargs["thinking_config"] = types.ThinkingConfig(
-                thinking_budget=-1  # auto
+                thinking_budget=budget,
+                include_thoughts=True,
+            )
+        elif reasoning_effort:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=-1,  # auto
+                include_thoughts=True,
             )
 
         config = types.GenerateContentConfig(**config_kwargs)
@@ -251,11 +259,16 @@ class GeminiAdapter(BaseAdapter):
                 text = ""
                 tool_calls_data = []
 
+                thinking_text = ""
+
                 if response.candidates:
                     for candidate in response.candidates:
                         if candidate.content and candidate.content.parts:
                             for part in candidate.content.parts:
-                                if hasattr(part, "text") and part.text:
+                                if getattr(part, "thought", False) and part.text:
+                                    # Thinking/reasoning part
+                                    thinking_text += part.text
+                                elif hasattr(part, "text") and part.text:
                                     text += part.text
                                 elif hasattr(part, "function_call") and part.function_call:
                                     fc = part.function_call
@@ -294,6 +307,25 @@ class GeminiAdapter(BaseAdapter):
                         await run_func(process_chunk, {
                             "role": "assistant",
                             "content": text,
+                        })
+
+                if thinking_text:
+                    chunk_dict = {
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "reasoning_content": thinking_text,
+                            },
+                            "finish_reason": None,
+                        }],
+                    }
+                    collected_chunks.append(chunk_dict)
+
+                    if process_chunk:
+                        await run_func(process_chunk, {
+                            "role": "assistant",
+                            "reasoning_content": thinking_text,
                         })
 
                 if tool_calls_data:
