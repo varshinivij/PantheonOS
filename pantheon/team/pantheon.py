@@ -642,8 +642,10 @@ async def create_delegation_task_message(
         except Exception as e:
             logger.warning(f"Failed to generate summary for delegation: {e}")
 
-    content_parts = []
-    if summary_text:
-        content_parts.append(f"Context Summary:\n{summary_text}")
-    content_parts.append(f"Task: {instruction}")
-    return "\n\n".join(content_parts)
+    from pantheon.utils.token_optimization import build_delegation_context_message
+
+    return build_delegation_context_message(
+        history=history,
+        instruction=instruction,
+        summary_text=summary_text,
+    )

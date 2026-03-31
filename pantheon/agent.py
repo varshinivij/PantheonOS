@@ -878,7 +878,8 @@ class Agent:
         # Providers return ToolInfo with pre-generated inputSchema (the "function" part)
         logger.debug(f"get tools for llm: {self.providers} ")
         provider_tools = []
-        for provider_name, provider in self.providers.items():
+        for provider_name in sorted(self.providers):
+            provider = self.providers[provider_name]
             try:
                 # Get tools from provider (uses cached list if available)
                 tools = await provider.list_tools()
@@ -948,7 +949,9 @@ class Agent:
             if not self.force_litellm:
                 func["parameters"].setdefault("required", []).append("_background")
 
-        return all_tools
+        from pantheon.utils.token_optimization import stabilize_tool_definitions
+
+        return stabilize_tool_definitions(all_tools)
 
     def _should_inject_context_variables(self, prefixed_name: str) -> bool:
         """Determine if context_variables should be injected for a tool.
@@ -1413,6 +1416,16 @@ class Agent:
 
         # Step 1: Process messages for the model
         async with tracker.measure("message_processing"):
+            from pantheon.utils.token_optimization import (
+                build_llm_view,
+            )
+
+            run_context = get_current_run_context()
+            optimization_memory = run_context.memory if run_context else None
+            messages = build_llm_view(
+                messages,
+                memory=optimization_memory,
+            )
             messages = process_messages_for_model(messages, model)
 
         # Step 2: Detect provider and get configuration
@@ -2129,7 +2142,7 @@ IMPORTANT: You are operating in a restricted workspace environment.
             conversation_history = (
                 memory_instance.get_messages(
                     execution_context_id=execution_context_id,
-                    for_llm=True
+                    for_llm=False
                 )
                 if (should_use_memory and memory_instance)
                 else []
