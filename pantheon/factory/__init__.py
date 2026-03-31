@@ -51,7 +51,6 @@ async def create_agent(
     agent.not_loaded_toolsets = []
     toolsets_added = []
     mcp_server_added = []
-    toolsets = list(toolsets or [])
     mcp_servers = list(mcp_servers or [])
     
     # ===== Parse toolsets to extract MCP specs =====
