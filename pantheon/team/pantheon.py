@@ -88,6 +88,43 @@ def _get_cache_safe_child_run_overrides(
     return overrides, updated_context_variables
 
 
+def _build_structured_fork_context(run_context) -> "list[dict] | None":
+    """Build a structured fork context from the parent's optimised history.
+
+    Mirrors Claude Code's forkContextMessages: the child receives the parent's
+    already-budget+snipped message list (sans system message) as its initial
+    context, rather than a plain-text summary.  This preserves tool-call
+    structure and lets the child reason over the actual conversation, not a
+    lossy narration of it.
+
+    Returns None if there is no history worth forwarding.
+    """
+    memory = getattr(run_context, "memory", None)
+    if memory is None:
+        return None
+
+    # Use the already-computed cache_safe_prompt_messages if available —
+    # those have already been through build_llm_view (budget + microcompact).
+    cached = getattr(run_context, "cache_safe_prompt_messages", None)
+    if cached:
+        result = [
+            copy.deepcopy(m)
+            for m in cached
+            if m.get("role") != "system"
+        ]
+        return result or None
+
+    # Fallback: build fresh view from memory
+    from pantheon.utils.token_optimization import build_llm_view
+
+    raw = memory.get_messages(None)
+    if not raw:
+        return None
+    projected = build_llm_view(raw, memory=memory, is_main_thread=True)
+    result = [m for m in projected if m.get("role") != "system"]
+    return result or None
+
+
 async def _get_cache_safe_child_fork_context_messages(
     run_context,
     target_agent: Agent | RemoteAgent,
@@ -460,22 +497,43 @@ class PantheonTeam(Team):
                         child_context_variables,
                     )
                 )
+                # CC-style delegation: structured fork is PRIMARY path.
+                # Child receives parent's full optimized message history as
+                # structured messages (forkContextMessages), enabling prompt
+                # cache sharing.  Summary is only a FALLBACK when no
+                # structured context is available.
+                use_summary_fallback = False
                 fork_context_messages = await _get_cache_safe_child_fork_context_messages(
                     run_context,
                     target_agent,
                 )
                 if fork_context_messages:
+                    # Path 1: Cache-compatible — share parent prefix byte-for-byte
                     child_context_variables["_cache_safe_fork_context_messages"] = (
                         fork_context_messages
                     )
+                elif run_context.memory:
+                    # Path 2: Incompatible agents — pass optimized structured
+                    # messages (CC's forkContextMessages for non-cache-sharing)
+                    structured_fork = _build_structured_fork_context(run_context)
+                    if structured_fork:
+                        child_context_variables["_cache_safe_fork_context_messages"] = (
+                            structured_fork
+                        )
+                    else:
+                        # Path 3: No structured context available — fall back to
+                        # summary (only when use_summary=True)
+                        use_summary_fallback = self.use_summary
+                else:
+                    use_summary_fallback = self.use_summary
 
-                # Build task message with optional history summary
+                # Build task message — with or without summary
                 task_message = await create_delegation_task_message(
                     history=run_context.memory.get_messages(None)
                     if run_context.memory
                     else [],
                     instruction=instruction,
-                    use_summary=self.use_summary,
+                    use_summary=use_summary_fallback,
                 )
                 if not task_message:
                     return ""

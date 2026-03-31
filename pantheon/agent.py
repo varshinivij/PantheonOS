@@ -1422,6 +1422,8 @@ class Agent:
         async with tracker.measure("message_processing"):
             from pantheon.utils.token_optimization import (
                 build_llm_view,
+                inject_cache_control_markers,
+                is_anthropic_model,
             )
 
             run_context = get_current_run_context()
@@ -1435,6 +1437,10 @@ class Agent:
                 is_main_thread=is_main_thread,
             )
             messages = process_messages_for_model(messages, model)
+            # Inject Anthropic prompt-cache markers so the server-side cache
+            # activates — mirrors Claude Code's getCacheControl() strategy.
+            if is_anthropic_model(model):
+                messages = inject_cache_control_markers(messages)
             if run_context is not None:
                 run_context.cache_safe_prompt_messages = copy.deepcopy(messages)
 

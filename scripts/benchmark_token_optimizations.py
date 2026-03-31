@@ -28,11 +28,16 @@ from pantheon.internal.memory import Memory
 from pantheon.team.pantheon import DELEGATION_RECENT_TAIL_SIZE
 from pantheon.utils.token_optimization import (
     ON_DEMAND_HINT,
+    SnipConfig,
     TimeBasedMicrocompactConfig,
+    apply_token_optimizations,
     apply_tool_result_budget,
+    autocompact_messages,
     build_delegation_context_message,
     build_llm_view,
+    collapse_read_search_groups,
     microcompact_messages,
+    snip_messages_to_budget,
     stabilize_tool_definitions,
 )
 
@@ -104,6 +109,36 @@ def build_conversation(
 
     msgs.append(_asst("Root cause: race condition in payment handler."))
     msgs.append({"role": "user", "content": "Please fix it."})
+    return msgs
+
+
+def build_collapsible_conversation(
+    num_rounds: int = 10,
+    output_kb: int = 50,
+) -> list[dict]:
+    """Build a conversation where tool calls have silent assistant messages
+    (no text content), making them collapsible by contextCollapse."""
+    msgs: list[dict] = [
+        {"role": "system", "content": "You are a software engineering assistant."},
+        {"role": "user", "content": "Investigate the bug."},
+    ]
+    now = time.time()
+    tools = ["grep", "read_file", "glob", "shell", "web_fetch"]
+
+    for i in range(num_rounds):
+        cid = f"call_{i:04d}"
+        name = tools[i % len(tools)]
+        ts = now - 7200 + i * 10
+        # Silent assistant: only tool_calls, NO text — collapsible
+        msgs.append({
+            "role": "assistant",
+            "tool_calls": [_tc(cid, name)],
+            "timestamp": ts,
+        })
+        msgs.append(_tool_msg(cid, _make_log_output(output_kb), name=name))
+
+    msgs.append(_asst("I found the root cause."))
+    msgs.append({"role": "user", "content": "Fix it."})
     return msgs
 
 
@@ -192,12 +227,39 @@ def bench_opt3() -> Result:
     return Result(f"3. Cache Stability (idempotent={is_stable}, see live)", t, t)
 
 
+def bench_opt4_snip(msgs: list[dict]) -> Result:
+    """Opt4a: HISTORY_SNIP — token-budget truncation of oldest messages."""
+    before = est_tokens(msgs)
+    out, freed = snip_messages_to_budget(
+        copy.deepcopy(msgs),
+        config=SnipConfig(enabled=True, token_budget=20_000, keep_recent=4),
+    )
+    return Result("4a. HISTORY_SNIP", before, est_tokens(out))
+
+
+def bench_opt4_collapse(msgs: list[dict], collapse_msgs: list[dict] | None = None) -> Result:
+    """Opt4b: contextCollapse — fold consecutive read/search groups."""
+    target = collapse_msgs or msgs
+    before = est_tokens(target)
+    out, saved = collapse_read_search_groups(copy.deepcopy(target), min_group_size=3)
+    return Result("4b. contextCollapse", before, est_tokens(out))
+
+
+def bench_opt4_autocompact(msgs: list[dict]) -> Result:
+    """Opt4c: autocompact — last-resort summarization of old messages."""
+    before = est_tokens(msgs)
+    out, freed = autocompact_messages(
+        copy.deepcopy(msgs), token_budget=20_000, keep_recent=4,
+    )
+    return Result("4c. Autocompact", before, est_tokens(out))
+
+
 def bench_opt4(msgs: list[dict], tmp: Path) -> Result:
-    """Opt4: build_llm_view — combined projection layer."""
+    """Opt4: build_llm_view — full 5-stage projection pipeline."""
     before = est_tokens(msgs)
     mem = Memory("b-opt4")
     out = build_llm_view(copy.deepcopy(msgs), memory=mem, base_dir=tmp / "o4", is_main_thread=True)
-    return Result("4. LLM View Layer", before, est_tokens(out))
+    return Result("4. LLM View Layer (all stages)", before, est_tokens(out))
 
 
 def bench_opt5(msgs: list[dict]) -> Result:
@@ -402,10 +464,17 @@ def main():
                                   all_timestamps_old=True)
         raw = est_tokens(msgs)
 
+        # Build collapsible version (silent assistant messages) for contextCollapse
+        collapse_msgs = build_collapsible_conversation(
+            num_rounds=scale["rounds"], output_kb=scale["kb"],
+        )
         rows = [
             bench_opt1(msgs, tmp),
             bench_opt2(msgs),
             bench_opt3(),
+            bench_opt4_snip(msgs),
+            bench_opt4_collapse(msgs, collapse_msgs),
+            bench_opt4_autocompact(msgs),
             bench_opt4(msgs, tmp),
             bench_opt5(msgs),
             bench_combined(msgs, tmp),

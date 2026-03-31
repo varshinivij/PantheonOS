@@ -11,9 +11,13 @@ from pantheon.utils.log import logger
 PERSISTED_OUTPUT_TAG = "<persisted-output>"
 PERSISTED_OUTPUT_CLOSING_TAG = "</persisted-output>"
 TIME_BASED_MC_CLEARED_MESSAGE = "[Old tool result content cleared]"
+EMPTY_TOOL_RESULT_PLACEHOLDER = "[No output]"
 PREVIEW_SIZE_BYTES = 2000
 BYTES_PER_TOKEN = 4
 MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000
+# CC default: DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000.  Used as fallback when
+# a tool has no explicit entry in PER_TOOL_RESULT_SIZE_CHARS.
+DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000
 TIME_BASED_MC_GAP_THRESHOLD_MINUTES = 60
 TIME_BASED_MC_KEEP_RECENT = 5
 STATE_KEY = "token_optimization"
@@ -33,6 +37,46 @@ COMPACTABLE_TOOL_SUFFIXES = {
     "web_search",
     "web_crawl",
 }
+
+# Per-tool result size limits (chars).  Tools that produce large but
+# structured output (web pages, full file reads) get a tighter cap than
+# the default; tools whose output is always small are left out so the
+# DEFAULT_MAX_RESULT_SIZE_CHARS (50K) applies.
+# Mirrors Claude Code's per-tool maxResultSizeChars declarations.
+PER_TOOL_RESULT_SIZE_CHARS: dict[str, int | float] = {
+    "read_file":   40_000,
+    "view_file":   40_000,
+    "web_fetch":   30_000,
+    "web_crawl":   30_000,
+    "web_search":  20_000,
+    "shell":       50_000,
+    "bash":        50_000,
+    "grep":        20_000,
+    "grep_search": 20_000,
+    "glob":        10_000,
+    "find_by_name": 10_000,
+}
+
+# Tools that opt out of persistence entirely (CC: maxResultSizeChars = Infinity).
+# Their results are never externalized regardless of size — model needs to see
+# the full output for correct reasoning.
+PERSISTENCE_OPT_OUT_TOOLS: frozenset[str] = frozenset()
+
+# Tools whose results are considered collapsible in contextCollapse.
+# Matches CC's collapseReadSearch.ts getToolSearchOrReadInfo().
+COLLAPSIBLE_SEARCH_TOOLS = frozenset({
+    "grep", "grep_search", "glob", "find_by_name",
+    "web_search",
+})
+COLLAPSIBLE_READ_TOOLS = frozenset({
+    "read_file", "view_file", "web_fetch", "web_crawl",
+})
+COLLAPSIBLE_LIST_TOOLS = frozenset({
+    "glob", "find_by_name",
+})
+ALL_COLLAPSIBLE_TOOLS = COLLAPSIBLE_SEARCH_TOOLS | COLLAPSIBLE_READ_TOOLS | frozenset({
+    "shell", "bash",  # absorbed silently like CC's REPL
+})
 
 
 @dataclass
@@ -136,6 +180,42 @@ def load_content_replacement_state(memory: Any | None) -> ContentReplacementStat
     return ContentReplacementState(seen_ids=seen_ids, replacements=replacements)
 
 
+def reconstruct_content_replacement_state(
+    messages: list[dict],
+    memory: Any | None = None,
+) -> ContentReplacementState:
+    """Reconstruct replacement state from message history on session resume.
+
+    Mirrors CC's ``reconstructContentReplacementState()``: scans messages for
+    already-externalized tool results and rebuilds the seen_ids/replacements
+    maps so the budget logic is consistent with prior decisions.
+    """
+    state = load_content_replacement_state(memory)
+
+    # Walk all tool messages; if content is already externalized (persisted-output
+    # or cleared), record the decision so we don't re-evaluate.
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        tool_use_id = message.get("tool_call_id")
+        if not isinstance(tool_use_id, str) or not tool_use_id:
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        if content.startswith(PERSISTED_OUTPUT_TAG):
+            state.seen_ids.add(tool_use_id)
+            state.replacements[tool_use_id] = content
+        elif content == TIME_BASED_MC_CLEARED_MESSAGE:
+            state.seen_ids.add(tool_use_id)
+        elif content == EMPTY_TOOL_RESULT_PLACEHOLDER:
+            state.seen_ids.add(tool_use_id)
+
+    if memory is not None:
+        save_content_replacement_state(memory, state)
+    return state
+
+
 def save_content_replacement_state(
     memory: Any | None,
     state: ContentReplacementState,
@@ -183,12 +263,27 @@ def _get_tool_results_dir(memory: Any | None, base_dir: Path | None) -> Path:
     return root / str(memory_id)
 
 
+def _detect_json_content(content: str) -> bool:
+    """Return True if *content* looks like a JSON array or object."""
+    stripped = content.lstrip()
+    if not stripped or stripped[0] not in ("[", "{"):
+        return False
+    try:
+        json.loads(content)
+        return True
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+
 def _get_tool_result_path(
     tool_use_id: str,
     memory: Any | None,
     base_dir: Path | None,
+    *,
+    is_json: bool = False,
 ) -> Path:
-    return _get_tool_results_dir(memory, base_dir) / f"{tool_use_id}.txt"
+    ext = ".json" if is_json else ".txt"
+    return _get_tool_results_dir(memory, base_dir) / f"{tool_use_id}{ext}"
 
 
 def persist_tool_result(
@@ -199,7 +294,9 @@ def persist_tool_result(
 ) -> dict[str, Any]:
     directory = _get_tool_results_dir(memory, base_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    filepath = _get_tool_result_path(tool_use_id, memory, base_dir)
+    is_json = _detect_json_content(content)
+    filepath = _get_tool_result_path(tool_use_id, memory, base_dir, is_json=is_json)
+    # Atomic-ish write: skip if file already exists (mirrors CC's 'wx' flag)
     if not filepath.exists():
         filepath.write_text(content, encoding="utf-8")
     preview, has_more = generate_preview(content, PREVIEW_SIZE_BYTES)
@@ -293,6 +390,27 @@ def collect_candidates_from_message(message: dict) -> list[ToolMessageCandidate]
     ]
 
 
+def guard_empty_tool_results(messages: list[dict]) -> list[dict]:
+    """Inject a placeholder for empty tool results.
+
+    Mirrors CC's emptiness guard: some models emit a stop-sequence when
+    they see an empty tool result.  Injecting ``[No output]`` prevents that.
+    """
+    result: list[dict] = []
+    for message in messages:
+        if message.get("role") != "tool":
+            result.append(message)
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            result.append(message)
+            continue
+        new_msg = dict(message)
+        new_msg["content"] = EMPTY_TOOL_RESULT_PLACEHOLDER
+        result.append(new_msg)
+    return result
+
+
 def collect_candidates_by_message(messages: list[dict]) -> list[list[ToolMessageCandidate]]:
     groups: list[list[ToolMessageCandidate]] = []
     current: list[ToolMessageCandidate] = []
@@ -374,21 +492,61 @@ def replace_tool_message_contents(
     return result
 
 
+def _get_per_tool_limit(tool_name: str | None, global_limit: int) -> int | float:
+    """Return the effective size limit for a single tool result.
+
+    Mirrors Claude Code's ``getPersistenceThreshold()``:
+    1. Infinity opt-out (never externalize)
+    2. Per-tool override from PER_TOOL_RESULT_SIZE_CHARS
+    3. Fallback: ``min(DEFAULT_MAX_RESULT_SIZE_CHARS, global_limit)``
+    """
+    normalized = normalize_tool_name(tool_name)
+    if normalized in PERSISTENCE_OPT_OUT_TOOLS:
+        return float("inf")
+    explicit = PER_TOOL_RESULT_SIZE_CHARS.get(normalized)
+    if explicit is not None:
+        return explicit
+    return min(DEFAULT_MAX_RESULT_SIZE_CHARS, global_limit)
+
+
+# querySource values that should NOT write to disk (mirrors CC's logic
+# in toolResultStorage.ts — agent_summary, fork calls, etc. only see
+# the already-persisted preview, they never create new disk entries).
+_PERSISTENCE_SKIP_QUERY_SOURCES = frozenset({
+    "agent_summary",
+    "memory_agent",
+    "title_agent",
+})
+
+
+def _should_persist_to_disk(query_source: str | None) -> bool:
+    """Return True if this query source is allowed to write new tool results
+    to disk.  Mirrors CC: only ``agent:*`` and ``repl_main_thread*`` persist;
+    summaries and fork helpers do not."""
+    if query_source is None:
+        return True  # conservative default
+    return query_source not in _PERSISTENCE_SKIP_QUERY_SOURCES
+
+
 def apply_tool_result_budget(
     messages: list[dict],
     memory: Any | None = None,
     base_dir: Path | None = None,
     per_message_limit: int = MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
     skip_tool_names: set[str] | None = None,
+    query_source: str | None = None,
 ) -> list[dict]:
+    # Guard empty tool results first (CC emptiness guard)
+    messages = guard_empty_tool_results(messages)
     state = load_content_replacement_state(memory)
+
+    # querySource filtering: fork helpers only re-apply existing decisions,
+    # they never create new disk entries.
+    persist_allowed = _should_persist_to_disk(query_source)
     candidates_by_message = collect_candidates_by_message(messages)
     skip_tool_names = skip_tool_names or set()
-    name_by_tool_use_id = (
-        build_tool_name_map(messages) if skip_tool_names else {}
-    )
+    tool_name_map = build_tool_name_map(messages)
     replacement_map: dict[str, str] = {}
-    changed = False
 
     for candidates in candidates_by_message:
         must_reapply, frozen, fresh = partition_by_prior_decision(candidates, state)
@@ -404,37 +562,68 @@ def apply_tool_result_budget(
         skipped = [
             candidate
             for candidate in fresh
-            if name_by_tool_use_id.get(candidate.tool_use_id) in skip_tool_names
+            if tool_name_map.get(candidate.tool_use_id) in skip_tool_names
         ]
         for candidate in skipped:
             state.seen_ids.add(candidate.tool_use_id)
 
         eligible = [candidate for candidate in fresh if candidate not in skipped]
+
+        # Separate opt-out tools (Infinity limit) — never externalize them
+        opted_out: list[ToolMessageCandidate] = []
+        checkable: list[ToolMessageCandidate] = []
+        for candidate in eligible:
+            tool_name = tool_name_map.get(candidate.tool_use_id)
+            normalized = normalize_tool_name(tool_name)
+            if normalized in PERSISTENCE_OPT_OUT_TOOLS:
+                opted_out.append(candidate)
+            else:
+                checkable.append(candidate)
+        for candidate in opted_out:
+            state.seen_ids.add(candidate.tool_use_id)
+
+        # Per-tool threshold check: externalize any single result that already
+        # exceeds its own tool-specific limit, regardless of the group total.
+        per_tool_selected: list[ToolMessageCandidate] = []
+        remaining_eligible: list[ToolMessageCandidate] = []
+        for candidate in checkable:
+            tool_name = tool_name_map.get(candidate.tool_use_id)
+            tool_limit = _get_per_tool_limit(tool_name, per_message_limit)
+            if candidate.size > tool_limit:
+                per_tool_selected.append(candidate)
+            else:
+                remaining_eligible.append(candidate)
+
+        # Per-message aggregate check on what's left
         frozen_size = sum(candidate.size for candidate in frozen)
-        fresh_size = sum(candidate.size for candidate in eligible)
-        selected = (
-            select_fresh_to_replace(eligible, frozen_size, per_message_limit)
+        fresh_size = sum(candidate.size for candidate in remaining_eligible)
+        aggregate_selected = (
+            select_fresh_to_replace(remaining_eligible, frozen_size, per_message_limit)
             if frozen_size + fresh_size > per_message_limit
             else []
         )
 
+        selected = per_tool_selected + aggregate_selected
         selected_ids = {candidate.tool_use_id for candidate in selected}
         for candidate in candidates:
             if candidate.tool_use_id not in selected_ids:
                 state.seen_ids.add(candidate.tool_use_id)
 
         for candidate in selected:
-            persisted = persist_tool_result(
-                candidate.content,
-                candidate.tool_use_id,
-                memory=memory,
-                base_dir=base_dir,
-            )
-            replacement = build_large_tool_result_message(persisted)
-            state.seen_ids.add(candidate.tool_use_id)
-            state.replacements[candidate.tool_use_id] = replacement
-            replacement_map[candidate.tool_use_id] = replacement
-            changed = True
+            if persist_allowed:
+                persisted = persist_tool_result(
+                    candidate.content,
+                    candidate.tool_use_id,
+                    memory=memory,
+                    base_dir=base_dir,
+                )
+                replacement = build_large_tool_result_message(persisted)
+                state.seen_ids.add(candidate.tool_use_id)
+                state.replacements[candidate.tool_use_id] = replacement
+                replacement_map[candidate.tool_use_id] = replacement
+            else:
+                # Fork / summary agents: mark as seen but don't persist
+                state.seen_ids.add(candidate.tool_use_id)
 
     save_content_replacement_state(memory, state)
     if not replacement_map:
@@ -563,22 +752,384 @@ def microcompact_messages(
     return result if changed else messages
 
 
+DEFAULT_SNIP_TOKEN_BUDGET = 80_000
+# Minimum messages to keep (system + last N) so the model always has
+# immediate context even if it was over budget.
+SNIP_KEEP_RECENT = 6
+
+
+@dataclass(frozen=True)
+class SnipConfig:
+    enabled: bool
+    token_budget: int
+    keep_recent: int
+
+
+def get_snip_config() -> SnipConfig:
+    return SnipConfig(
+        enabled=True,
+        token_budget=DEFAULT_SNIP_TOKEN_BUDGET,
+        keep_recent=SNIP_KEEP_RECENT,
+    )
+
+
+def _estimate_message_tokens(message: dict) -> int:
+    content = message.get("content")
+    if isinstance(content, str):
+        return max(1, len(content) // BYTES_PER_TOKEN)
+    if isinstance(content, list):
+        total = 0
+        for block in content:
+            if isinstance(block, dict):
+                total += max(1, len(block.get("text", "") or block.get("content", "")) // BYTES_PER_TOKEN)
+        return max(1, total)
+    return 1
+
+
+def snip_messages_to_budget(
+    messages: list[dict],
+    *,
+    config: SnipConfig | None = None,
+) -> tuple[list[dict], int]:
+    """Drop the oldest non-system messages until total tokens fit within budget.
+
+    Mirrors Claude Code's HISTORY_SNIP: runs before microcompact so that
+    urgent over-budget situations are handled first.
+
+    Returns (new_messages, tokens_freed).
+    Protected tail (last *keep_recent* messages) and the system message are
+    never dropped.
+    """
+    resolved = config or get_snip_config()
+    if not resolved.enabled:
+        return messages, 0
+
+    total = sum(_estimate_message_tokens(m) for m in messages)
+    if total <= resolved.token_budget:
+        return messages, 0
+
+    # Split: system message (always keep), body, protected tail
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    non_system = [m for m in messages if m.get("role") != "system"]
+
+    keep_recent = max(1, resolved.keep_recent)
+    if len(non_system) <= keep_recent:
+        return messages, 0
+
+    tail = non_system[-keep_recent:]
+    candidates = non_system[:-keep_recent]  # oldest messages, eligible to drop
+
+    tokens_freed = 0
+    kept_candidates: list[dict] = []
+    # Drop from oldest first; stop as soon as we're under budget
+    for msg in candidates:
+        remaining_total = total - tokens_freed
+        if remaining_total <= resolved.token_budget:
+            kept_candidates.append(msg)
+        else:
+            tokens_freed += _estimate_message_tokens(msg)
+
+    if tokens_freed == 0:
+        return messages, 0
+
+    result = system_msgs + kept_candidates + tail
+    logger.info(
+        "[token optimization] history snip freed ~{} tokens ({} messages dropped)",
+        tokens_freed,
+        len(candidates) - len(kept_candidates),
+    )
+    return result, tokens_freed
+
+
+# ---------------------------------------------------------------------------
+# Opt4 extension: contextCollapse (read/search group folding)
+# Mirrors CC's collapseReadSearch.ts — fold consecutive collapsible tool uses
+# into compact summary messages.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CollapsedGroup:
+    """A group of consecutive collapsible tool-use / tool-result pairs."""
+    start_index: int
+    end_index: int  # exclusive
+    search_count: int
+    read_file_paths: list[str]
+    read_count: int
+    list_count: int
+    bash_count: int
+    tokens_before: int
+
+
+def _is_collapsible_message(message: dict, tool_name_map: dict[str, str]) -> bool:
+    """Return True if this message is part of a collapsible tool-use chain."""
+    role = message.get("role")
+    if role == "tool":
+        tool_name = get_tool_name_for_message(message, tool_name_map)
+        normalized = normalize_tool_name(tool_name)
+        return normalized in ALL_COLLAPSIBLE_TOOLS
+    if role == "assistant":
+        # An assistant message that ONLY has tool_calls (no text output) is
+        # absorbable into a collapse group (CC's "silent assistant" logic).
+        content = message.get("content")
+        has_text = isinstance(content, str) and content.strip()
+        has_tool_calls = bool(message.get("tool_calls"))
+        return has_tool_calls and not has_text
+    return False
+
+
+def _extract_read_path(message: dict) -> str | None:
+    """Try to extract a file path from a tool call's arguments."""
+    # Look for path-like argument in the corresponding assistant tool_call
+    tool_name = message.get("tool_name", "")
+    content = message.get("content", "")
+    if not content:
+        return None
+    # Heuristic: first line often contains the path for read tools
+    first_line = content.split("\n", 1)[0].strip()
+    if "/" in first_line and len(first_line) < 200:
+        return first_line
+    return None
+
+
+def collapse_read_search_groups(
+    messages: list[dict],
+    *,
+    min_group_size: int = 3,
+) -> tuple[list[dict], int]:
+    """Collapse consecutive read/search tool-use sequences into summaries.
+
+    Mirrors CC's ``collapseReadSearchGroups()`` — identifies groups of
+    consecutive collapsible messages, summarizes each group into a single
+    compact user message, and returns the reduced list.
+
+    Returns (new_messages, tokens_saved).
+    """
+    tool_name_map = build_tool_name_map(messages)
+
+    # Phase 1: identify collapsible groups
+    groups: list[CollapsedGroup] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        # Skip non-collapsible messages
+        if not _is_collapsible_message(messages[i], tool_name_map):
+            i += 1
+            continue
+        # Start a new group
+        start = i
+        search_count = 0
+        read_count = 0
+        list_count = 0
+        bash_count = 0
+        read_paths: list[str] = []
+        seen_paths: set[str] = set()
+        tokens = 0
+
+        while i < n and _is_collapsible_message(messages[i], tool_name_map):
+            msg = messages[i]
+            tokens += _estimate_message_tokens(msg)
+            if msg.get("role") == "tool":
+                tool_name = normalize_tool_name(
+                    get_tool_name_for_message(msg, tool_name_map)
+                )
+                if tool_name in COLLAPSIBLE_SEARCH_TOOLS:
+                    search_count += 1
+                if tool_name in COLLAPSIBLE_READ_TOOLS:
+                    read_count += 1
+                    path = _extract_read_path(msg)
+                    if path and path not in seen_paths:
+                        seen_paths.add(path)
+                        read_paths.append(path)
+                if tool_name in COLLAPSIBLE_LIST_TOOLS:
+                    list_count += 1
+                if tool_name in ("shell", "bash"):
+                    bash_count += 1
+            i += 1
+
+        group_size = i - start
+        if group_size >= min_group_size:
+            groups.append(CollapsedGroup(
+                start_index=start,
+                end_index=i,
+                search_count=search_count,
+                read_file_paths=read_paths,
+                read_count=read_count,
+                list_count=list_count,
+                bash_count=bash_count,
+                tokens_before=tokens,
+            ))
+
+    if not groups:
+        return messages, 0
+
+    # Phase 2: build collapsed messages
+    tokens_saved = 0
+    result: list[dict] = []
+    prev_end = 0
+
+    for group in groups:
+        # Keep messages before this group
+        result.extend(messages[prev_end:group.start_index])
+
+        # Build summary text (matches CC's createCollapsedGroup output)
+        parts: list[str] = []
+        if group.search_count:
+            parts.append(f"searched {group.search_count} pattern{'s' if group.search_count > 1 else ''}")
+        if group.read_count:
+            parts.append(f"read {group.read_count} file{'s' if group.read_count > 1 else ''}")
+        if group.list_count:
+            parts.append(f"listed {group.list_count} dir{'s' if group.list_count > 1 else ''}")
+        if group.bash_count:
+            parts.append(f"ran {group.bash_count} command{'s' if group.bash_count > 1 else ''}")
+
+        summary = ", ".join(parts) if parts else "performed tool operations"
+
+        # Include file paths for context
+        file_lines = ""
+        if group.read_file_paths:
+            paths = group.read_file_paths[:8]
+            file_lines = "\nFiles: " + ", ".join(paths)
+            if len(group.read_file_paths) > 8:
+                file_lines += f" (+{len(group.read_file_paths) - 8} more)"
+
+        collapsed_content = f"[Collapsed exploration: {summary}{file_lines}]"
+        collapsed_msg = {
+            "role": "assistant",
+            "content": collapsed_content,
+            "_collapsed": True,
+            "_collapsed_message_count": group.end_index - group.start_index,
+        }
+        result.append(collapsed_msg)
+
+        collapsed_tokens = _estimate_message_tokens(collapsed_msg)
+        tokens_saved += group.tokens_before - collapsed_tokens
+        prev_end = group.end_index
+
+    result.extend(messages[prev_end:])
+
+    if tokens_saved > 0:
+        logger.info(
+            "[token optimization] contextCollapse folded {} group(s), ~{} tokens saved",
+            len(groups),
+            tokens_saved,
+        )
+    return result, tokens_saved
+
+
+# ---------------------------------------------------------------------------
+# Opt4 extension: autocompact (last-resort full summarization)
+# Mirrors CC's autocompact — when context still over budget after all other
+# optimizations, summarize the older portion into a compact message.
+# ---------------------------------------------------------------------------
+
+AUTOCOMPACT_TOKEN_BUDGET = 100_000  # trigger threshold
+AUTOCOMPACT_KEEP_RECENT = 8  # messages to preserve verbatim
+
+
+def autocompact_messages(
+    messages: list[dict],
+    *,
+    token_budget: int = AUTOCOMPACT_TOKEN_BUDGET,
+    keep_recent: int = AUTOCOMPACT_KEEP_RECENT,
+) -> tuple[list[dict], int]:
+    """Summarize oldest messages when total tokens exceed *token_budget*.
+
+    Unlike snip (which drops messages), autocompact replaces older messages
+    with a compact textual summary, preserving the gist of the conversation.
+    This is a synchronous heuristic-based summary (no LLM call) that captures
+    the key information from each message.
+
+    Returns (new_messages, tokens_freed).
+    """
+    total = sum(_estimate_message_tokens(m) for m in messages)
+    if total <= token_budget:
+        return messages, 0
+
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    non_system = [m for m in messages if m.get("role") != "system"]
+
+    if len(non_system) <= keep_recent:
+        return messages, 0
+
+    tail = non_system[-keep_recent:]
+    to_summarize = non_system[:-keep_recent]
+
+    if not to_summarize:
+        return messages, 0
+
+    # Build a compact summary of the older messages
+    summary_parts: list[str] = []
+    for msg in to_summarize:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") for b in content if isinstance(b, dict)
+            )
+        if not isinstance(content, str):
+            content = str(content)
+        trimmed = content[:300].strip()
+        if trimmed:
+            summary_parts.append(f"[{role}] {trimmed}")
+
+    summary_text = "\n".join(summary_parts[:30])
+    if len(summary_parts) > 30:
+        summary_text += f"\n... (+{len(summary_parts) - 30} more messages)"
+
+    compact_msg = {
+        "role": "user",
+        "content": (
+            "[Autocompact summary of earlier conversation]\n" + summary_text
+        ),
+        "_autocompacted": True,
+    }
+
+    tokens_before = sum(_estimate_message_tokens(m) for m in to_summarize)
+    tokens_after = _estimate_message_tokens(compact_msg)
+    tokens_freed = tokens_before - tokens_after
+
+    result = system_msgs + [compact_msg] + tail
+
+    if tokens_freed > 0:
+        logger.info(
+            "[token optimization] autocompact summarized {} messages, ~{} tokens freed",
+            len(to_summarize),
+            tokens_freed,
+        )
+    return result, tokens_freed
+
+
 def apply_token_optimizations(
     messages: list[dict],
     memory: Any | None = None,
     base_dir: Path | None = None,
     *,
     is_main_thread: bool = True,
+    snip_config: SnipConfig | None = None,
+    enable_context_collapse: bool = True,
+    enable_autocompact: bool = True,
+    query_source: str | None = None,
 ) -> list[dict]:
+    # 1. Externalize large tool outputs (session-level budget)
     optimized = apply_tool_result_budget(
         messages,
         memory=memory,
         base_dir=base_dir,
+        query_source=query_source,
     )
+    # 2. Snip over-budget history (HISTORY_SNIP) — before microcompact
+    optimized, _ = snip_messages_to_budget(optimized, config=snip_config)
+    # 3. Clear old compactable tool results (time-based microcompact)
     optimized = microcompact_messages(
         optimized,
         is_main_thread=is_main_thread,
     )
+    # 4. Context Collapse: fold consecutive read/search groups (CC-style)
+    if enable_context_collapse:
+        optimized, _ = collapse_read_search_groups(optimized)
+    # 5. Autocompact: last-resort summarization when still over budget
+    if enable_autocompact:
+        optimized, _ = autocompact_messages(optimized)
     return optimized
 
 
@@ -613,6 +1164,7 @@ def build_llm_view(
     base_dir: Path | None = None,
     *,
     is_main_thread: bool = True,
+    snip_config: "SnipConfig | None" = None,
 ) -> list[dict]:
     """Build the projected prompt view from raw history."""
     if not messages:
@@ -631,6 +1183,7 @@ def build_llm_view(
         memory=memory,
         base_dir=base_dir,
         is_main_thread=is_main_thread,
+        snip_config=snip_config,
     )
     if system_message is not None:
         return [system_message, *optimized]
@@ -757,3 +1310,94 @@ def estimate_total_tokens_from_chars(messages: list[dict]) -> int:
         if isinstance(content, str):
             total_chars += len(content)
     return int(total_chars / BYTES_PER_TOKEN)
+
+
+# ---------------------------------------------------------------------------
+# Opt3: Prompt cache control markers (Anthropic API)
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_MODEL_PREFIXES = ("claude", "anthropic/", "custom_anthropic/")
+
+
+def is_anthropic_model(model: str) -> bool:
+    """Return True if *model* routes to the Anthropic API via litellm."""
+    lower = model.lower()
+    return any(lower.startswith(p) for p in _ANTHROPIC_MODEL_PREFIXES)
+
+
+def _make_text_block(text: str) -> dict[str, Any]:
+    return {"type": "text", "text": text}
+
+
+def _last_text_block_index(blocks: list[dict]) -> int | None:
+    """Return the index of the last block whose type is 'text', or None."""
+    for i in range(len(blocks) - 1, -1, -1):
+        if blocks[i].get("type") == "text":
+            return i
+    return None
+
+
+def _ensure_block_content(message: dict) -> list[dict]:
+    """Return message content as a list of blocks, converting str if needed."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return [_make_text_block(content)]
+    if isinstance(content, list):
+        return list(content)
+    return []
+
+
+def inject_cache_control_markers(
+    messages: list[dict],
+    *,
+    skip_cache_write: bool = False,
+) -> list[dict]:
+    """Inject Anthropic prompt-cache markers into a message list.
+
+    Mirrors Claude Code's ``addCacheBreakpoints()`` strategy:
+    - System message: mark the last text block with cache_control.
+    - Conversation: mark the last text block of the last (or
+      second-to-last when *skip_cache_write*) user/assistant message
+      that has non-empty text content.
+
+    *skip_cache_write* is used for fire-and-forget / fork queries:
+    the last message is a short delegation directive whose prefix will
+    never be reused, so placing the cache breakpoint one message earlier
+    preserves cache for the parent conversation prefix.
+
+    Returns a *new* list; input messages are not mutated.
+    """
+    from copy import deepcopy
+
+    result = deepcopy(messages)
+    cache_marker: dict[str, Any] = {"type": "ephemeral"}
+
+    # 1. Mark last text block of system message
+    for msg in result:
+        if msg.get("role") == "system":
+            blocks = _ensure_block_content(msg)
+            idx = _last_text_block_index(blocks)
+            if idx is not None:
+                blocks[idx] = {**blocks[idx], "cache_control": cache_marker}
+                msg["content"] = blocks
+            break
+
+    # 2. Mark last text block of the Nth-from-last user/assistant message
+    #    Normal: last message.  skip_cache_write: second-to-last.
+    hits_needed = 2 if skip_cache_write else 1
+    hits = 0
+    for msg in reversed(result):
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        hits += 1
+        if hits < hits_needed:
+            continue
+        blocks = _ensure_block_content(msg)
+        idx = _last_text_block_index(blocks)
+        if idx is not None and blocks[idx].get("text", "").strip():
+            blocks[idx] = {**blocks[idx], "cache_control": cache_marker}
+            msg["content"] = blocks
+            break
+
+    return result

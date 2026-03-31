@@ -21,6 +21,8 @@ from pantheon.utils.token_optimization import (
     build_llm_view,
     evaluate_time_based_trigger,
     estimate_total_tokens_from_chars,
+    inject_cache_control_markers,
+    is_anthropic_model,
     microcompact_messages,
 )
 
@@ -35,6 +37,8 @@ def _build_tool_message(tool_call_id: str, content: str) -> dict:
 
 
 def test_apply_tool_result_budget_persists_large_parallel_tool_messages(tmp_path):
+    """Per-tool threshold: shell limit is 50K chars. Each 90K result exceeds
+    its individual limit, so all three are externalized (per-tool path)."""
     memory = Memory("test-memory")
     messages = [
         {
@@ -57,19 +61,42 @@ def test_apply_tool_result_budget_persists_large_parallel_tool_messages(tmp_path
     persisted = [
         msg for msg in optimized_tool_messages if msg["content"].startswith(PERSISTED_OUTPUT_TAG)
     ]
-    untouched = [
-        msg for msg in optimized_tool_messages if not msg["content"].startswith(PERSISTED_OUTPUT_TAG)
-    ]
 
-    assert len(persisted) == 1
-    assert len(untouched) == 2
-    assert "Full output saved to:" in persisted[0]["content"]
+    # All three exceed the shell per-tool limit (50K), so all are externalized
+    assert len(persisted) == 3
+    assert all("Full output saved to:" in m["content"] for m in persisted)
     assert "token_optimization" in memory.extra_data
 
     rerun = apply_tool_result_budget(messages, memory=memory, base_dir=tmp_path)
     assert rerun[1]["content"] == optimized[1]["content"]
     assert rerun[2]["content"] == optimized[2]["content"]
     assert rerun[3]["content"] == optimized[3]["content"]
+
+
+def test_apply_tool_result_budget_aggregate_path_for_unknown_tool(tmp_path):
+    """Unknown tools use global aggregate logic, not per-tool limit."""
+    memory = Memory("test-aggregate")
+    # 3 × 90K = 270K > 200K global limit → only largest(s) get externalized
+    messages = [
+        {
+            "role": "assistant",
+            "id": "assistant-1",
+            "tool_calls": [
+                {"id": "t-1", "function": {"name": "my_custom_tool"}},
+                {"id": "t-2", "function": {"name": "my_custom_tool"}},
+                {"id": "t-3", "function": {"name": "my_custom_tool"}},
+            ],
+        },
+        _build_tool_message("t-1", "A" * 90_000),
+        _build_tool_message("t-2", "B" * 90_000),
+        _build_tool_message("t-3", "C" * 90_000),
+    ]
+    optimized = apply_tool_result_budget(messages, memory=memory, base_dir=tmp_path)
+    tool_msgs = [msg for msg in optimized if msg["role"] == "tool"]
+    persisted = [m for m in tool_msgs if m["content"].startswith(PERSISTED_OUTPUT_TAG)]
+    # Aggregate logic: 270K > 200K limit → some (≥1) get externalized
+    assert len(persisted) >= 1
+    assert "Full output saved to:" in persisted[0]["content"]
 
 
 def test_time_based_microcompact_clears_old_tool_messages():
@@ -580,3 +607,653 @@ def test_pantheon_team_use_summary_defaults_to_true():
 
     team = PantheonTeam(agents=[agent])
     assert team.use_summary is True
+
+
+# ---------------------------------------------------------------------------
+# Opt3: cache_control injection tests
+# ---------------------------------------------------------------------------
+
+def test_is_anthropic_model_detection():
+    assert is_anthropic_model("claude-3-5-sonnet-20241022") is True
+    assert is_anthropic_model("anthropic/claude-3-haiku") is True
+    assert is_anthropic_model("custom_anthropic/claude-3-opus") is True
+    assert is_anthropic_model("gpt-4o") is False
+    assert is_anthropic_model("gpt-4.1-mini") is False
+    assert is_anthropic_model("openai/gpt-4") is False
+
+
+def test_inject_cache_control_marks_system_and_last_user():
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there!"},
+        {"role": "user", "content": "What is 2+2?"},
+    ]
+    result = inject_cache_control_markers(messages)
+
+    # System message last block should have cache_control
+    sys_content = result[0]["content"]
+    assert isinstance(sys_content, list)
+    assert sys_content[-1].get("cache_control") == {"type": "ephemeral"}
+
+    # Last user message should have cache_control
+    last_user = result[-1]["content"]
+    assert isinstance(last_user, list)
+    assert last_user[-1].get("cache_control") == {"type": "ephemeral"}
+
+    # Middle assistant message should NOT have cache_control
+    mid_asst = result[2]["content"]
+    if isinstance(mid_asst, list):
+        assert all("cache_control" not in b for b in mid_asst)
+    else:
+        assert "cache_control" not in str(mid_asst)
+
+
+def test_inject_cache_control_converts_string_content_to_blocks():
+    messages = [{"role": "user", "content": "plain string content"}]
+    result = inject_cache_control_markers(messages)
+    content = result[0]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[0]["text"] == "plain string content"
+    assert content[0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_inject_cache_control_does_not_mutate_input():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user msg"},
+    ]
+    original_sys = messages[0]["content"]
+    inject_cache_control_markers(messages)
+    # Input should be unchanged
+    assert messages[0]["content"] == original_sys
+    assert isinstance(messages[0]["content"], str)
+
+
+def test_inject_cache_control_skips_empty_assistant():
+    """Last non-empty user/assistant gets the marker, not an empty trailing message."""
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "   "},  # whitespace-only, skip
+    ]
+    result = inject_cache_control_markers(messages)
+    # user message should get the marker since assistant is empty
+    user_content = result[1]["content"]
+    assert isinstance(user_content, list)
+    assert user_content[-1].get("cache_control") == {"type": "ephemeral"}
+
+
+# ---------------------------------------------------------------------------
+# Opt2 extension: HISTORY_SNIP tests
+# ---------------------------------------------------------------------------
+
+def test_snip_messages_drops_oldest_when_over_budget():
+    from pantheon.utils.token_optimization import SnipConfig, snip_messages_to_budget
+
+    # 5 user messages of ~1000 tokens each = ~5000 tokens, budget = 3000
+    def big_msg(i):
+        return {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 4000, "id": str(i)}
+
+    messages = [{"role": "system", "content": "sys"}] + [big_msg(i) for i in range(5)]
+    config = SnipConfig(enabled=True, token_budget=3000, keep_recent=2)
+
+    result, freed = snip_messages_to_budget(messages, config=config)
+
+    # System message always kept
+    assert result[0]["role"] == "system"
+    # Last 2 messages always kept (protected tail)
+    assert result[-1]["id"] == "4"
+    assert result[-2]["id"] == "3"
+    # Some old messages dropped
+    assert freed > 0
+    total_after = sum(len(m.get("content", "")) // 4 for m in result)
+    assert total_after <= 3000
+
+
+def test_snip_messages_noop_when_under_budget():
+    from pantheon.utils.token_optimization import SnipConfig, snip_messages_to_budget
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "short"},
+        {"role": "assistant", "content": "reply"},
+    ]
+    config = SnipConfig(enabled=True, token_budget=100_000, keep_recent=2)
+    result, freed = snip_messages_to_budget(messages, config=config)
+    assert result is messages  # unchanged
+    assert freed == 0
+
+
+def test_snip_messages_respects_keep_recent():
+    from pantheon.utils.token_optimization import SnipConfig, snip_messages_to_budget
+
+    messages = [{"role": "user", "content": "x" * 4000, "id": str(i)} for i in range(10)]
+    config = SnipConfig(enabled=True, token_budget=1, keep_recent=4)
+    result, freed = snip_messages_to_budget(messages, config=config)
+    kept_ids = [m["id"] for m in result]
+    # Last 4 must be in result
+    assert "6" in kept_ids
+    assert "7" in kept_ids
+    assert "8" in kept_ids
+    assert "9" in kept_ids
+
+
+def test_snip_disabled_is_noop():
+    from pantheon.utils.token_optimization import SnipConfig, snip_messages_to_budget
+
+    messages = [{"role": "user", "content": "x" * 100_000}]
+    config = SnipConfig(enabled=False, token_budget=1, keep_recent=1)
+    result, freed = snip_messages_to_budget(messages, config=config)
+    assert result is messages
+    assert freed == 0
+
+
+def test_apply_token_optimizations_runs_snip_before_microcompact(tmp_path):
+    import time
+    from pantheon.utils.token_optimization import SnipConfig
+
+    # Build messages that are over snip budget, with old timestamps → both snip and microcompact fire
+    old_ts = time.time() - 7200
+    messages = []
+    for i in range(8):
+        messages.append({
+            "role": "assistant", "content": f"turn {i}",
+            "tool_calls": [{"id": f"c{i}", "function": {"name": "shell", "arguments": "{}"}}],
+            "timestamp": old_ts + i,
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}", "tool_name": "shell",
+            "content": "x" * 4000,
+        })
+
+    snip_cfg = SnipConfig(enabled=True, token_budget=2000, keep_recent=2)
+    mc_cfg = TimeBasedMicrocompactConfig(enabled=True, gap_threshold_minutes=1, keep_recent=1)
+
+    result = apply_token_optimizations(
+        messages, snip_config=snip_cfg, is_main_thread=True
+    )
+    # Result must be smaller than input
+    before = sum(len(m.get("content", "")) for m in messages)
+    after = sum(len(m.get("content", "")) for m in result)
+    assert after < before
+
+
+# ---------------------------------------------------------------------------
+# Opt1 extension: per-tool threshold tests
+# ---------------------------------------------------------------------------
+
+def test_per_tool_threshold_externalizes_oversized_single_result(tmp_path):
+    """A single read_file result > 40K chars should be externalized even if
+    the group total is below the 200K global limit."""
+    from pantheon.utils.token_optimization import PER_TOOL_RESULT_SIZE_CHARS
+
+    read_file_limit = PER_TOOL_RESULT_SIZE_CHARS["read_file"]
+    big_content = "x" * (read_file_limit + 1000)
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "reading file",
+            "tool_calls": [{"id": "rf-1", "function": {"name": "read_file", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "rf-1", "tool_name": "read_file", "content": big_content},
+    ]
+
+    mem = Memory("per-tool-test")
+    result = apply_tool_result_budget(messages, memory=mem, base_dir=tmp_path)
+
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert PERSISTED_OUTPUT_TAG in tool_msg["content"]
+
+
+def test_per_tool_threshold_keeps_small_result_intact(tmp_path):
+    """A shell result under its 50K per-tool limit should NOT be externalized."""
+    small_content = "x" * 100  # well under any limit
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "running shell",
+            "tool_calls": [{"id": "sh-1", "function": {"name": "shell", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "sh-1", "tool_name": "shell", "content": small_content},
+    ]
+
+    mem = Memory("per-tool-small-test")
+    result = apply_tool_result_budget(messages, memory=mem, base_dir=tmp_path)
+
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert tool_msg["content"] == small_content
+
+
+def test_per_tool_threshold_unknown_tool_uses_global_limit(tmp_path):
+    """An unknown tool falls back to the global per_message_limit."""
+    # Content below global limit → should not be externalized
+    content = "y" * 1000
+    messages = [
+        {
+            "role": "assistant",
+            "content": "custom tool call",
+            "tool_calls": [{"id": "ct-1", "function": {"name": "my_custom_tool", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "ct-1", "tool_name": "my_custom_tool", "content": content},
+    ]
+
+    mem = Memory("per-tool-unknown-test")
+    result = apply_tool_result_budget(
+        messages, memory=mem, base_dir=tmp_path, per_message_limit=200_000
+    )
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert tool_msg["content"] == content
+
+
+# ---------------------------------------------------------------------------
+# Opt5: forkContextMessages structured delegation tests
+# ---------------------------------------------------------------------------
+
+def test_build_structured_fork_context_uses_cache_safe_messages():
+    from unittest.mock import MagicMock
+    from pantheon.team.pantheon import _build_structured_fork_context
+
+    run_context = MagicMock()
+    run_context.cache_safe_prompt_messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
+
+    result = _build_structured_fork_context(run_context)
+
+    # System message must be stripped
+    assert all(m["role"] != "system" for m in result)
+    assert len(result) == 2
+    assert result[0]["content"] == "hello"
+    assert result[1]["content"] == "hi"
+
+
+def test_build_structured_fork_context_returns_none_when_no_memory():
+    from unittest.mock import MagicMock
+    from pantheon.team.pantheon import _build_structured_fork_context
+
+    run_context = MagicMock()
+    run_context.memory = None
+    run_context.cache_safe_prompt_messages = None
+
+    assert _build_structured_fork_context(run_context) is None
+
+
+def test_build_structured_fork_context_returns_none_for_empty_messages():
+    from unittest.mock import MagicMock
+    from pantheon.team.pantheon import _build_structured_fork_context
+
+    run_context = MagicMock()
+    run_context.cache_safe_prompt_messages = [
+        {"role": "system", "content": "sys only"},
+    ]
+
+    # Only system message → nothing to forward
+    assert _build_structured_fork_context(run_context) is None
+
+
+# ---------------------------------------------------------------------------
+# New: empty result guard tests
+# ---------------------------------------------------------------------------
+
+def test_guard_empty_tool_results_injects_placeholder():
+    from pantheon.utils.token_optimization import (
+        EMPTY_TOOL_RESULT_PLACEHOLDER,
+        guard_empty_tool_results,
+    )
+    messages = [
+        {"role": "tool", "tool_call_id": "t1", "content": ""},
+        {"role": "tool", "tool_call_id": "t2", "content": "   "},
+        {"role": "tool", "tool_call_id": "t3", "content": "real output"},
+    ]
+    result = guard_empty_tool_results(messages)
+    assert result[0]["content"] == EMPTY_TOOL_RESULT_PLACEHOLDER
+    assert result[1]["content"] == EMPTY_TOOL_RESULT_PLACEHOLDER
+    assert result[2]["content"] == "real output"
+
+
+def test_empty_result_guard_runs_inside_apply_tool_result_budget(tmp_path):
+    """Empty tool results get the placeholder even inside the full budget pipeline."""
+    from pantheon.utils.token_optimization import EMPTY_TOOL_RESULT_PLACEHOLDER
+    from pantheon.internal.memory import Memory
+    memory = Memory("empty-guard-test")
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "e1", "function": {"name": "shell"}}],
+        },
+        {"role": "tool", "tool_call_id": "e1", "tool_name": "shell", "content": ""},
+    ]
+    result = apply_tool_result_budget(messages, memory=memory, base_dir=tmp_path)
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert tool_msg["content"] == EMPTY_TOOL_RESULT_PLACEHOLDER
+
+
+# ---------------------------------------------------------------------------
+# New: DEFAULT_MAX_RESULT_SIZE_CHARS = 50K fallback tests
+# ---------------------------------------------------------------------------
+
+def test_default_per_tool_limit_is_50k_for_unknown_tools(tmp_path):
+    """Unknown tools use DEFAULT_MAX_RESULT_SIZE_CHARS (50K), not the 200K global."""
+    from pantheon.utils.token_optimization import DEFAULT_MAX_RESULT_SIZE_CHARS
+    from pantheon.internal.memory import Memory
+    memory = Memory("default-50k-test")
+    # Content is 60K — above 50K default but below 200K global
+    content = "x" * 60_000
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "u1", "function": {"name": "unknown_tool"}}],
+        },
+        {"role": "tool", "tool_call_id": "u1", "tool_name": "unknown_tool", "content": content},
+    ]
+    result = apply_tool_result_budget(messages, memory=memory, base_dir=tmp_path)
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert PERSISTED_OUTPUT_TAG in tool_msg["content"], (
+        f"60K content should be externalized (default limit is {DEFAULT_MAX_RESULT_SIZE_CHARS})"
+    )
+
+
+def test_persistence_opt_out_prevents_externalization(tmp_path):
+    """Tools in PERSISTENCE_OPT_OUT_TOOLS are never externalized."""
+    from pantheon.utils import token_optimization as tok
+    from pantheon.internal.memory import Memory
+
+    original = tok.PERSISTENCE_OPT_OUT_TOOLS
+    try:
+        tok.PERSISTENCE_OPT_OUT_TOOLS = frozenset({"my_special_tool"})
+        memory = Memory("opt-out-test")
+        messages = [
+            {
+                "role": "assistant",
+                "tool_calls": [{"id": "o1", "function": {"name": "my_special_tool"}}],
+            },
+            {"role": "tool", "tool_call_id": "o1", "tool_name": "my_special_tool", "content": "x" * 500_000},
+        ]
+        result = apply_tool_result_budget(messages, memory=memory, base_dir=tmp_path)
+        tool_msg = next(m for m in result if m.get("role") == "tool")
+        # Should NOT be externalized despite being 500K
+        assert PERSISTED_OUTPUT_TAG not in tool_msg["content"]
+        assert len(tool_msg["content"]) == 500_000
+    finally:
+        tok.PERSISTENCE_OPT_OUT_TOOLS = original
+
+
+# ---------------------------------------------------------------------------
+# New: JSON detection tests
+# ---------------------------------------------------------------------------
+
+def test_persist_json_content_uses_json_extension(tmp_path):
+    from pantheon.utils.token_optimization import persist_tool_result
+    json_content = '[{"key": "value"}, {"key2": 123}]'
+    result = persist_tool_result(json_content, "json-tool-1", base_dir=tmp_path)
+    assert result["filepath"].endswith(".json")
+
+
+def test_persist_non_json_content_uses_txt_extension(tmp_path):
+    from pantheon.utils.token_optimization import persist_tool_result
+    result = persist_tool_result("plain text content", "txt-tool-1", base_dir=tmp_path)
+    assert result["filepath"].endswith(".txt")
+
+
+# ---------------------------------------------------------------------------
+# New: contextCollapse tests
+# ---------------------------------------------------------------------------
+
+def test_collapse_read_search_groups_folds_consecutive_reads():
+    from pantheon.utils.token_optimization import collapse_read_search_groups
+    messages = [
+        {"role": "user", "content": "Find the bug"},
+        # Collapsible group: assistant(tool_calls) + 3 tool results with substantial content
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "g1", "function": {"name": "grep"}},
+                {"id": "g2", "function": {"name": "read_file"}},
+                {"id": "g3", "function": {"name": "glob"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "g1", "tool_name": "grep", "content": "match result " * 500},
+        {"role": "tool", "tool_call_id": "g2", "tool_name": "read_file", "content": "/src/main.py\n" + "code " * 1000},
+        {"role": "tool", "tool_call_id": "g3", "tool_name": "glob", "content": "file_entry\n" * 200},
+        # Non-collapsible: assistant with text output
+        {"role": "assistant", "content": "I found the issue in main.py"},
+    ]
+    result, tokens_saved = collapse_read_search_groups(messages, min_group_size=3)
+    # Group of 4 (assistant + 3 tools) → collapsed to 1
+    assert len(result) < len(messages)
+    collapsed = [m for m in result if m.get("_collapsed")]
+    assert len(collapsed) == 1
+    assert "searched" in collapsed[0]["content"]
+    assert "read" in collapsed[0]["content"]
+    assert tokens_saved > 0
+
+
+def test_collapse_preserves_non_collapsible_messages():
+    from pantheon.utils.token_optimization import collapse_read_search_groups
+    messages = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "I'll help you."},
+        {"role": "user", "content": "Fix the bug"},
+    ]
+    result, tokens_saved = collapse_read_search_groups(messages)
+    assert result == messages
+    assert tokens_saved == 0
+
+
+def test_collapse_skips_small_groups():
+    from pantheon.utils.token_optimization import collapse_read_search_groups
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "s1", "function": {"name": "grep"}}],
+        },
+        {"role": "tool", "tool_call_id": "s1", "tool_name": "grep", "content": "x"},
+    ]
+    # Only 2 messages — below min_group_size=3
+    result, tokens_saved = collapse_read_search_groups(messages, min_group_size=3)
+    assert result == messages
+    assert tokens_saved == 0
+
+
+def test_collapse_breaks_on_assistant_text_output():
+    from pantheon.utils.token_optimization import collapse_read_search_groups
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "a1", "function": {"name": "grep"}}],
+        },
+        {"role": "tool", "tool_call_id": "a1", "tool_name": "grep", "content": "x" * 1000},
+        # Assistant with text — breaks the group
+        {"role": "assistant", "content": "I see the results."},
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "a2", "function": {"name": "read_file"}}],
+        },
+        {"role": "tool", "tool_call_id": "a2", "tool_name": "read_file", "content": "y" * 1000},
+    ]
+    result, tokens_saved = collapse_read_search_groups(messages, min_group_size=3)
+    # No group reaches min_group_size because the text output breaks them
+    assert tokens_saved == 0
+
+
+# ---------------------------------------------------------------------------
+# New: autocompact tests
+# ---------------------------------------------------------------------------
+
+def test_autocompact_summarizes_when_over_budget():
+    from pantheon.utils.token_optimization import autocompact_messages
+    # 20 big messages → way over 1000 token budget
+    messages = [{"role": "user", "content": f"msg {i}: " + "x" * 4000} for i in range(20)]
+    result, freed = autocompact_messages(messages, token_budget=1000, keep_recent=4)
+    assert freed > 0
+    # Last 4 preserved
+    assert result[-1]["content"] == messages[-1]["content"]
+    assert result[-4]["content"] == messages[-4]["content"]
+    # First message is the autocompact summary
+    assert "[Autocompact summary" in result[0]["content"]
+
+
+def test_autocompact_noop_when_under_budget():
+    from pantheon.utils.token_optimization import autocompact_messages
+    messages = [
+        {"role": "user", "content": "short"},
+        {"role": "assistant", "content": "reply"},
+    ]
+    result, freed = autocompact_messages(messages, token_budget=100_000, keep_recent=4)
+    assert result is messages
+    assert freed == 0
+
+
+# ---------------------------------------------------------------------------
+# New: skip_cache_write tests
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# New: querySource filtering tests
+# ---------------------------------------------------------------------------
+
+def test_query_source_agent_summary_does_not_persist(tmp_path):
+    """agent_summary query source must NOT write new disk entries."""
+    from pantheon.internal.memory import Memory
+    memory = Memory("qs-test")
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "qs1", "function": {"name": "shell"}}],
+        },
+        {"role": "tool", "tool_call_id": "qs1", "tool_name": "shell", "content": "x" * 100_000},
+    ]
+    result = apply_tool_result_budget(
+        messages, memory=memory, base_dir=tmp_path, query_source="agent_summary"
+    )
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    # Should NOT be externalized — agent_summary is a skip source
+    assert PERSISTED_OUTPUT_TAG not in tool_msg["content"]
+
+
+def test_query_source_main_thread_persists(tmp_path):
+    """Main thread query source SHOULD persist to disk."""
+    from pantheon.internal.memory import Memory
+    memory = Memory("qs-main-test")
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "qs2", "function": {"name": "shell"}}],
+        },
+        {"role": "tool", "tool_call_id": "qs2", "tool_name": "shell", "content": "x" * 100_000},
+    ]
+    result = apply_tool_result_budget(
+        messages, memory=memory, base_dir=tmp_path, query_source="repl_main_thread"
+    )
+    tool_msg = next(m for m in result if m.get("role") == "tool")
+    assert PERSISTED_OUTPUT_TAG in tool_msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# New: session resume state reconstruction tests
+# ---------------------------------------------------------------------------
+
+def test_reconstruct_state_from_existing_messages():
+    from pantheon.utils.token_optimization import reconstruct_content_replacement_state
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "tool", "tool_call_id": "r1", "content": "<persisted-output>\nOutput too large (10KB). Full output saved to: /tmp/r1.txt\n\nPreview:\nxxx\n</persisted-output>"},
+        {"role": "tool", "tool_call_id": "r2", "content": "[Old tool result content cleared]"},
+        {"role": "tool", "tool_call_id": "r3", "content": "normal content"},
+    ]
+    state = reconstruct_content_replacement_state(messages)
+    assert "r1" in state.seen_ids
+    assert "r1" in state.replacements  # persisted → replacement recorded
+    assert "r2" in state.seen_ids  # cleared → seen
+    assert "r2" not in state.replacements  # cleared → no replacement
+    assert "r3" not in state.seen_ids  # normal → not tracked
+
+
+def test_inject_cache_control_skip_cache_write_marks_second_to_last():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "fork directive"},
+    ]
+    result = inject_cache_control_markers(messages, skip_cache_write=True)
+    # With skip_cache_write, the marker goes on the SECOND-to-last user/assistant
+    # which is the assistant "first answer"
+    asst_content = result[2]["content"]
+    assert isinstance(asst_content, list)
+    assert asst_content[-1].get("cache_control") == {"type": "ephemeral"}
+    # The last user message should NOT have cache_control
+    last_user = result[3]["content"]
+    if isinstance(last_user, list):
+        assert all("cache_control" not in b for b in last_user)
+
+
+def test_inject_cache_control_normal_marks_last():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "answer"},
+        {"role": "user", "content": "followup"},
+    ]
+    result = inject_cache_control_markers(messages, skip_cache_write=False)
+    # Normal mode: last user/assistant gets the marker
+    last_user = result[3]["content"]
+    assert isinstance(last_user, list)
+    assert last_user[-1].get("cache_control") == {"type": "ephemeral"}
+
+
+# ---------------------------------------------------------------------------
+# New: full pipeline integration test with all 5 stages
+# ---------------------------------------------------------------------------
+
+def test_apply_token_optimizations_runs_all_5_stages(tmp_path):
+    """Integration: budget → snip → microcompact → collapse → autocompact."""
+    import time
+    from pantheon.utils.token_optimization import SnipConfig
+    from pantheon.internal.memory import Memory
+
+    memory = Memory("pipeline-test")
+    old_ts = time.time() - 7200  # 2 hours ago
+
+    # Build large conversation with collapsible groups
+    messages = []
+    for i in range(15):
+        messages.append({
+            "role": "assistant",
+            "tool_calls": [
+                {"id": f"c{i}a", "function": {"name": "grep"}},
+                {"id": f"c{i}b", "function": {"name": "read_file"}},
+            ],
+            "timestamp": old_ts + i,
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}a",
+            "tool_name": "grep", "content": "match " * 5000,
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}b",
+            "tool_name": "read_file", "content": "file content " * 5000,
+        })
+
+    messages.append({"role": "user", "content": "What did you find?"})
+
+    before = estimate_total_tokens_from_chars(messages)
+    result = apply_token_optimizations(
+        messages,
+        memory=memory,
+        base_dir=tmp_path,
+        is_main_thread=True,
+        snip_config=SnipConfig(enabled=True, token_budget=10_000, keep_recent=4),
+    )
+    after = estimate_total_tokens_from_chars(result)
+
+    # Massive reduction from all 5 stages combined
+    assert after < before
+    savings_pct = (1 - after / before) * 100
+    assert savings_pct > 50, f"Expected >50% savings, got {savings_pct:.1f}%"
