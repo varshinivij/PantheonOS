@@ -166,7 +166,10 @@ class CodexAdapter(BaseAdapter):
             async with httpx.AsyncClient(timeout=120) as client:
                 async with client.stream("POST", endpoint, headers=headers, json=body) as resp:
                     if resp.status_code == 401:
-                        raise APIConnectionError("Codex OAuth token expired or invalid (401)")
+                        raise APIConnectionError(
+                            "[OAUTH_REQUIRED] Codex OAuth token expired. "
+                            "Please re-login in Settings → API Keys → OAuth."
+                        )
                     elif resp.status_code == 429:
                         raise RateLimitError(f"Codex rate limited (429)")
                     elif resp.status_code >= 500:

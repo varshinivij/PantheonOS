@@ -577,8 +577,8 @@ async def acompletion(
         effective_api_key = oauth.get_access_token(auto_refresh=True)
         if not effective_api_key:
             raise RuntimeError(
-                "Codex OAuth not authenticated. Run CodexOAuthManager().login() "
-                "or import tokens from Codex CLI with CodexOAuthManager().import_from_codex_cli()"
+                "[OAUTH_REQUIRED] Codex OAuth session expired or not configured. "
+                "Please re-login in Settings → API Keys → OAuth."
             )
         effective_base_url = provider_config.get("base_url")
         effective_model = model_name
