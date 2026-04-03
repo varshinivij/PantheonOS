@@ -228,6 +228,12 @@ class ChatRoom(ToolSet):
             task = asyncio.create_task(self._ensure_plugins())
             self._background_tasks.add(task)
 
+        # Update litellm model cost map in background (non-blocking)
+        # This fetches latest model metadata (context window sizes, pricing) from GitHub.
+        # Without this, newer models (e.g. gpt-5.4) fall back to 200K max_tokens.
+        # Same logic as REPL's _update_litellm_cost_map() in __main__.py.
+        asyncio.create_task(self._update_litellm_cost_map())
+
         # Register activity callback for _ping responses (used by Hub idle cleanup)
         if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'set_activity_callback'):
             self.worker.set_activity_callback(self._get_activity_status)
@@ -249,6 +255,15 @@ class ChatRoom(ToolSet):
             "bg_tasks": bg_task_count,
             "has_active_tasks": has_active_tasks,
         }
+
+    @staticmethod
+    async def _update_litellm_cost_map():
+        """Background task to update litellm model cost map.
+
+        Delegates to the shared utility in pantheon.utils.llm.
+        """
+        from pantheon.utils.llm import update_litellm_cost_map
+        await update_litellm_cost_map()
 
     async def _ensure_plugins(self, endpoint_service: object = None) -> list:
         """Lazily initialize plugins (idempotent).
@@ -2085,6 +2100,34 @@ class ChatRoom(ToolSet):
             logger.error(f"Error setting agent model: {e}")
             return {"success": False, "message": str(e)}
 
+
+    @tool
+    async def get_token_stats(self, chat_id: str) -> dict:
+        """Get detailed token usage statistics for a chat.
+
+        Returns token breakdown by role (system/user/assistant/tool),
+        usage percentage, cost, model info, and context window utilization.
+
+        Args:
+            chat_id: The chat to get token stats for
+
+        Returns:
+            dict with success status and token statistics
+        """
+        try:
+            team = await self.get_team_for_chat(chat_id)
+            from pantheon.repl.utils import get_detailed_token_stats
+
+            token_info = await get_detailed_token_stats(
+                chatroom=self,
+                chat_id=chat_id,
+                team=team,
+                fallback={},
+            )
+            return {"success": True, **token_info}
+        except Exception as e:
+            logger.error(f"Error getting token stats: {e}")
+            return {"success": False, "error": str(e)}
 
     @tool
     async def compress_chat(self, chat_id: str) -> dict:
