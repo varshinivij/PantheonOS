@@ -818,13 +818,28 @@ class FileManagerToolSet(FileManagerToolSetBase):
         overwrite: bool = True,
         append: bool = False,
     ) -> dict:
-        """Create, overwrite, or append to a file.
+        """Create a new file, overwrite an existing one, or append to it.
+
+        Parent directories are created automatically if they do not exist.
+
+        For EDITING existing files, prefer `update_file` instead — it is
+        safer and more efficient for partial modifications.
+
+        Use this tool when:
+        - Creating a brand new file
+        - Completely rewriting a file from scratch
+        - Appending content to an existing file (set append=True)
+
+        Do NOT use this tool when:
+        - Making partial modifications to an existing file (use `update_file`)
+        - Changing a few lines in a large file (use `update_file`)
 
         Args:
             file_path: The path to the file to write.
             content: The content to write to the file.
             overwrite: When False, abort if the target file already exists (ignored when append=True).
             append: When True, append content to the end of an existing file instead of overwriting.
+                    The file must already exist when using append mode.
 
         Returns:
             dict: Success status or error message.
