@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from pantheon.utils.log import logger
+from pantheon.utils.tool_pairing import ensure_tool_result_pairing
 from pantheon.utils.truncate import (
     PERSISTED_OUTPUT_TAG,
     PERSISTED_OUTPUT_CLOSING_TAG,
@@ -111,6 +114,55 @@ class CacheSafeRuntimeParams:
     response_format_normalized: Any | None
 
 
+@dataclass(frozen=True)
+class ContextCollapseDecision:
+    total_tokens: int
+    context_window: int
+    usage_ratio: float
+    should_commit: bool
+    at_blocking_limit: bool
+
+
+@dataclass(frozen=True)
+class ContextCollapseHealth:
+    total_spawns: int = 0
+    total_errors: int = 0
+    total_empty_spawns: int = 0
+    empty_spawn_warning_emitted: bool = False
+    last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class ContextCollapseStats:
+    collapsed_spans: int
+    collapsed_messages: int
+    staged_spans: int
+    health: ContextCollapseHealth
+
+
+@dataclass(frozen=True)
+class ContextCollapseCommit:
+    collapse_id: int
+    archived_pattern: tuple[str, ...]
+    summary_message: dict[str, Any]
+    summary_text: str
+    archived_count: int
+
+
+@dataclass(frozen=True)
+class ContextCollapseApplyResult:
+    messages: list[dict]
+    committed: int
+    decision: ContextCollapseDecision
+
+
+@dataclass(frozen=True)
+class ContextCollapseRecoverResult:
+    messages: list[dict]
+    committed: int
+    at_blocking_limit: bool
+
+
 def create_content_replacement_state() -> ContentReplacementState:
     return ContentReplacementState(seen_ids=set(), replacements={})
 
@@ -121,6 +173,12 @@ def get_time_based_microcompact_config() -> TimeBasedMicrocompactConfig:
         gap_threshold_minutes=TIME_BASED_MC_GAP_THRESHOLD_MINUTES,
         keep_recent=TIME_BASED_MC_KEEP_RECENT,
     )
+
+
+CONTEXT_COLLAPSE_COMMIT_THRESHOLD = 0.90
+CONTEXT_COLLAPSE_BLOCKING_THRESHOLD = 0.95
+AUTOCOMPACT_TRIGGER_BUFFER_TOKENS = 13_000
+_COLLAPSE_SKIP_QUERY_SOURCES = frozenset({"compact", "session_memory", "agent_summary"})
 
 
 def normalize_cache_safe_value(value: Any) -> Any:
@@ -767,9 +825,41 @@ def get_snip_config() -> SnipConfig:
     )
 
 
+def ensure_tool_history_consistency(messages: list[dict]) -> list[dict]:
+    """Canonical tool pairing repair pass for optimized message histories."""
+    return ensure_tool_result_pairing(messages)
+
+
 # CC-identical token estimation constants (from microCompact.ts)
 IMAGE_MAX_TOKEN_SIZE = 2000  # CC: images/documents ≈ 2000 tokens
 _TOKEN_ESTIMATE_PAD_FACTOR = 4 / 3  # CC: pad estimate by 4/3 to be conservative
+
+
+def get_effective_context_window_size(model: str | None) -> int:
+    """Return the model input window used for headroom-based token decisions."""
+    if not model:
+        return 200_000
+
+    try:
+        from pantheon.utils.provider_registry import get_model_info
+
+        model_info = get_model_info(model)
+        return int(model_info.get("max_input_tokens") or 200_000)
+    except Exception:
+        return 200_000
+
+
+def get_autocompact_threshold(
+    model: str | None,
+    *,
+    fallback_budget: int = 100_000,
+) -> int:
+    """Claude-style autocompact threshold based on model context window."""
+    if not model:
+        return fallback_budget
+
+    effective_window = get_effective_context_window_size(model)
+    return max(1, effective_window - AUTOCOMPACT_TRIGGER_BUFFER_TOKENS)
 
 
 def _rough_token_count(text: str) -> int:
@@ -880,7 +970,7 @@ def snip_messages_to_budget(
     if tokens_freed == 0:
         return messages, 0
 
-    result = system_msgs + kept_candidates + tail
+    result = ensure_tool_history_consistency(system_msgs + kept_candidates + tail)
     logger.info(
         "[token optimization] history snip freed ~{} tokens ({} messages dropped)",
         tokens_freed,
@@ -894,6 +984,24 @@ def snip_messages_to_budget(
 # Mirrors CC's collapseReadSearch.ts — fold consecutive collapsible tool uses
 # into compact summary messages.
 # ---------------------------------------------------------------------------
+
+def _message_fingerprint(message: dict) -> str:
+    """Stable fingerprint for context-collapse commit replay."""
+    payload = {
+        "role": message.get("role"),
+        "content": message.get("content"),
+        "tool_call_id": message.get("tool_call_id"),
+        "tool_name": message.get("tool_name"),
+        "tool_calls": message.get("tool_calls"),
+        "collapsed_commit_id": message.get("_context_collapse_commit_id"),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
+    return hashlib.sha1(encoded.encode("utf-8")).hexdigest()
+
+
+def _fingerprint_messages(messages: list[dict]) -> tuple[str, ...]:
+    return tuple(_message_fingerprint(message) for message in messages)
+
 
 @dataclass
 class CollapsedGroup:
@@ -951,31 +1059,20 @@ def _extract_read_paths_from_tool_calls(message: dict) -> list[str]:
     return paths
 
 
-def collapse_read_search_groups(
+def _find_collapsible_groups(
     messages: list[dict],
     *,
     min_group_size: int = 3,
-) -> tuple[list[dict], int]:
-    """Collapse consecutive read/search tool-use sequences into summaries.
-
-    Mirrors CC's ``collapseReadSearchGroups()`` — identifies groups of
-    consecutive collapsible messages, summarizes each group into a single
-    compact user message, and returns the reduced list.
-
-    Returns (new_messages, tokens_saved).
-    """
+) -> list[CollapsedGroup]:
     tool_name_map = build_tool_name_map(messages)
-
-    # Phase 1: identify collapsible groups
     groups: list[CollapsedGroup] = []
     i = 0
     n = len(messages)
     while i < n:
-        # Skip non-collapsible messages
         if not _is_collapsible_message(messages[i], tool_name_map):
             i += 1
             continue
-        # Start a new group
+
         start = i
         search_count = 0
         read_count = 0
@@ -989,7 +1086,6 @@ def collapse_read_search_groups(
             msg = messages[i]
             tokens += _estimate_message_tokens(msg)
             if msg.get("role") == "assistant":
-                # Extract file paths from tool_call arguments
                 for path in _extract_read_paths_from_tool_calls(msg):
                     if path not in seen_paths:
                         seen_paths.add(path)
@@ -1020,47 +1116,61 @@ def collapse_read_search_groups(
                 bash_count=bash_count,
                 tokens_before=tokens,
             ))
+    return groups
 
+
+def _build_collapsed_message(
+    group: CollapsedGroup,
+    *,
+    commit_id: int | None = None,
+) -> dict[str, Any]:
+    parts: list[str] = []
+    if group.search_count:
+        parts.append(f"searched {group.search_count} pattern{'s' if group.search_count > 1 else ''}")
+    if group.read_count:
+        parts.append(f"read {group.read_count} file{'s' if group.read_count > 1 else ''}")
+    if group.list_count:
+        parts.append(f"listed {group.list_count} dir{'s' if group.list_count > 1 else ''}")
+    if group.bash_count:
+        parts.append(f"ran {group.bash_count} command{'s' if group.bash_count > 1 else ''}")
+
+    summary = ", ".join(parts) if parts else "performed tool operations"
+
+    file_lines = ""
+    if group.read_file_paths:
+        paths = group.read_file_paths[:8]
+        file_lines = "\nFiles: " + ", ".join(paths)
+        if len(group.read_file_paths) > 8:
+            file_lines += f" (+{len(group.read_file_paths) - 8} more)"
+
+    collapsed_message = {
+        "role": "assistant",
+        "content": f"[Collapsed exploration: {summary}{file_lines}]",
+        "_collapsed": True,
+        "_collapsed_message_count": group.end_index - group.start_index,
+    }
+    if commit_id is not None:
+        collapsed_message["_context_collapse_commit_id"] = commit_id
+    return collapsed_message
+
+
+def _apply_groups_to_messages(
+    messages: list[dict],
+    groups: list[CollapsedGroup],
+    *,
+    commit_ids: list[int | None] | None = None,
+) -> tuple[list[dict], int]:
     if not groups:
         return messages, 0
 
-    # Phase 2: build collapsed messages
     tokens_saved = 0
     result: list[dict] = []
     prev_end = 0
 
-    for group in groups:
-        # Keep messages before this group
+    for index, group in enumerate(groups):
         result.extend(messages[prev_end:group.start_index])
-
-        # Build summary text (matches CC's createCollapsedGroup output)
-        parts: list[str] = []
-        if group.search_count:
-            parts.append(f"searched {group.search_count} pattern{'s' if group.search_count > 1 else ''}")
-        if group.read_count:
-            parts.append(f"read {group.read_count} file{'s' if group.read_count > 1 else ''}")
-        if group.list_count:
-            parts.append(f"listed {group.list_count} dir{'s' if group.list_count > 1 else ''}")
-        if group.bash_count:
-            parts.append(f"ran {group.bash_count} command{'s' if group.bash_count > 1 else ''}")
-
-        summary = ", ".join(parts) if parts else "performed tool operations"
-
-        # Include file paths for context
-        file_lines = ""
-        if group.read_file_paths:
-            paths = group.read_file_paths[:8]
-            file_lines = "\nFiles: " + ", ".join(paths)
-            if len(group.read_file_paths) > 8:
-                file_lines += f" (+{len(group.read_file_paths) - 8} more)"
-
-        collapsed_content = f"[Collapsed exploration: {summary}{file_lines}]"
-        collapsed_msg = {
-            "role": "assistant",
-            "content": collapsed_content,
-            "_collapsed": True,
-            "_collapsed_message_count": group.end_index - group.start_index,
-        }
+        commit_id = commit_ids[index] if commit_ids is not None else None
+        collapsed_msg = _build_collapsed_message(group, commit_id=commit_id)
         result.append(collapsed_msg)
 
         collapsed_tokens = _estimate_message_tokens(collapsed_msg)
@@ -1068,6 +1178,233 @@ def collapse_read_search_groups(
         prev_end = group.end_index
 
     result.extend(messages[prev_end:])
+    return result, tokens_saved
+
+
+class ContextCollapseManager:
+    """Stateful replay of Claude Code-style context collapse commits."""
+
+    def __init__(self) -> None:
+        self._commits: list[ContextCollapseCommit] = []
+        self._next_commit_id = 1
+        self._health = ContextCollapseHealth()
+
+    def isContextCollapseEnabled(self) -> bool:
+        return True
+
+    def getStats(self) -> ContextCollapseStats:
+        return ContextCollapseStats(
+            collapsed_spans=len(self._commits),
+            collapsed_messages=sum(commit.archived_count for commit in self._commits),
+            staged_spans=0,
+            health=self._health,
+        )
+
+    def projectView(self, messages: list[dict]) -> list[dict]:
+        view = [copy.deepcopy(message) for message in messages]
+        for commit in self._commits:
+            view = self._apply_commit(view, commit)
+        return view
+
+    def applyCollapsesIfNeeded(
+        self,
+        messages: list[dict],
+        tool_use_context: Any | None = None,
+        query_source: str | None = None,
+        model: str | None = None,
+        min_group_size: int = 3,
+    ) -> ContextCollapseApplyResult:
+        del tool_use_context
+
+        view = self.projectView(messages)
+        decision = get_context_collapse_decision(
+            view,
+            model=model,
+            query_source=query_source,
+        )
+        if not decision.should_commit:
+            return ContextCollapseApplyResult(messages=view, committed=0, decision=decision)
+
+        self._health = ContextCollapseHealth(
+            total_spawns=self._health.total_spawns + 1,
+            total_errors=self._health.total_errors,
+            total_empty_spawns=self._health.total_empty_spawns,
+            empty_spawn_warning_emitted=self._health.empty_spawn_warning_emitted,
+            last_error=self._health.last_error,
+        )
+
+        committed = 0
+        current_view = view
+        current_decision = decision
+        while current_decision.should_commit:
+            groups = _find_collapsible_groups(current_view, min_group_size=min_group_size)
+            if not groups:
+                self._record_empty_spawn()
+                break
+
+            group = groups[0]
+            collapsed_message = _build_collapsed_message(
+                group,
+                commit_id=self._next_commit_id,
+            )
+            if _estimate_message_tokens(collapsed_message) >= group.tokens_before:
+                self._record_empty_spawn()
+                break
+
+            self._commits.append(ContextCollapseCommit(
+                collapse_id=self._next_commit_id,
+                archived_pattern=_fingerprint_messages(
+                    current_view[group.start_index:group.end_index]
+                ),
+                summary_message=collapsed_message,
+                summary_text=str(collapsed_message.get("content", "")),
+                archived_count=group.end_index - group.start_index,
+            ))
+            self._next_commit_id += 1
+            committed += 1
+            current_view = self.projectView(messages)
+            current_decision = get_context_collapse_decision(
+                current_view,
+                model=model,
+                query_source=query_source,
+            )
+
+        if committed > 0:
+            logger.info(
+                "[token optimization] contextCollapse committed {} span(s), ~{} tokens saved",
+                committed,
+                max(0, decision.total_tokens - current_decision.total_tokens),
+            )
+
+        return ContextCollapseApplyResult(
+            messages=current_view,
+            committed=committed,
+            decision=current_decision,
+        )
+
+    def recoverFromOverflow(
+        self,
+        messages: list[dict],
+        query_source: str | None = None,
+        model: str | None = None,
+        min_group_size: int = 3,
+    ) -> ContextCollapseRecoverResult:
+        del query_source, model
+
+        committed = 0
+        current_view = self.projectView(messages)
+        while True:
+            groups = _find_collapsible_groups(current_view, min_group_size=min_group_size)
+            if not groups:
+                break
+            group = groups[0]
+            collapsed_message = _build_collapsed_message(
+                group,
+                commit_id=self._next_commit_id,
+            )
+            if _estimate_message_tokens(collapsed_message) >= group.tokens_before:
+                break
+            self._commits.append(ContextCollapseCommit(
+                collapse_id=self._next_commit_id,
+                archived_pattern=_fingerprint_messages(
+                    current_view[group.start_index:group.end_index]
+                ),
+                summary_message=collapsed_message,
+                summary_text=str(collapsed_message.get("content", "")),
+                archived_count=group.end_index - group.start_index,
+            ))
+            self._next_commit_id += 1
+            committed += 1
+            current_view = self.projectView(messages)
+
+        if committed > 0:
+            logger.warning(
+                "[token optimization] contextCollapse overflow recovery committed {} span(s)",
+                committed,
+            )
+
+        return ContextCollapseRecoverResult(messages=current_view, committed=committed)
+
+    def isWithheldPromptTooLong(
+        self,
+        message: Any,
+        is_prompt_too_long_message: Any,
+        query_source: str | None = None,
+    ) -> bool:
+        del query_source
+        try:
+            return bool(is_prompt_too_long_message(message))
+        except Exception:
+            return False
+
+    def _apply_commit(
+        self,
+        messages: list[dict],
+        commit: ContextCollapseCommit,
+    ) -> list[dict]:
+        pattern_len = len(commit.archived_pattern)
+        if pattern_len == 0 or len(messages) < pattern_len:
+            return messages
+
+        for start in range(0, len(messages) - pattern_len + 1):
+            window = messages[start:start + pattern_len]
+            if _fingerprint_messages(window) != commit.archived_pattern:
+                continue
+            return [
+                *messages[:start],
+                copy.deepcopy(commit.summary_message),
+                *messages[start + pattern_len:],
+            ]
+        return messages
+
+    def _record_empty_spawn(self) -> None:
+        total_empty = self._health.total_empty_spawns + 1
+        self._health = ContextCollapseHealth(
+            total_spawns=self._health.total_spawns,
+            total_errors=self._health.total_errors,
+            total_empty_spawns=total_empty,
+            empty_spawn_warning_emitted=total_empty >= 3,
+            last_error=self._health.last_error,
+        )
+
+
+def _get_context_collapse_manager() -> ContextCollapseManager:
+    try:
+        from pantheon.agent import get_current_run_context
+    except Exception:
+        return ContextCollapseManager()
+
+    run_context = get_current_run_context()
+    if run_context is None:
+        return ContextCollapseManager()
+
+    manager = getattr(run_context, "context_collapse_manager", None)
+    if isinstance(manager, ContextCollapseManager):
+        return manager
+
+    manager = ContextCollapseManager()
+    run_context.context_collapse_manager = manager
+    return manager
+
+
+def collapse_read_search_groups(
+    messages: list[dict],
+    *,
+    min_group_size: int = 3,
+) -> tuple[list[dict], int]:
+    """Collapse consecutive read/search tool-use sequences into summaries.
+
+    Mirrors CC's ``collapseReadSearchGroups()`` — identifies groups of
+    consecutive collapsible messages, summarizes each group into a single
+    compact user message, and returns the reduced list.
+
+    Returns (new_messages, tokens_saved).
+    """
+    groups = _find_collapsible_groups(messages, min_group_size=min_group_size)
+    if not groups:
+        return messages, 0
+
+    result, tokens_saved = _apply_groups_to_messages(messages, groups)
 
     if tokens_saved > 0:
         logger.info(
@@ -1076,6 +1413,97 @@ def collapse_read_search_groups(
             tokens_saved,
         )
     return result, tokens_saved
+
+
+def get_context_collapse_decision(
+    messages: list[dict],
+    *,
+    model: str | None = None,
+    query_source: str | None = None,
+) -> ContextCollapseDecision:
+    """Claude-style headroom gate for context collapse commit decisions."""
+    if query_source in _COLLAPSE_SKIP_QUERY_SOURCES:
+        return ContextCollapseDecision(
+            total_tokens=0,
+            context_window=get_effective_context_window_size(model),
+            usage_ratio=0.0,
+            should_commit=False,
+            at_blocking_limit=False,
+        )
+
+    total_tokens = sum(_estimate_message_tokens(message) for message in messages)
+    context_window = get_effective_context_window_size(model)
+    usage_ratio = (total_tokens / context_window) if context_window > 0 else 0.0
+    return ContextCollapseDecision(
+        total_tokens=total_tokens,
+        context_window=context_window,
+        usage_ratio=usage_ratio,
+        should_commit=usage_ratio >= CONTEXT_COLLAPSE_COMMIT_THRESHOLD,
+        at_blocking_limit=usage_ratio >= CONTEXT_COLLAPSE_BLOCKING_THRESHOLD,
+    )
+
+
+def apply_collapses_if_needed(
+    messages: list[dict],
+    *,
+    model: str | None = None,
+    query_source: str | None = None,
+    min_group_size: int = 3,
+) -> tuple[list[dict], int]:
+    """Python wrapper around Claude Code-style applyCollapsesIfNeeded()."""
+    result = applyCollapsesIfNeeded(
+        messages,
+        model=model,
+        query_source=query_source,
+        min_group_size=min_group_size,
+    )
+    return result.messages, result.committed
+
+
+def applyCollapsesIfNeeded(
+    messages: list[dict],
+    tool_use_context: Any | None = None,
+    query_source: str | None = None,
+    model: str | None = None,
+    min_group_size: int = 3,
+) -> ContextCollapseApplyResult:
+    """Claude Code-shaped entrypoint for committing context collapses."""
+    manager = _get_context_collapse_manager()
+    return manager.applyCollapsesIfNeeded(
+        messages,
+        tool_use_context=tool_use_context,
+        query_source=query_source,
+        model=model,
+        min_group_size=min_group_size,
+    )
+
+
+def projectView(messages: list[dict]) -> list[dict]:
+    """Claude Code-shaped projection API for already-committed collapses."""
+    return _get_context_collapse_manager().projectView(messages)
+
+
+def recoverFromOverflow(
+    messages: list[dict],
+    query_source: str | None = None,
+    model: str | None = None,
+    min_group_size: int = 3,
+) -> ContextCollapseRecoverResult:
+    """Claude Code-shaped overflow drain hook."""
+    return _get_context_collapse_manager().recoverFromOverflow(
+        messages,
+        query_source=query_source,
+        model=model,
+        min_group_size=min_group_size,
+    )
+
+
+def isContextCollapseEnabled() -> bool:
+    return _get_context_collapse_manager().isContextCollapseEnabled()
+
+
+def getContextCollapseStats() -> ContextCollapseStats:
+    return _get_context_collapse_manager().getStats()
 
 
 # ---------------------------------------------------------------------------
@@ -1173,7 +1601,9 @@ def should_autocompact(
     messages: list[dict],
     *,
     token_budget: int = AUTOCOMPACT_TOKEN_BUDGET,
+    model: str | None = None,
     query_source: str | None = None,
+    suppress_for_context_collapse: bool = False,
 ) -> bool:
     """CC-identical predicate: should autocompact fire?
 
@@ -1184,8 +1614,11 @@ def should_autocompact(
     # Recursion guard (CC: querySource === 'session_memory' || 'compact')
     if query_source in ("compact", "session_memory", "agent_summary"):
         return False
+    if suppress_for_context_collapse:
+        return False
+    threshold = get_autocompact_threshold(model, fallback_budget=token_budget)
     total = sum(_estimate_message_tokens(m) for m in messages)
-    return total > token_budget
+    return total > threshold
 
 
 async def autocompact_messages(
@@ -1197,6 +1630,7 @@ async def autocompact_messages(
     tracking: AutocompactTrackingState | None = None,
     query_source: str | None = None,
     transcript_path: str | None = None,
+    suppress_for_context_collapse: bool = False,
 ) -> tuple[list[dict], int, AutocompactTrackingState]:
     """CC-identical LLM-based autocompact.
 
@@ -1213,7 +1647,13 @@ async def autocompact_messages(
     tracking = tracking or AutocompactTrackingState()
 
     # Budget check
-    if not should_autocompact(messages, token_budget=token_budget, query_source=query_source):
+    if not should_autocompact(
+        messages,
+        token_budget=token_budget,
+        model=model,
+        query_source=query_source,
+        suppress_for_context_collapse=suppress_for_context_collapse,
+    ):
         return messages, 0, tracking
 
     # Circuit breaker (CC: MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3)
@@ -1370,6 +1810,7 @@ def apply_token_optimizations(
     enable_context_collapse: bool = True,
     enable_autocompact: bool = True,
     query_source: str | None = None,
+    context_window_model: str | None = None,
 ) -> list[dict]:
     """Synchronous 4-stage optimization pipeline.
 
@@ -1390,9 +1831,14 @@ def apply_token_optimizations(
         optimized,
         is_main_thread=is_main_thread,
     )
-    # 4. Context Collapse: fold consecutive read/search groups (CC-style)
+    # 4. Context Collapse: Claude-style gate first, then fold read/search groups.
     if enable_context_collapse:
-        optimized, _ = collapse_read_search_groups(optimized)
+        optimized, _ = apply_collapses_if_needed(
+            optimized,
+            model=context_window_model,
+            query_source=query_source,
+        )
+    optimized = ensure_tool_history_consistency(optimized)
     # Note: autocompact (stage 5) is async — use apply_token_optimizations_async
     return optimized
 
@@ -1410,6 +1856,7 @@ async def apply_token_optimizations_async(
     autocompact_model: str | None = None,
     autocompact_tracking: AutocompactTrackingState | None = None,
     transcript_path: str | None = None,
+    context_window_model: str | None = None,
 ) -> tuple[list[dict], AutocompactTrackingState | None]:
     """Full 5-stage CC-identical optimization pipeline (async).
 
@@ -1432,6 +1879,7 @@ async def apply_token_optimizations_async(
         enable_context_collapse=enable_context_collapse,
         enable_autocompact=False,  # handled below
         query_source=query_source,
+        context_window_model=context_window_model or autocompact_model,
     )
     # Stage 5: Autocompact (async, LLM-based)
     tracking = autocompact_tracking
@@ -1442,7 +1890,9 @@ async def apply_token_optimizations_async(
             query_source=query_source,
             tracking=tracking,
             transcript_path=transcript_path,
+            suppress_for_context_collapse=enable_context_collapse,
         )
+    optimized = ensure_tool_history_consistency(optimized)
     return optimized, tracking
 
 
@@ -1509,6 +1959,7 @@ def build_llm_view(
     *,
     is_main_thread: bool = True,
     snip_config: "SnipConfig | None" = None,
+    context_window_model: str | None = None,
 ) -> list[dict]:
     """Build the projected prompt view from raw history (sync, no autocompact)."""
     if not messages:
@@ -1520,6 +1971,7 @@ def build_llm_view(
         base_dir=base_dir,
         is_main_thread=is_main_thread,
         snip_config=snip_config,
+        context_window_model=context_window_model,
     )
     return _wrap_with_system(system_message, optimized)
 
@@ -1532,6 +1984,7 @@ async def build_llm_view_async(
     is_main_thread: bool = True,
     snip_config: "SnipConfig | None" = None,
     autocompact_model: str | None = None,
+    context_window_model: str | None = None,
 ) -> list[dict]:
     """Async variant of build_llm_view that enables LLM-based autocompact."""
     if not messages:
@@ -1544,6 +1997,7 @@ async def build_llm_view_async(
         is_main_thread=is_main_thread,
         snip_config=snip_config,
         autocompact_model=autocompact_model,
+        context_window_model=context_window_model or autocompact_model,
     )
     return _wrap_with_system(system_message, optimized)
 
@@ -1636,6 +2090,7 @@ def build_delegation_context_message(
     caller (``create_delegation_task_message``).  Older context is represented
     by *summary_text*.
     """
+    raw_projected = project_memory_messages_for_llm(history)
     projected = build_llm_view(history, is_main_thread=False)
     parts: list[str] = []
     if summary_text:
@@ -1645,7 +2100,7 @@ def build_delegation_context_message(
     if recent_context:
         parts.append(f"Recent Context:\n{recent_context}")
 
-    file_paths = extract_persisted_file_paths(projected)
+    file_paths = extract_persisted_file_paths(raw_projected) or extract_persisted_file_paths(projected)
     if file_paths:
         parts.append(
             "Referenced Files (retrieve on demand if needed):\n"

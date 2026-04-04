@@ -6,10 +6,226 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from pantheon.agent import Agent, AgentTransfer
+from pantheon.agent import Agent, AgentRunContext, AgentTransfer, _RUN_CONTEXT, _call_agent
+from pantheon.utils.tool_pairing import INCOMPLETE_TOOL_RESULT_PLACEHOLDER
+from pantheon.utils.llm_providers import ProviderConfig, ProviderType
 from pantheon.utils.vision import vision_input
 
 HERE = Path(__file__).parent
+
+
+def test_sanitize_messages_repairs_tool_pairing_and_drops_orphans():
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_kept",
+                    "type": "function",
+                    "function": {"name": "tool_a", "arguments": "{}"},
+                },
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "tool_b", "arguments": "{}"},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_kept", "content": "ok"},
+        {"role": "tool", "tool_call_id": "orphan", "content": "bad"},
+    ]
+
+    sanitized = Agent._sanitize_messages(messages)
+
+    assert len(sanitized) == 4
+    assert [tc["id"] for tc in sanitized[1]["tool_calls"]] == [
+        "call_kept",
+        "call_missing",
+    ]
+    assert sanitized[2]["tool_call_id"] == "call_kept"
+    assert sanitized[3]["tool_call_id"] == "call_missing"
+    assert sanitized[3]["content"] == INCOMPLETE_TOOL_RESULT_PLACEHOLDER
+    assert sanitized[3]["_recovered"] is True
+
+
+async def test_acompletion_resanitizes_messages_after_token_optimization(monkeypatch):
+    agent = Agent(name="test", instructions="You are helpful.")
+    captured = {}
+
+    async def fake_build_llm_view_async(*args, **kwargs):
+        return [
+            {"role": "system", "content": "You are helpful."},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_missing",
+                        "type": "function",
+                        "function": {"name": "shell", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "user", "content": "hello"},
+        ]
+
+    async def fake_call_llm_provider(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return {"role": "assistant", "content": "ok"}
+
+    monkeypatch.setattr(
+        "pantheon.utils.token_optimization.build_llm_view_async",
+        fake_build_llm_view_async,
+    )
+    monkeypatch.setattr(
+        "pantheon.utils.token_optimization.supports_explicit_cache_control",
+        lambda model: False,
+    )
+    monkeypatch.setattr(
+        "pantheon.agent.call_llm_provider",
+        fake_call_llm_provider,
+    )
+    monkeypatch.setattr(
+        "pantheon.agent.detect_provider",
+        lambda model, relaxed_schema: ProviderConfig(
+            provider_type=ProviderType.OPENAI,
+            model_name=model,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            relaxed_schema=relaxed_schema,
+        ),
+    )
+
+    await agent._acompletion(
+        messages=[{"role": "user", "content": "hello"}],
+        model="codex/gpt-5.4-mini",
+        tool_use=False,
+    )
+
+    assert captured["messages"][0] == {"role": "system", "content": "You are helpful."}
+    assert captured["messages"][1] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_missing",
+                "type": "function",
+                "function": {"name": "shell", "arguments": "{}"},
+            }
+        ],
+    }
+    assert captured["messages"][2]["role"] == "tool"
+    assert captured["messages"][2]["tool_call_id"] == "call_missing"
+    assert captured["messages"][2]["tool_name"] == "shell"
+
+
+def test_blank_model_is_treated_as_implicit_default():
+    agent = Agent(name="implicit", instructions="x", model="")
+
+    assert agent._model_was_explicit is False
+    assert agent.models
+
+
+async def test_call_agent_prefers_current_provider_for_quality_tag(monkeypatch):
+    captured = {}
+
+    async def fake_run(self, messages, **kwargs):
+        captured["models"] = list(self.models)
+        return type(
+            "FakeResult",
+            (),
+            {
+                "content": "ok",
+                "details": type("FakeDetails", (), {"messages": []})(),
+            },
+        )()
+
+    monkeypatch.setattr(Agent, "run", fake_run)
+
+    token = _RUN_CONTEXT.set(
+        AgentRunContext(
+            agent=Agent(name="parent", instructions="x", model="codex/gpt-5.4-mini"),
+            memory=None,
+            execution_context_id="ctx-1",
+            current_model="codex/gpt-5.4-mini",
+        )
+    )
+    try:
+        result = await _call_agent(
+            messages=[{"role": "user", "content": "hi"}],
+            system_prompt="x",
+            model="low",
+            memory=None,
+        )
+    finally:
+        _RUN_CONTEXT.reset(token)
+
+    assert result["success"] is True
+    assert captured["models"][0].startswith("codex/")
+
+
+async def test_context_injection_sampler_prefers_parent_provider_without_run_model(
+    monkeypatch,
+):
+    captured = {}
+
+    async def fake_call_agent(*, messages, system_prompt, model, memory):
+        captured["model"] = model
+        return {"success": True, "response": "[]", "_metadata": {}}
+
+    class DummyInjector:
+        async def inject(self, input_text, injector_context):
+            await injector_context["_call_agent"](
+                messages=[{"role": "user", "content": "pick"}],
+                system_prompt="x",
+                model="low",
+                use_memory=False,
+            )
+            return ""
+
+    monkeypatch.setattr("pantheon.agent._call_agent", fake_call_agent)
+
+    agent = Agent(name="parent", instructions="x", model="codex/gpt-5.4-mini")
+    agent.context_injectors = [DummyInjector()]
+
+    await agent._inject_context_to_messages(
+        messages=[{"role": "user", "content": "hello"}],
+        context_variables={},
+    )
+
+    assert isinstance(captured["model"], list)
+    assert captured["model"][0].startswith("codex/")
+
+
+async def test_call_agent_inherits_current_run_model_when_not_specified(monkeypatch):
+    captured = {}
+
+    class DummyResult:
+        content = "ok"
+        details = None
+
+    async def fake_run(self, *args, **kwargs):
+        captured["models"] = list(self.models)
+        return DummyResult()
+
+    monkeypatch.setattr(Agent, "run", fake_run)
+
+    run_context = AgentRunContext(agent=Agent(name="parent", instructions="parent", model="gemini/gemini-3-flash-preview"), memory=None)
+    run_context.current_model = "gemini/gemini-3-flash-preview"
+    token = _RUN_CONTEXT.set(run_context)
+    try:
+        result = await _call_agent(
+            messages=[{"role": "user", "content": "hi"}],
+            system_prompt="You are helpful.",
+            model=None,
+        )
+    finally:
+        _RUN_CONTEXT.reset(token)
+
+    assert result["success"] is True
+    assert captured["models"] == ["gemini/gemini-3-flash-preview"]
 
 
 async def test_stream():

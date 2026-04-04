@@ -147,14 +147,27 @@ def _convert_tools_to_gemini(tools: list[dict] | None) -> list[dict] | None:
         if "description" in func:
             decl["description"] = func["description"]
         if "parameters" in func:
-            params = dict(func["parameters"])
-            # Gemini doesn't support 'strict' or 'additionalProperties' at top level
-            params.pop("strict", None)
-            params.pop("additionalProperties", None)
+            params = _sanitize_schema_for_gemini(dict(func["parameters"]))
             decl["parameters"] = params
         declarations.append(decl)
 
     return declarations
+
+
+def _sanitize_schema_for_gemini(value: Any) -> Any:
+    """Recursively drop OpenAI-specific JSON-schema fields Gemini rejects."""
+    if isinstance(value, list):
+        return [_sanitize_schema_for_gemini(item) for item in value]
+
+    if not isinstance(value, dict):
+        return value
+
+    sanitized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in {"strict", "additionalProperties", "additional_properties"}:
+            continue
+        sanitized[key] = _sanitize_schema_for_gemini(item)
+    return sanitized
 
 
 # ============ Adapter ============
