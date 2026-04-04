@@ -135,6 +135,7 @@ class AgentRunContext:
     cache_safe_runtime_params: Any | None = None
     cache_safe_prompt_messages: list[dict] | None = None
     cache_safe_tool_definitions: list[dict] | None = None
+    context_collapse_manager: Any | None = None
 
 
 _RUN_CONTEXT: ContextVar[AgentRunContext | None] = ContextVar(

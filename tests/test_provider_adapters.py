@@ -29,6 +29,7 @@ from pantheon.utils.provider_registry import (
     token_counter,
 )
 from pantheon.utils.adapters import get_adapter
+from pantheon.utils.adapters.gemini_adapter import _convert_tools_to_gemini
 from pantheon.utils.llm import stream_chunk_builder
 from pantheon.utils.model_selector import DEFAULT_PROVIDER_MODELS, PROVIDER_API_KEYS
 from pantheon.utils.llm_providers import is_responses_api_model, detect_provider
@@ -143,6 +144,54 @@ class TestStreamChunkBuilder:
         resp = stream_chunk_builder([])
         msg = resp.choices[0].message.model_dump()
         assert msg["content"] is None
+
+
+class TestGeminiSchemaConversion:
+
+    def test_convert_tools_to_gemini_strips_nested_additional_properties(self):
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "example_tool",
+                "description": "Example",
+                "parameters": {
+                    "type": "object",
+                    "strict": True,
+                    "additionalProperties": False,
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "name": {"type": "string"},
+                                },
+                                "required": ["name"],
+                            },
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "additional_properties": False,
+                            "properties": {
+                                "id": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+        }]
+
+        converted = _convert_tools_to_gemini(tools)
+
+        params = converted[0]["parameters"]
+        assert "strict" not in params
+        assert "additionalProperties" not in params
+        assert "additional_properties" not in params
+        assert "additionalProperties" not in params["properties"]["items"]["items"]
+        assert "additional_properties" not in params["properties"]["items"]["items"]
+        assert "additionalProperties" not in params["properties"]["metadata"]
+        assert "additional_properties" not in params["properties"]["metadata"]
 
 
 # ============ Real API: test every model in DEFAULT_PROVIDER_MODELS ============

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from pantheon.agent import Agent, AgentRunContext
+from pantheon.agent import Agent, AgentRunContext, _RUN_CONTEXT
 from pantheon.internal.memory import Memory
 from pantheon.team.pantheon import (
     PantheonTeam,
@@ -14,8 +14,10 @@ from pantheon.utils.token_optimization import (
     PERSISTED_OUTPUT_TAG,
     TIME_BASED_MC_CLEARED_MESSAGE,
     TimeBasedMicrocompactConfig,
+    ContextCollapseManager,
     apply_token_optimizations,
     apply_tool_result_budget,
+    applyCollapsesIfNeeded,
     build_cache_safe_runtime_params,
     build_delegation_context_message,
     build_llm_view,
@@ -24,6 +26,7 @@ from pantheon.utils.token_optimization import (
     inject_cache_control_markers,
     is_anthropic_model,
     microcompact_messages,
+    projectView,
 )
 
 
@@ -1175,6 +1178,69 @@ def test_apply_collapses_if_needed_commits_when_context_usage_is_high(monkeypatc
     assert len(result) < len(messages)
     assert any(message.get("_collapsed") for message in result)
     assert tokens_saved > 0
+
+
+def test_context_collapse_manager_replays_commits_across_calls(monkeypatch):
+    monkeypatch.setattr(
+        "pantheon.utils.provider_registry.get_model_info",
+        lambda model: {"max_input_tokens": 1_000},
+    )
+    manager = ContextCollapseManager()
+    messages = [
+        {"role": "user", "content": "Inspect the repository"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "g1", "function": {"name": "glob"}},
+                {"id": "g2", "function": {"name": "read_file"}},
+                {"id": "g3", "function": {"name": "grep"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "g1", "tool_name": "glob", "content": "file.py\n" * 200},
+        {"role": "tool", "tool_call_id": "g2", "tool_name": "read_file", "content": "code " * 1200},
+        {"role": "tool", "tool_call_id": "g3", "tool_name": "grep", "content": "match " * 800},
+    ]
+
+    first = manager.applyCollapsesIfNeeded(messages, model="codex/gpt-5.4-mini")
+    second = manager.applyCollapsesIfNeeded(messages, model="codex/gpt-5.4-mini")
+
+    assert first.committed > 0
+    assert second.committed == 0
+    assert second.messages == first.messages
+    assert manager.projectView(messages) == first.messages
+    assert manager.getStats().collapsed_spans == first.committed
+
+
+def test_applyCollapsesIfNeeded_uses_run_context_manager(monkeypatch):
+    monkeypatch.setattr(
+        "pantheon.utils.provider_registry.get_model_info",
+        lambda model: {"max_input_tokens": 1_000},
+    )
+    messages = [
+        {"role": "user", "content": "Inspect the repository"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "g1", "function": {"name": "glob"}},
+                {"id": "g2", "function": {"name": "read_file"}},
+                {"id": "g3", "function": {"name": "grep"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "g1", "tool_name": "glob", "content": "file.py\n" * 200},
+        {"role": "tool", "tool_call_id": "g2", "tool_name": "read_file", "content": "code " * 1200},
+        {"role": "tool", "tool_call_id": "g3", "tool_name": "grep", "content": "match " * 800},
+    ]
+    run_context = AgentRunContext(agent=None, memory=None)
+    token = _RUN_CONTEXT.set(run_context)
+    try:
+        result = applyCollapsesIfNeeded(messages, model="codex/gpt-5.4-mini")
+        replayed = projectView(messages)
+    finally:
+        _RUN_CONTEXT.reset(token)
+
+    assert result.committed > 0
+    assert run_context.context_collapse_manager is not None
+    assert replayed == result.messages
 
 
 # ---------------------------------------------------------------------------
