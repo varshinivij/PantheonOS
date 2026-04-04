@@ -1231,8 +1231,8 @@ def _build_collapsed_message(
             file_lines += f" (+{len(group.read_file_paths) - 8} more)"
 
     collapsed_message = {
-        "role": "assistant",
-        "content": f"[Collapsed exploration: {summary}{file_lines}]",
+        "role": "user",
+        "content": f"[contextCollapse] {summary}{file_lines}",
         "_collapsed": True,
         "_collapsed_message_count": group.end_index - group.start_index,
     }
