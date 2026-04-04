@@ -1671,16 +1671,31 @@ def estimate_total_tokens_from_chars(messages: list[dict]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Opt3: Prompt cache control markers (Anthropic API)
+# Opt3: Prompt cache control markers
 # ---------------------------------------------------------------------------
 
 _ANTHROPIC_MODEL_PREFIXES = ("claude", "anthropic/", "custom_anthropic/")
+_QWEN_MODEL_PREFIXES = ("qwen", "zai/")
 
 
 def is_anthropic_model(model: str) -> bool:
     """Return True if *model* routes to the Anthropic API."""
     lower = model.lower()
     return any(lower.startswith(p) for p in _ANTHROPIC_MODEL_PREFIXES)
+
+
+def supports_explicit_cache_control(model: str) -> bool:
+    """Return True if *model* supports ``cache_control: {"type": "ephemeral"}`` markers.
+
+    Currently supported:
+    - Anthropic (Claude): native cache_control in Messages API
+    - Qwen (DashScope): same cache_control format via OpenAI-compatible endpoint
+    """
+    lower = model.lower()
+    return (
+        any(lower.startswith(p) for p in _ANTHROPIC_MODEL_PREFIXES)
+        or any(lower.startswith(p) for p in _QWEN_MODEL_PREFIXES)
+    )
 
 
 def _make_text_block(text: str) -> dict[str, Any]:

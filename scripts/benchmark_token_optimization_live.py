@@ -37,8 +37,8 @@ from pantheon.utils.token_optimization import (
     BYTES_PER_TOKEN,
 )
 
-# ── Gemini model to use ──
-GEMINI_MODEL = "gemini/gemini-2.5-flash"
+# ── Model to use ──
+LLM_MODEL = os.environ.get("TEST_MODEL", "openai/gpt-4.1-mini")
 
 # ── Helpers ──
 
@@ -310,12 +310,12 @@ def test_stage4_context_collapse():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Stage 5: Autocompact (Live Gemini LLM Call)
+# Stage 5: Autocompact (Live LLM LLM Call)
 # ══════════════════════════════════════════════════════════════════════
 
 async def test_stage5_autocompact():
-    print_header("Stage 5: Autocompact (autocompact_messages) - LIVE GEMINI CALL")
-    print(f"  LLM-based summarization using {GEMINI_MODEL}.\n")
+    print_header("Stage 5: Autocompact (autocompact_messages) - LIVE LLM CALL")
+    print(f"  LLM-based summarization using {LLM_MODEL}.\n")
 
     # Build a conversation that exceeds 100K token budget
     messages = []
@@ -335,12 +335,12 @@ async def test_stage5_autocompact():
     before_tokens = before_chars // BYTES_PER_TOKEN
 
     print(f"  Input: {len(messages)} messages, ~{before_tokens:,} tokens")
-    print(f"  Calling {GEMINI_MODEL} for summarization...")
+    print(f"  Calling {LLM_MODEL} for summarization...")
 
     t0 = time.time()
     optimized, tokens_freed, tracking = await autocompact_messages(
         messages,
-        model=GEMINI_MODEL,
+        model=LLM_MODEL,
         token_budget=50_000,  # lower budget to force compaction
         keep_recent=8,
     )
@@ -436,55 +436,115 @@ def test_bonus_stabilize_and_cache():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# End-to-End: Full Pipeline + Live Gemini Completion
+# End-to-End: Full Pipeline + Live LLM Completion
 # ══════════════════════════════════════════════════════════════════════
 
 async def test_end_to_end():
-    print_header("End-to-End: build_llm_view_async + Live Gemini Completion")
-    print(f"  Full 5-stage pipeline, then send to {GEMINI_MODEL}.\n")
+    print_header("End-to-End: build_llm_view_async + Live LLM Completion")
+    print(f"  Full 5-stage pipeline, then send to {LLM_MODEL}.")
+    print("  Scenario: long coding session with large tool outputs,")
+    print("  consecutive searches, old+recent messages — triggers all 5 stages.\n")
 
     from pantheon.internal.memory import Memory
     memory = Memory("test-e2e")
     now = time.time()
 
-    # Build a realistic conversation
     messages = [{"role": "system", "content": "You are a helpful coding assistant."}]
 
-    # Old messages with large tool results (stage 1 + 3 targets)
-    for i in range(10):
-        ts = now - 7200 + i * 120  # 2 hours ago
+    # ── Phase 1: Old exploration (2+ hours ago) ──
+    # Large tool results → Stage 1 (aggregate budget per parallel turn)
+    # Old timestamps → Stage 3 (microcompact)
+    # Many messages → Stage 2 (snip) + Stage 5 (autocompact)
+    for i in range(15):
+        ts = now - 7200 - (15 - i) * 180  # 2-3 hours ago
+
+        # User asks to read a file
         messages.append({
             "role": "user",
-            "content": f"Read file src/module_{i}.py",
+            "content": f"Read and analyze src/module_{i}.py, then search for related usages.",
             "timestamp": ts,
         })
-        messages.extend(
-            make_tool_call_pair("read_file", make_large_tool_result(30), timestamp=ts + 1)
-        )
+
+        # Assistant does a parallel tool call: read_file + grep (triggers Stage 1 aggregate)
+        cid_read = f"call_read_{i:04d}"
+        cid_grep = f"call_grep_{i:04d}"
         messages.append({
             "role": "assistant",
-            "content": f"I've read module_{i}.py. It contains {i*100} lines of Python code with various functions. " * 20,
+            "content": None,
+            "id": f"asst_parallel_{i}",
+            "timestamp": ts + 1,
+            "tool_calls": [
+                {"id": cid_read, "type": "function",
+                 "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": cid_grep, "type": "function",
+                 "function": {"name": "grep", "arguments": "{}"}},
+            ],
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": cid_read, "name": "read_file",
+            "content": make_large_tool_result(20),  # 20KB per file
+            "timestamp": ts + 2,
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": cid_grep, "name": "grep",
+            "content": f"grep result {i}:\n" + f"src/module_{i}.py:42: import foo\n" * 200,
             "timestamp": ts + 2,
         })
 
-    # Recent messages
-    for i in range(5):
-        ts = now - 300 + i * 60
+        # Assistant analysis
+        messages.append({
+            "role": "assistant",
+            "content": (
+                f"Module {i} analysis: This file implements a data processing pipeline. "
+                f"It imports from modules {max(0,i-2)}-{i-1} and exports {i*3} functions. "
+                "The main entry point handles configuration, validation, and execution. "
+            ) * 15,
+            "timestamp": ts + 3,
+        })
+
+    # ── Phase 2: Consecutive search burst (1.5 hours ago) → Stage 4 ──
+    ts_search = now - 5400
+    for i in range(6):
+        messages.extend(
+            make_tool_call_pair(
+                "grep",
+                f"search {i}: " + f"match_{i}_line\n" * 100,
+                timestamp=ts_search + i * 5,
+            )
+        )
+
+    # ── Phase 3: More old work (1 hour ago) — more budget to exceed autocompact ──
+    for i in range(10):
+        ts = now - 3600 - (10 - i) * 60
         messages.append({
             "role": "user",
-            "content": f"Recent question {i}: What does function_{i} do?",
+            "content": f"Refactor function_{i} to use async/await pattern. " + "Detail " * 200,
             "timestamp": ts,
         })
         messages.append({
             "role": "assistant",
-            "content": f"Function_{i} processes data through a pipeline. " * 10,
+            "content": f"Refactored function_{i}. Changes: " + "Modified code pattern. " * 300,
+            "timestamp": ts + 30,
+        })
+
+    # ── Phase 4: Recent work (last 10 min) — kept intact ──
+    for i in range(4):
+        ts = now - 600 + i * 120
+        messages.append({
+            "role": "user",
+            "content": f"Recent task {i}: check the test results for module_{i}.",
+            "timestamp": ts,
+        })
+        messages.append({
+            "role": "assistant",
+            "content": f"Tests for module_{i} passed. 12 tests, 0 failures. " * 5,
             "timestamp": ts + 30,
         })
 
     # Final user message
     messages.append({
         "role": "user",
-        "content": "Summarize what we've done in this session.",
+        "content": "Summarize everything we've done in this session.",
         "timestamp": now,
     })
 
@@ -501,7 +561,7 @@ async def test_end_to_end():
             memory=memory,
             base_dir=Path(tmpdir),
             is_main_thread=True,
-            autocompact_model=GEMINI_MODEL,
+            autocompact_model=LLM_MODEL,
         )
         pipeline_time = time.time() - t0
 
@@ -513,17 +573,20 @@ async def test_end_to_end():
     print(f"  Messages: {before_count} -> {after_count}")
     print_result(before_tokens, after_tokens, unit="tokens (est.)")
 
-    # Now send the optimized messages to Gemini via call_llm_provider
-    print(f"\n  Sending optimized messages to {GEMINI_MODEL}...")
+    # Now send the optimized messages to LLM via call_llm_provider
+    print(f"\n  Sending optimized messages to {LLM_MODEL}...")
 
     from pantheon.utils.llm_providers import call_llm_provider, detect_provider
+    from pantheon.utils.llm import process_messages_for_model
 
-    provider_config = detect_provider(GEMINI_MODEL, False)
+    # Clean messages for model (remove orphan tool results, etc.)
+    send_messages = process_messages_for_model(optimized, LLM_MODEL)
+    provider_config = detect_provider(LLM_MODEL, False)
 
     t0 = time.time()
     message = await call_llm_provider(
         config=provider_config,
-        messages=optimized,
+        messages=send_messages,
         tools=None,
         response_format=None,
         process_chunk=None,
@@ -536,7 +599,7 @@ async def test_end_to_end():
     prompt_tokens = meta.get("prompt_tokens", 0)
     completion_tokens = meta.get("completion_tokens", 0)
 
-    print(f"  Gemini response time: {llm_time:.1f}s")
+    print(f"  LLM response time: {llm_time:.1f}s")
     print(f"  Prompt tokens (actual): {prompt_tokens:,}")
     print(f"  Completion tokens: {completion_tokens:,}")
     print(f"  Response preview: {content[:200]}...")
@@ -549,14 +612,14 @@ async def test_end_to_end():
 # ══════════════════════════════════════════════════════════════════════
 
 async def main():
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("ERROR: GEMINI_API_KEY not set")
+        print("ERROR: OPENAI_API_KEY or GEMINI_API_KEY not set")
         sys.exit(1)
 
     print("=" * 70)
     print("  Token Optimization 5-Stage Pipeline Test")
-    print(f"  Model: {GEMINI_MODEL}")
+    print(f"  Model: {LLM_MODEL}")
     print("=" * 70)
 
     # Stages 1-4: local (no API call)

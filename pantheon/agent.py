@@ -1419,7 +1419,7 @@ class Agent:
             from pantheon.utils.token_optimization import (
                 build_llm_view_async,
                 inject_cache_control_markers,
-                is_anthropic_model,
+                supports_explicit_cache_control,
             )
 
             run_context = get_current_run_context()
@@ -1434,9 +1434,11 @@ class Agent:
                 autocompact_model=model,
             )
             messages = process_messages_for_model(messages, model)
-            # Inject Anthropic prompt-cache markers so the server-side cache
-            # activates — mirrors Claude Code's getCacheControl() strategy.
-            if is_anthropic_model(model):
+            # Inject prompt-cache markers for providers that support
+            # explicit cache_control (Anthropic, Qwen).
+            # OpenAI/DeepSeek/Gemini use automatic prefix caching —
+            # stabilize_tool_definitions() ensures stable prefixes for them.
+            if supports_explicit_cache_control(model):
                 messages = inject_cache_control_markers(messages)
             if run_context is not None:
                 # Selective copy: shallow for messages with string content,
