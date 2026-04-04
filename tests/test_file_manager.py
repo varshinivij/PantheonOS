@@ -3,6 +3,8 @@ import pytest
 from tempfile import TemporaryDirectory
 from pantheon.toolsets.file import FileManagerToolSet
 
+HAS_OPENAI = bool(os.environ.get("OPENAI_API_KEY"))
+
 @pytest.fixture
 def temp_toolset():
     """Create a FileManagerToolSet with a temporary directory."""
@@ -660,3 +662,44 @@ async def test_two_phase_write_protocol(temp_toolset):
     assert "\\bibitem{ref1}" in content
     assert "INTRO_PLACEHOLDER" not in content
     assert "METHODS_PLACEHOLDER" not in content
+
+
+# ---------------------------------------------------------------------------
+# max_tokens auto-detection (PR #55 — 7920a72)
+# ---------------------------------------------------------------------------
+
+def test_max_tokens_auto_set():
+    """acompletion must auto-set max_tokens from model's max_output_tokens
+    when not explicitly provided (prevents Anthropic 4096 default truncation)."""
+    from pantheon.utils.provider_registry import get_model_info
+
+    # Anthropic model — the original failure case
+    info = get_model_info("anthropic/claude-3-haiku-20240307")
+    max_out = info.get("max_output_tokens", 0)
+    assert max_out > 4096, (
+        f"Expected max_output_tokens > 4096 for claude-3-haiku, got {max_out}"
+    )
+
+    # OpenAI model
+    info = get_model_info("openai/gpt-4.1-mini")
+    max_out = info.get("max_output_tokens", 0)
+    assert max_out > 0, f"Expected max_output_tokens > 0 for gpt-4.1-mini, got {max_out}"
+
+
+@pytest.mark.skipif(not HAS_OPENAI, reason="OPENAI_API_KEY not set")
+async def test_max_tokens_live_openai():
+    """Live test: acompletion sets max_tokens automatically, preventing truncation."""
+    from pantheon.utils.llm_providers import call_llm_provider, detect_provider
+
+    provider_config = detect_provider("openai/gpt-4.1-mini", False)
+    # Call with a simple prompt, no explicit max_tokens in model_params
+    message = await call_llm_provider(
+        config=provider_config,
+        messages=[
+            {"role": "system", "content": "Reply with exactly: OK"},
+            {"role": "user", "content": "Say OK"},
+        ],
+    )
+    assert isinstance(message, dict)
+    content = message.get("content", "")
+    assert len(content) > 0, "Expected non-empty response"
