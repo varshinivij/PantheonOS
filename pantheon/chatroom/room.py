@@ -239,7 +239,11 @@ class ChatRoom(ToolSet):
             self.worker.set_activity_callback(self._get_activity_status)
 
     def _get_activity_status(self) -> dict:
-        """Return current activity status for _ping responses."""
+        """Return current activity status for _ping responses.
+
+        Called synchronously from NATSRemoteWorker._ping().  Must not block.
+        psutil.cpu_percent(interval=None) is non-blocking; first call returns 0.0.
+        """
         active_threads = len(self.threads)
         bg_task_count = 0
         for team in self.chat_teams.values():
@@ -250,11 +254,23 @@ class ChatRoom(ToolSet):
                         if t.status == "running"
                     )
         has_active_tasks = active_threads > 0 or bg_task_count > 0
-        return {
+
+        metrics: dict = {
             "active_threads": active_threads,
             "bg_tasks": bg_task_count,
             "has_active_tasks": has_active_tasks,
         }
+
+        try:
+            import psutil
+            metrics["cpu_percent"] = round(psutil.cpu_percent(interval=None), 1)
+            vm = psutil.virtual_memory()
+            metrics["mem_used_mb"] = round(vm.used / 1024 / 1024, 1)
+            metrics["mem_percent"] = round(vm.percent, 1)
+        except Exception:
+            pass  # psutil unavailable or failed — omit silently
+
+        return metrics
 
     @staticmethod
     async def _update_litellm_cost_map():
