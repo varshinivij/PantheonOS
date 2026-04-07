@@ -2026,7 +2026,7 @@ class ChatRoom(ToolSet):
             }
         """
         try:
-            from pantheon.agent import _is_model_tag, _resolve_model_tag
+            from pantheon.agent import _is_model_tag, _resolve_model_tag, _parse_thinking_suffix
             from pantheon.utils.model_selector import get_model_selector
 
             # 1. Get team and find target agent
@@ -2041,20 +2041,27 @@ class ChatRoom(ToolSet):
                     "message": f"Agent '{agent_name}' not found in chat '{chat_id}'",
                 }
 
-            # 2. Validate provider if requested
+            # 2. Parse +think suffix (e.g. "high+think:medium" → thinking="medium")
+            clean_model, thinking = _parse_thinking_suffix(model)
+
+            # 3. Validate provider if requested
             if validate:
-                is_valid, error_msg = self._validate_model_provider(model)
+                is_valid, error_msg = self._validate_model_provider(clean_model)
                 if not is_valid:
                     return {"success": False, "message": error_msg}
 
-            # 3. Resolve model to list
-            if _is_model_tag(model):
-                resolved_models = _resolve_model_tag(model)
+            # 4. Resolve model to list
+            if _is_model_tag(clean_model):
+                resolved_models = _resolve_model_tag(clean_model)
             else:
-                resolved_models = [model]
+                resolved_models = [clean_model]
 
-            # 4. Update runtime agent
+            # 5. Update runtime agent
             target_agent.models = resolved_models
+            if thinking:
+                target_agent.model_params["thinking"] = thinking
+            else:
+                target_agent.model_params.pop("thinking", None)
 
             # 5. Persist to template file (if source_path exists)
             source_path = getattr(team, "_source_path", None)

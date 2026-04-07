@@ -66,11 +66,34 @@ def _get_default_model() -> list[str]:
         return [ULTIMATE_FALLBACK]
 
 
+def _parse_thinking_suffix(model_str: str) -> tuple[str, str | None]:
+    """Strip ``+think[:level]`` suffix from a model string.
+
+    Args:
+        model_str: Model name or tag, optionally ending with ``+think`` or
+            ``+think:low``/``+think:medium``/``+think:high``.
+
+    Returns:
+        (clean_model_str, thinking_level) where *thinking_level* is
+        ``"low"``, ``"medium"``, ``"high"``, or ``None``.
+    """
+    import re
+
+    match = re.search(r"\+think(?::(\w+))?$", model_str)
+    if not match:
+        return model_str, None
+    level = match.group(1) or "high"
+    if level not in ("low", "medium", "high"):
+        return model_str, None
+    return model_str[: match.start()], level
+
+
 def _is_model_tag(model_str: str) -> bool:
     """Check if a string is a model tag vs a model name.
 
     Model tags are quality/capability identifiers like "high", "normal,vision".
     Model names are actual model identifiers like "openai/gpt-4o", "gpt-4o-mini".
+    A ``+think[:level]`` suffix is allowed on any tag string.
 
     Args:
         model_str: The string to check
@@ -81,15 +104,18 @@ def _is_model_tag(model_str: str) -> bool:
     if not model_str or not model_str.strip():
         return False
 
+    # Strip +think suffix before checking
+    clean, _ = _parse_thinking_suffix(model_str)
+
     # Model names typically contain "/" (provider/model format)
-    if "/" in model_str:
+    if "/" in clean:
         return False
 
     # Check if all parts are known tags
     try:
         from .utils.model_selector import QUALITY_TAGS, CAPABILITY_MAP
 
-        parts = [p.strip().lower() for p in model_str.split(",")]
+        parts = [p.strip().lower() for p in clean.split(",")]
         all_known_tags = QUALITY_TAGS | set(CAPABILITY_MAP.keys())
 
         return all(part in all_known_tags for part in parts if part)
@@ -100,15 +126,19 @@ def _is_model_tag(model_str: str) -> bool:
 def _resolve_model_tag(tag: str) -> list[str]:
     """Resolve a tag string to a model list.
 
+    A ``+think[:level]`` suffix is stripped before resolution (it only
+    affects ``model_params``, not model selection).
+
     Args:
-        tag: Tag string like "high", "normal,vision"
+        tag: Tag string like "high", "normal,vision", "high+think"
 
     Returns:
         List of models as fallback chain
     """
     from .utils.model_selector import get_model_selector
 
-    return get_model_selector().resolve_model(tag)
+    clean, _ = _parse_thinking_suffix(tag)
+    return get_model_selector().resolve_model(clean)
 
 
 def _normalize_model_spec(
@@ -134,12 +164,15 @@ def _resolve_model_spec_with_current_provider(
     if not isinstance(model, str) or not _is_model_tag(model):
         return model
 
+    # Strip +think suffix — it doesn't affect model selection
+    clean, _ = _parse_thinking_suffix(model)
+
     if current_model and "/" in current_model:
         provider = current_model.split("/", 1)[0].strip().lower()
         if provider:
             from .utils.model_selector import get_model_selector
 
-            return get_model_selector().resolve_model_for_provider(model, provider)
+            return get_model_selector().resolve_model_for_provider(clean, provider)
 
     return model
 
@@ -561,6 +594,11 @@ class Agent:
         description: str | None = None,
         think_tool: bool = False,
     ):
+        # Parse +think suffix before any processing
+        thinking_level: str | None = None
+        if isinstance(model, str):
+            model, thinking_level = _parse_thinking_suffix(model)
+
         model = _normalize_model_spec(model)
         self.id = uuid4()
         self.name = name
@@ -585,6 +623,8 @@ class Agent:
             self.models = list(model)
 
         self.model_params = model_params or {}
+        if thinking_level:
+            self.model_params.setdefault("thinking", thinking_level)
         # Tool storage (simplified - unified handling)
         self._base_functions: dict[
             str, Callable

@@ -814,11 +814,21 @@ class ModelSelector:
         # Collect supported tags
         supported_tags = list(QUALITY_TAGS) + list(CAPABILITY_MAP.keys())
 
+        # Collect models that support reasoning/thinking
+        from .provider_registry import get_model_info
+        reasoning_models: list[str] = []
+        for provider_models in models_by_provider.values():
+            for model in provider_models:
+                info = get_model_info(model)
+                if info.get("supports_reasoning"):
+                    reasoning_models.append(model)
+
         return {
             "success": True,
             "available_providers": available_providers,
             "current_provider": current_provider,
             "models_by_provider": models_by_provider,
+            "reasoning_models": reasoning_models,
             "supported_tags": supported_tags,
         }
 

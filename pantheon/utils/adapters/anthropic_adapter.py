@@ -262,8 +262,10 @@ class AnthropicAdapter(BaseAdapter):
         if thinking:
             call_kwargs["thinking"] = thinking
         elif reasoning_effort:
-            # Map reasoning_effort to Anthropic thinking
-            call_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+            # Map reasoning_effort to Anthropic thinking with effort-based budget
+            effort_budgets = {"low": 5000, "medium": 10000, "high": 30000}
+            budget = effort_budgets.get(reasoning_effort, 10000)
+            call_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         # Temperature
         temperature = kwargs.pop("temperature", None)
