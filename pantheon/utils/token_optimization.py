@@ -173,10 +173,7 @@ def _save_state_payload(memory: Any | None, payload: dict[str, Any]) -> None:
     if memory is None:
         return
     normalized = _normalize_state_payload(payload)
-    if memory.extra_data.get(STATE_KEY) == normalized:
-        return
-    memory.extra_data[STATE_KEY] = normalized
-    memory.mark_dirty()
+    memory.set_metadata(STATE_KEY, normalized)
 
 
 def create_content_replacement_state() -> ContentReplacementState:

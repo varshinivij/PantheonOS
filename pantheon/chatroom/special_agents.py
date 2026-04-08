@@ -553,9 +553,11 @@ class ChatNameGenerator:
 
     def _update_metadata(self, memory: Memory, message_count: int):
         """Update simple metadata"""
-        memory.extra_data["name_generated"] = True
-        memory.extra_data["last_name_generation_message_count"] = message_count
-        memory.extra_data["last_name_generation_time"] = datetime.now().isoformat()
+        memory.update_metadata({
+            "name_generated": True,
+            "last_name_generation_message_count": message_count,
+            "last_name_generation_time": datetime.now().isoformat(),
+        })
 
 
 # ===== Singleton instances =====

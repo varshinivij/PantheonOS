@@ -1717,8 +1717,7 @@ class Repl(ReplUI):
                 # Read-only: clearing team template from extra_data, no need to fix
                 memory = await run_func(self._chatroom.memory_manager.get_memory, self._chat_id)
                 if hasattr(memory, "extra_data") and "team_template" in memory.extra_data:
-                    del memory.extra_data["team_template"]
-                    memory.mark_dirty()
+                    memory.delete_metadata("team_template")
                 # Clear cache so get_team_for_chat creates fresh default
                 self._chatroom.chat_teams.pop(self._chat_id, None)
                 self._team = await self._chatroom.get_team_for_chat(self._chat_id)

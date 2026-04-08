@@ -234,6 +234,48 @@ class Memory:
         automatically trigger persistence (unlike add_messages).
         """
         self._schedule_persist()
+
+    def set_metadata(self, key: str, value: object) -> bool:
+        """Set a metadata key and schedule debounced persistence if it changed."""
+        if self.extra_data.get(key) == value:
+            return False
+        self.extra_data[key] = value
+        self.mark_dirty()
+        return True
+
+    def set_metadata_in_memory(self, key: str, value: object) -> bool:
+        """Set a metadata key without scheduling persistence."""
+        if self.extra_data.get(key) == value:
+            return False
+        self.extra_data[key] = value
+        return True
+
+    def update_metadata(self, updates: dict[str, object]) -> bool:
+        """Update multiple metadata keys and schedule persistence if any changed."""
+        changed = False
+        for key, value in updates.items():
+            if self.extra_data.get(key) != value:
+                self.extra_data[key] = value
+                changed = True
+
+        if changed:
+            self.mark_dirty()
+        return changed
+
+    def delete_metadata(self, key: str) -> bool:
+        """Delete a metadata key and schedule persistence if it existed."""
+        if key not in self.extra_data:
+            return False
+        del self.extra_data[key]
+        self.mark_dirty()
+        return True
+
+    def delete_metadata_in_memory(self, key: str) -> bool:
+        """Delete a metadata key without scheduling persistence."""
+        if key not in self.extra_data:
+            return False
+        del self.extra_data[key]
+        return True
     
     def _schedule_persist(self):
         """Schedule debounced persistence (non-blocking).
@@ -522,7 +564,7 @@ class MemoryManager:
 
         # Reset running status
         if memory.extra_data.get("running"):
-            memory.extra_data["running"] = False
+            memory.set_metadata_in_memory("running", False)
 
         return memory
 

@@ -18,10 +18,7 @@ def _normalize_payload(memory: Any | None) -> dict[str, Any]:
 def _save_payload(memory: Any | None, payload: dict[str, Any]) -> None:
     if memory is None:
         return
-    if memory.extra_data.get(SESSION_STORAGE_KEY) == payload:
-        return
-    memory.extra_data[SESSION_STORAGE_KEY] = payload
-    memory.mark_dirty()
+    memory.set_metadata(SESSION_STORAGE_KEY, payload)
 
 
 def getSessionStorageState(memory: Any | None) -> dict[str, Any]:

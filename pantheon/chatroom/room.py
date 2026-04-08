@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import dataclasses
 import io
 try:
@@ -361,7 +362,7 @@ class ChatRoom(ToolSet):
         else:
             team_config = self.template_manager.dict_to_team_config(template_obj)
 
-        extra_data["team_template"] = dataclasses.asdict(team_config)
+        memory.set_metadata_in_memory("team_template", dataclasses.asdict(team_config))
 
     async def get_team_for_chat(self, chat_id: str, save_to_memory: bool = True) -> PantheonTeam:
         """Get the team for a specific chat, creating from memory if needed."""
@@ -409,10 +410,11 @@ class ChatRoom(ToolSet):
             team_template_dict = dataclasses.asdict(default_template)
 
             # Save default template to memory for this chat
-            extra_data["team_template"] = team_template_dict
             if save_to_memory:
-                memory.mark_dirty()
+                memory.set_metadata("team_template", team_template_dict)
                 logger.info(f"Saved default template to memory for chat {chat_id}")
+            else:
+                memory.set_metadata_in_memory("team_template", team_template_dict)
         else:
             logger.info(
                 f"Loading team from stored template '{team_template_dict.get('name', 'unknown')}' for chat {chat_id}"
@@ -429,8 +431,10 @@ class ChatRoom(ToolSet):
                 if original_template and original_template.source_path:
                     team_config.source_path = original_template.source_path
                     # Update memory with source_path for future loads
-                    team_template_dict["source_path"] = original_template.source_path
-                    memory.mark_dirty()
+                    updated_team_template = copy.deepcopy(team_template_dict)
+                    updated_team_template["source_path"] = original_template.source_path
+                    memory.set_metadata("team_template", updated_team_template)
+                    team_template_dict = updated_team_template
                     logger.info(f"Updated memory with source_path: {original_template.source_path}")
             except Exception as e:
                 logger.debug(f"Could not look up source_path for template {team_config.id}: {e}")
@@ -534,15 +538,12 @@ class ChatRoom(ToolSet):
             memory = await run_func(self.memory_manager.get_memory, chat_id)
             self._save_team_template_to_memory(memory, template_obj)
 
-            if "active_agent" in memory.extra_data:
-                del memory.extra_data["active_agent"]
+            memory.delete_metadata("active_agent")
             
             if save_to_memory:
-                # Mark memory as dirty to trigger delayed auto-persistence
-                # This is much faster than saving all chats immediately
-                memory.mark_dirty()
                 # Optionally: use save_one for immediate persistence of just this chat
                 # await run_func(self.memory_manager.save_one, chat_id)
+                pass
 
             # Clear cached team (force recreation next time)
             if chat_id in self.chat_teams:
@@ -943,7 +944,7 @@ class ChatRoom(ToolSet):
             workspace_mode: Workspace mode - "project" (shared, default) or "isolated" (per-chat).
         """
         memory = await run_func(self.memory_manager.new_memory, chat_name)
-        memory.extra_data["last_activity_date"] = datetime.now().isoformat()
+        memory.set_metadata("last_activity_date", datetime.now().isoformat())
 
         if workspace_path:
             # Explicit path provided — always isolated
@@ -975,7 +976,7 @@ class ChatRoom(ToolSet):
             project["workspace_path"] = workspace_path
             project["original_cwd"] = str(get_settings().workspace)
         if project:
-            memory.extra_data["project"] = project
+            memory.set_metadata("project", project)
 
         return {
             "success": True,
@@ -1048,9 +1049,16 @@ class ChatRoom(ToolSet):
         try:
             ids = await run_func(self.memory_manager.list_memories)
             chats = []
+            skipped_chats = []
             for id in ids:
-                # Read-only: listing chats, no need to fix
-                memory = await run_func(self.memory_manager.get_memory, id)
+                # Read-only: listing chats, no need to fix.
+                # Skip corrupted entries so one broken metadata file doesn't hide all chats.
+                try:
+                    memory = await run_func(self.memory_manager.get_memory, id)
+                except KeyError as e:
+                    logger.warning(f"Skipping unreadable chat {id}: {e}")
+                    skipped_chats.append({"id": id, "message": str(e)})
+                    continue
                 project = memory.extra_data.get("project", None)
 
                 # Filter by project_name if specified
@@ -1078,10 +1086,13 @@ class ChatRoom(ToolSet):
                 reverse=True,
             )
 
-            return {
+            result = {
                 "success": True,
                 "chats": chats,
             }
+            if skipped_chats:
+                result["skipped_chats"] = skipped_chats
+            return result
         except Exception as e:
             import traceback
 
@@ -1187,7 +1198,7 @@ class ChatRoom(ToolSet):
 
         try:
             memory = await run_func(self.memory_manager.get_memory, chat_id)
-            project = memory.extra_data.get("project", {})
+            project = copy.deepcopy(memory.extra_data.get("project", {}))
             if not isinstance(project, dict):
                 project = {}
 
@@ -1208,8 +1219,7 @@ class ChatRoom(ToolSet):
                     return {"success": False, "message": f"Failed to create workspace: {e}"}
 
             project["workspace_mode"] = workspace_mode
-            memory.extra_data["project"] = project
-            memory.mark_dirty()
+            memory.set_metadata("project", project)
 
             return {
                 "success": True,
@@ -1247,11 +1257,11 @@ class ChatRoom(ToolSet):
 
             if project_name is None and workspace_path is None and workspace_mode is None and not kwargs:
                 # Remove project metadata
-                memory.extra_data.pop("project", None)
+                memory.delete_metadata("project")
                 message = "Project metadata removed"
             else:
                 # Create or update project object
-                project = memory.extra_data.get("project", {})
+                project = copy.deepcopy(memory.extra_data.get("project", {}))
                 if not isinstance(project, dict):
                     project = {}
 
@@ -1267,10 +1277,8 @@ class ChatRoom(ToolSet):
                     if value is not None:
                         project[key] = value
 
-                memory.extra_data["project"] = project
+                memory.set_metadata("project", project)
                 message = f"Project metadata updated for chat"
-
-            memory.mark_dirty()
             return {"success": True, "message": message}
         except Exception as e:
             logger.error(f"Error setting chat project: {e}")
@@ -1596,8 +1604,10 @@ class ChatRoom(ToolSet):
             memory = await run_func(self.memory_manager.get_memory, chat_id, True)
         except KeyError:
             return {"success": False, "message": f"Chat '{chat_id}' not found"}
-        memory.extra_data["running"] = True
-        memory.extra_data["last_activity_date"] = datetime.now().isoformat()
+        memory.update_metadata({
+            "running": True,
+            "last_activity_date": datetime.now().isoformat(),
+        })
 
         async def team_getter():
             return await self.get_team_for_chat(chat_id)
@@ -1675,8 +1685,10 @@ class ChatRoom(ToolSet):
 
             # Protect persistent state updates from cancellation
             async def _cleanup_persistent_state():
-                memory.extra_data["running"] = False
-                memory.extra_data["last_activity_date"] = datetime.now().isoformat()
+                memory.update_metadata({
+                    "running": False,
+                    "last_activity_date": datetime.now().isoformat(),
+                })
                 try:
                     await run_func(self.memory_manager.save_one, chat_id)
                 except Exception as e:
@@ -1853,13 +1865,11 @@ class ChatRoom(ToolSet):
 
             # Cache suggestions in memory
             if suggestions:
-                memory.extra_data["cached_suggestions"] = suggestions
-                memory.extra_data["last_suggestion_message_count"] = len(messages)
-                memory.extra_data["suggestions_generated_at"] = (
-                    datetime.now().isoformat()
-                )
-                # Use delayed save for caching (non-critical)
-                memory.mark_dirty()
+                memory.update_metadata({
+                    "cached_suggestions": suggestions,
+                    "last_suggestion_message_count": len(messages),
+                    "suggestions_generated_at": datetime.now().isoformat(),
+                })
 
             logger.debug(f"Generated {len(suggestions)} suggestions for chat {chat_id}")
 
@@ -2113,7 +2123,7 @@ class ChatRoom(ToolSet):
             # Also update memory template for current session
             # Read-only: updating model config, no need to fix
             memory = await run_func(self.memory_manager.get_memory, chat_id)
-            team_template = memory.extra_data.get("team_template", {})
+            team_template = copy.deepcopy(memory.extra_data.get("team_template", {}))
 
             # Update the agent's model in template (case-insensitive match)
             for agent_config in team_template.get("agents", []):
@@ -2123,8 +2133,7 @@ class ChatRoom(ToolSet):
                     )
                     break
 
-            memory.extra_data["team_template"] = team_template
-            memory.mark_dirty()
+            memory.set_metadata("team_template", team_template)
 
             logger.info(
                 f"Set model for agent '{agent_name}' in chat '{chat_id}': {model} -> {resolved_models}"
