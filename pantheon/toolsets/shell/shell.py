@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import uuid
 from pathlib import Path
@@ -6,7 +7,10 @@ from pathlib import Path
 from ._shell import AsyncShell, ShellStatus
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.log import logger
+from pantheon.utils.image_detection import snapshot_images, diff_snapshots, encode_images_to_uris
 from pantheon.internal.package_runtime.context import build_context_env
+
+_PYTHON_CMD_RE = re.compile(r"(?:^|\s|&&|\|)python[23]?\s", re.IGNORECASE)
 
 
 class ShellToolSet(ToolSet):
@@ -371,6 +375,11 @@ PANTHEON_ENV_EOF
             run_command(command="ls -la")
             run_command(command="R -e 'install(...)'", max_output=5000)
         """
+        # Snapshot image files before execution so we can detect new ones
+        pre_snapshot: dict[str, float] = {}
+        if command and _PYTHON_CMD_RE.search(command):
+            pre_snapshot = self._snapshot_images()
+
         # If shell_id is provided, use it directly (Manual Mode)
         if shell_id:
             result = await self.run_command_in_shell(
@@ -447,6 +456,40 @@ PANTHEON_ENV_EOF
             # No max_output specified
             result["truncated"] = False
 
+        # Detect images produced by Python/matplotlib commands so claw
+        # channels (e.g. Telegram) can forward them to the user.
+        if result.get("success") and command and _PYTHON_CMD_RE.search(command):
+            result = self._attach_new_images(result, pre_snapshot)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Image detection helpers
+    # ------------------------------------------------------------------
+
+    def _snapshot_images(self) -> dict[str, float]:
+        """Return {path: mtime} for image files in the working directory."""
+        scan_dir = self._get_effective_workdir() or str(self.workdir)
+        return snapshot_images(scan_dir)
+
+    def _attach_new_images(
+        self, result: dict, pre_snapshot: dict[str, float]
+    ) -> dict:
+        """Compare pre/post snapshots; base64-encode any new or updated images.
+
+        Paths under the designated image output directory are excluded
+        because ``room.py`` handles those via its own post-execution scan.
+        """
+        from pantheon.utils.image_detection import IMAGE_OUTPUT_DIR
+        post = self._snapshot_images()
+        new_paths = diff_snapshots(pre_snapshot, post)
+        # Exclude files in the designated image output dir to avoid duplicates
+        new_paths = [p for p in new_paths if IMAGE_OUTPUT_DIR not in p]
+        if new_paths:
+            uris = encode_images_to_uris(new_paths)
+            if uris:
+                result["base64_uri"] = uris
+                result["hidden_to_model"] = ["base64_uri"]
         return result
 
     def _should_restart(self, error_message: str | None) -> bool:
