@@ -228,21 +228,25 @@ class WeChatGatewayBot(ChannelRuntime):
         return uris
 
     async def _send_image(self, to_user_id: str, context_token: str, data_uri: str) -> None:
-        raw, _mime = data_uri_to_bytes(data_uri)
+        """Send image to WeChat user.
+
+        Note: WeChat iLink API requires CDN upload with AES encryption for
+        images. Full CDN upload is not yet implemented, so images are saved
+        locally and the user is notified with a text message.
+        """
+        raw, mime = data_uri_to_bytes(data_uri)
         if not raw:
-            logger.warning(f"[WeChat] _send_image: data_uri_to_bytes returned empty, uri length={len(data_uri)}")
             return
-        logger.info(f"[WeChat] _send_image: sending {len(raw)} bytes to {to_user_id}")
-        try:
-            await asyncio.to_thread(
-                self._client.send_image,
-                to_user_id=to_user_id,
-                image_data=raw,
-                context_token=context_token,
-            )
-            logger.info("[WeChat] _send_image: success")
-        except Exception as e:
-            logger.warning(f"[WeChat] _send_image failed: {e}")
+        # Save image locally as fallback
+        import os, tempfile
+        ext = mime.split("/")[-1] if mime else "png"
+        tmp_dir = os.path.join(tempfile.gettempdir(), "pantheon_claw_images")
+        os.makedirs(tmp_dir, exist_ok=True)
+        img_path = os.path.join(tmp_dir, f"image_{os.urandom(4).hex()}.{ext}")
+        with open(img_path, "wb") as f:
+            f.write(raw)
+        # TODO: Implement CDN upload (getuploadurl + AES-128-ECB + PUT) for native image sending
+        await self._send_text(to_user_id, context_token, f"📷 [Image generated — view in Pantheon UI]")
 
     async def _handle_control(
         self,
