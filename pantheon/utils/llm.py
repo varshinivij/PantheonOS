@@ -558,11 +558,10 @@ def stream_chunk_builder(chunks: list[dict]) -> Any:
         final_tool_calls = [tool_calls_map[i] for i in sorted(tool_calls_map.keys())]
 
     # Build message
-    # For reasoning models that put everything in reasoning_content with no content,
-    # fall back to reasoning_content so the response isn't empty
+    # Keep content and reasoning_content separate so the frontend can
+    # render reasoning in a dedicated "Thinking" section instead of
+    # mixing it into the main response text.
     effective_content = full_content or None
-    if not effective_content and full_reasoning:
-        effective_content = full_reasoning
 
     message = SimpleNamespace(
         role=role,
