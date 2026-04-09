@@ -96,6 +96,30 @@ class DiscordGatewayBot(discord.Client, ChannelRuntime):
         return uris
 
     @staticmethod
+    async def _download_documents(message: discord.Message) -> list[tuple[str, str]]:
+        """Download non-image file attachments and save locally.
+        Returns list of (filename, local_path) tuples.
+        """
+        import os, tempfile
+        results: list[tuple[str, str]] = []
+        for att in message.attachments:
+            ct = att.content_type or ""
+            if ct.startswith("image/"):
+                continue  # handled by _download_attachments
+            file_name = att.filename or "uploaded_file"
+            tmp_dir = os.path.join(tempfile.gettempdir(), "pantheon_claw_uploads")
+            os.makedirs(tmp_dir, exist_ok=True)
+            local_path = os.path.join(tmp_dir, file_name)
+            try:
+                data = await att.read()
+                with open(local_path, "wb") as f:
+                    f.write(data)
+                results.append((file_name, local_path))
+            except Exception:
+                logger.debug("Discord document download failed: %s", file_name)
+        return results
+
+    @staticmethod
     async def _send_image(channel, data_uri: str) -> None:
         """Send a base64 data-URI as a file to a Discord channel."""
         import io as _io
@@ -234,9 +258,19 @@ class DiscordGatewayBot(discord.Client, ChannelRuntime):
         # Download image attachments
         image_uris = await self._download_attachments(message)
 
+        # Download non-image files and inject as attachments
+        docs = await self._download_documents(message)
+
         text = message.content or ""
         if self.user is not None and not isinstance(message.channel, discord.DMChannel):
             text = text.replace(self.user.mention, "").strip()
+
+        if docs:
+            attachment_text = "--- Attachments ---\nUser attached the following files:\n"
+            for fname, fpath in docs:
+                attachment_text += f"{fname}: {fpath}\n"
+            attachment_text += "--- End of Attachments ---\n"
+            text = attachment_text + (text or f"I've uploaded {', '.join(n for n, _ in docs)}.")
 
         if not text and not image_uris:
             return
