@@ -78,7 +78,8 @@ class SlackGatewayApp(ChannelRuntime):
             return False
         if result.get("clear_pending"):
             self._clear_pending(route.route_key())
-        await self._post(client, body, result.get("message") or "", thread=bool(route.thread_id))
+        is_thread = route.scope_type != "dm" or bool(body.get("event", {}).get("thread_ts"))
+        await self._post(client, body, result.get("message") or "", thread=is_thread)
         return True
 
     async def _download_files(self, client, event: dict[str, Any]) -> list[str]:
@@ -189,7 +190,10 @@ class SlackGatewayApp(ChannelRuntime):
         sender_name: str | None = None,
     ) -> None:
         route_key = route.route_key()
-        placeholder = await self._post(client, body, ":thinking_face: Thinking...", thread=bool(route.thread_id))
+        # Always reply in a thread when in channels (use event's thread_ts or ts)
+        event = body.get("event", {})
+        is_thread = route.scope_type != "dm" or bool(event.get("thread_ts"))
+        placeholder = await self._post(client, body, ":thinking_face: Thinking...", thread=is_thread)
         placeholder_ts = str(placeholder["ts"])
         llm_buf: list[str] = []
         image_buf: list[str] = []
@@ -296,7 +300,7 @@ class SlackGatewayApp(ChannelRuntime):
             route_key = route.route_key()
             if self._get_running(route_key) is not None:
                 self._queue_message(route_key, tail or text or "[file]")
-                await self._post(client, body, "Queued after current analysis.", thread=bool(route.thread_id))
+                await self._post(client, body, "Queued after current analysis.", thread=route.scope_type != "dm")
                 return
             # Resolve sender name for group context
             sender_name = None
