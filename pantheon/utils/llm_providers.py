@@ -77,9 +77,9 @@ def detect_provider(model: str, relaxed_schema: bool) -> ProviderConfig:
         provider_lower = provider_prefix.lower()
 
         if provider_lower == "custom":
-            from pantheon.settings import get_settings
-            custom_models = get_settings().get("models.custom_models", {})
-            if isinstance(custom_models, dict) and model_name in custom_models:
+            from .model_selector import _load_custom_models_config
+            custom_models = _load_custom_models_config()
+            if model_name in custom_models:
                 cfg = custom_models[model_name]
                 custom_base = cfg.get("api_base", "")
                 custom_key = cfg.get("api_key", "")

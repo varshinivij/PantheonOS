@@ -2,6 +2,7 @@ import asyncio
 import copy
 import dataclasses
 import io
+import json as _json
 try:
     import psutil as _psutil
     _psutil_process = _psutil.Process()
@@ -33,6 +34,30 @@ if TYPE_CHECKING:
 
 
 DEFAULT_TOOLSETS = []
+
+
+def _custom_models_path() -> Path:
+    """Path to the custom models config file."""
+    from pantheon.settings import get_settings
+    return get_settings().pantheon_dir / "custom_models.json"
+
+
+def _load_custom_models() -> dict:
+    """Load user-defined custom models from custom_models.json."""
+    p = _custom_models_path()
+    if p.exists():
+        try:
+            return _json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_custom_models(models: dict) -> None:
+    """Save user-defined custom models to custom_models.json."""
+    p = _custom_models_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(models, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 class ChatRoom(ToolSet):
@@ -2367,39 +2392,21 @@ class ChatRoom(ToolSet):
     @tool
     async def get_custom_models(self) -> dict:
         """Get all user-defined custom models."""
-        from pantheon.settings import get_settings
-        models = get_settings().get("models.custom_models", {})
-        return {"success": True, "models": models if isinstance(models, dict) else {}}
+        models = _load_custom_models()
+        return {"success": True, "models": models}
 
     @tool
     async def save_custom_models(self, models: dict) -> dict:
-        """Save user-defined custom models to settings.json.
+        """Save user-defined custom models.
 
         Args:
             models: Dict of model_name -> {api_base, api_key, provider_type}
         """
         try:
-            import json
-            from pantheon.settings import get_settings
-            settings = get_settings()
-            settings_path = settings.pantheon_dir / "settings.json"
-
-            # Read existing settings
-            if settings_path.exists():
-                data = json.loads(settings_path.read_text(encoding="utf-8"))
-            else:
-                data = {}
-
-            # Update custom_models under models key
-            if "models" not in data:
-                data["models"] = {}
-            data["models"]["custom_models"] = models
-
-            # Write back
-            settings_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
-
-            # Reload
-            settings.reload()
+            _save_custom_models(models)
+            # Reset model selector cache so new models appear
+            from pantheon.utils.model_selector import reset_model_selector
+            reset_model_selector()
             return {"success": True, "message": "Custom models saved"}
         except Exception as e:
             return {"success": False, "message": str(e)}

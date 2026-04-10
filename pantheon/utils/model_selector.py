@@ -19,6 +19,21 @@ from typing import TYPE_CHECKING
 
 from .log import logger
 
+
+def _load_custom_models_config() -> dict:
+    """Load user-defined custom models from .pantheon/custom_models.json."""
+    import json
+    try:
+        from pantheon.settings import get_settings
+        p = get_settings().pantheon_dir / "custom_models.json"
+        if p.exists():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
 if TYPE_CHECKING:
     from pantheon.settings import Settings
 
@@ -322,9 +337,9 @@ class ModelSelector:
             if os.environ.get(config.api_key_env, "") or settings.get_api_key(config.api_key_env):
                 self._available_providers.add(provider_key)
 
-        # Check user-defined custom models from settings.json
-        custom_models = settings.get("models.custom_models", {})
-        if isinstance(custom_models, dict) and custom_models:
+        # Check user-defined custom models from custom_models.json
+        custom_models = _load_custom_models_config()
+        if custom_models:
             self._available_providers.add("custom")
 
         # Check OAuth providers (e.g., Codex, Gemini CLI)
@@ -436,11 +451,10 @@ class ModelSelector:
                 return {"high": [prefixed], "normal": [prefixed], "low": [prefixed]}
             return {}
 
-        # User-defined custom models from settings.json
+        # User-defined custom models from custom_models.json
         if provider == "custom":
-            from pantheon.settings import get_settings
-            custom_models = get_settings().get("models.custom_models", {})
-            if isinstance(custom_models, dict) and custom_models:
+            custom_models = _load_custom_models_config()
+            if custom_models:
                 prefixed = [f"custom/{name}" for name in custom_models]
                 return {"high": prefixed, "normal": prefixed, "low": prefixed}
             return {}
