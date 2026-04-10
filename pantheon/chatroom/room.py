@@ -2371,6 +2371,7 @@ class ChatRoom(ToolSet):
         models = get_settings().get("models.custom_models", {})
         return {"success": True, "models": models if isinstance(models, dict) else {}}
 
+    @tool
     async def save_custom_models(self, models: dict) -> dict:
         """Save user-defined custom models to settings.json.
 
