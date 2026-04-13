@@ -38,9 +38,25 @@ def test_open_url_in_windows_browser_falls_back_to_cmd(monkeypatch):
 
     assert start._open_url_in_windows_browser("https://example.com") is True
     assert commands == [
-        ["powershell.exe", "-NoProfile", "-Command", "Start-Process", "https://example.com"],
-        ["cmd.exe", "/c", "start", "", "https://example.com"],
+        ["powershell.exe", "-NoProfile", "-Command", 'Start-Process "https://example.com"'],
+        ["cmd.exe", "/c", 'start "" "https://example.com"'],
     ]
+
+
+def test_open_url_in_windows_browser_quotes_url_with_ampersand(monkeypatch):
+    """URLs with & (common in query strings) must be quoted for cmd.exe."""
+    commands = []
+
+    def fake_run(command, check, stdout, stderr):
+        commands.append(command)
+        return None
+
+    monkeypatch.setattr(start.subprocess, "run", fake_run)
+
+    url = "http://localhost:5173/#/?nats=ws://localhost:8080&service=abc&auto=true"
+    assert start._open_url_in_windows_browser(url) is True
+    # PowerShell command should have the URL quoted
+    assert f'"{url}"' in commands[0][3]
 
 
 def test_open_url_in_windows_browser_raises_when_all_launchers_fail(monkeypatch):

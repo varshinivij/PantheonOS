@@ -36,10 +36,15 @@ def _open_url_in_windows_browser(url: str) -> bool:
     Open a URL using the Windows default browser from WSL.
 
     Returns True once one of the Windows launch commands succeeds.
+
+    Note: URLs are quoted to prevent shell metacharacters (e.g. & in query
+    strings) from being interpreted by cmd.exe or PowerShell.
     """
+    # Quote the URL so & and other shell metacharacters are not interpreted
+    quoted = f'"{url}"'
     launch_commands = [
-        ["powershell.exe", "-NoProfile", "-Command", "Start-Process", url],
-        ["cmd.exe", "/c", "start", "", url],
+        ["powershell.exe", "-NoProfile", "-Command", f"Start-Process {quoted}"],
+        ["cmd.exe", "/c", f"start \"\" {quoted}"],
     ]
 
     last_error = None
@@ -49,11 +54,12 @@ def _open_url_in_windows_browser(url: str) -> bool:
                 command,
                 check=True,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
             return True
         except (FileNotFoundError, subprocess.CalledProcessError) as exc:
             last_error = exc
+            logger.debug(f"[FRONTEND] WSL browser command failed: {command[0]}: {exc}")
 
     if last_error is not None:
         raise RuntimeError(
