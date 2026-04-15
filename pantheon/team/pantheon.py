@@ -673,8 +673,9 @@ class PantheonTeam(Team):
                 sub_agent_result = {
                     "agent_name": target_agent.name,
                     "messages": child_memory._messages,
-                    "chat_id": parent_chat_id,
-                    "question": instruction,  # For sub-agents, include the delegation instruction
+                    "chat_id": parent_chat_id,   # parent chat id for session grouping
+                    "memory": child_memory,       # sub-agent's own memory (messages consistent)
+                    "question": instruction,      # marks this as a sub-agent run — plugins skip on this key
                 }
                 await self._call_plugin_hook("on_run_end", self, sub_agent_result)
 
@@ -739,9 +740,26 @@ class PantheonTeam(Team):
             await self.add_list_agents_tool()
             await self.add_unified_call_agent_tool()
         
+        # Inject toolsets declared by plugins.
+        # Plugins that need per-LLM-call hooks (ephemeral messages, tool tracking)
+        # register closures directly on the target agent inside get_toolsets().
+        for plugin in self.plugins:
+            try:
+                toolset_specs = await plugin.get_toolsets(self)
+                for toolset_instance, agent_names in toolset_specs:
+                    targets = (
+                        [a for a in self.team_agents if a.name in agent_names]
+                        if agent_names is not None
+                        else self.team_agents
+                    )
+                    for agent in targets:
+                        await agent.toolset(toolset_instance)
+            except Exception as e:
+                logger.warning(f"Plugin {plugin.__class__.__name__}.get_toolsets() failed: {e}")
+
         # Call plugin lifecycle hook
         await self._call_plugin_hook("on_team_created", self)
-        
+
         self._is_initialized = True
 
     async def run(self, msg: AgentInput, memory: Memory | None = None, **kwargs):
@@ -749,12 +767,15 @@ class PantheonTeam(Team):
         if memory is None:
             memory = Memory(name="pantheon-team")
 
-        # Call on_run_start hook for plugins
+        # Call on_run_start hook for plugins; allow plugins to return a modified msg.
         run_context = {
             "memory": memory,
             "kwargs": kwargs,
         }
-        await self._call_plugin_hook("on_run_start", self, msg, run_context)
+        for plugin in self.plugins:
+            result = await run_func(plugin.on_run_start, self, msg, run_context)
+            if result is not None:
+                msg = result
 
         # Record turn start for learning
         turn_start_index = len(memory._messages)
@@ -790,6 +811,7 @@ class PantheonTeam(Team):
                         "agent_name": active_agent.name,
                         "messages": current_messages,
                         "chat_id": memory.id or "",
+                        "memory": memory,
                     }
                     await self._call_plugin_hook("on_run_end", self, run_result)
                 return resp
