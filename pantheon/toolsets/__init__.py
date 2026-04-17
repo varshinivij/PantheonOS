@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from .knowledge import KnowledgeToolSet
     from .evolution import EvolutionToolSet, EvaluatorToolSet
     from .scfm import SCFMToolSet
-    from .gene_panel_selection_tool import GenePanelToolSet
 
 _TOOLSET_MAPPING = {
     "PythonInterpreterToolSet": ".python",
@@ -42,7 +41,6 @@ _TOOLSET_MAPPING = {
     "EvolutionToolSet": ".evolution",
     "EvaluatorToolSet": ".evolution",
     "SCFMToolSet": ".scfm",
-    "GenePanelToolSet": ".gene_panel_selection_tool",
 }
 
 __all__ = list(_TOOLSET_MAPPING.keys())
