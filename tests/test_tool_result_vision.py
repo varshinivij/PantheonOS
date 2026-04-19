@@ -76,6 +76,13 @@ class TestCapabilityDetection:
         # codex and *-pro models go through Responses API which supports images
         assert supports_tool_result_image("codex-mini-latest") is True
 
+    def test_codex_oauth_supported(self):
+        # Codex OAuth (codex/gpt-5.x) uses the backend-api Responses endpoint
+        # which supports input_image in function_call_output.
+        assert supports_tool_result_image("codex/gpt-5.4") is True
+        assert supports_tool_result_image("codex/gpt-5.4-mini") is True
+        assert supports_tool_result_image("codex/gpt-5.2-codex") is True
+
     def test_proxy_mode_forces_false(self, monkeypatch):
         """When LLM_API_BASE is set (LiteLLM proxy), all calls route through
         Chat Completions — even 'anthropic/...'. The sanitiser would strip
@@ -637,6 +644,45 @@ class TestAgentContentBlocksMerge:
         # Old-style tool results with content: str must NOT trigger native path.
         result = {"success": True, "content": "plain text"}
         assert self._detect_native(result) is None
+
+    def test_guard_empty_tool_results_preserves_content_blocks(self):
+        """guard_empty_tool_results must NOT replace a list of content blocks
+        with '[No output]' — that path silently drops image payloads."""
+        from pantheon.utils.token_optimization import (
+            guard_empty_tool_results,
+            EMPTY_TOOL_RESULT_PLACEHOLDER,
+        )
+
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "c",
+                "content": [
+                    {"type": "text", "text": "summary"},
+                    {"type": "image_url", "image_url": {"url": _TINY_PNG_DATA_URI}},
+                ],
+            },
+        ]
+        out = guard_empty_tool_results(messages)
+        assert out[0]["content"] != EMPTY_TOOL_RESULT_PLACEHOLDER
+        assert isinstance(out[0]["content"], list)
+        assert any(b.get("type") == "image_url" for b in out[0]["content"])
+
+    def test_guard_empty_tool_results_still_replaces_truly_empty(self):
+        from pantheon.utils.token_optimization import (
+            guard_empty_tool_results,
+            EMPTY_TOOL_RESULT_PLACEHOLDER,
+        )
+
+        # Plain empty string → gets placeholder
+        messages = [{"role": "tool", "tool_call_id": "c", "content": ""}]
+        out = guard_empty_tool_results(messages)
+        assert out[0]["content"] == EMPTY_TOOL_RESULT_PLACEHOLDER
+
+        # Empty list → also placeholder
+        messages = [{"role": "tool", "tool_call_id": "c", "content": []}]
+        out = guard_empty_tool_results(messages)
+        assert out[0]["content"] == EMPTY_TOOL_RESULT_PLACEHOLDER
 
     def test_structured_data_preserved_when_peeled(self):
         """After extracting content_blocks, remaining dict keeps other fields."""

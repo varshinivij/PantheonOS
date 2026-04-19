@@ -58,6 +58,12 @@ def supports_tool_result_image(model: str | None) -> bool:
         return True
     if prefix in {"gemini", "google"}:
         return True
+    # Codex OAuth (codex/gpt-5.x) routes through the backend-api Responses
+    # endpoint which supports input_image in function_call_output. The codex
+    # adapter shares _convert_messages_to_responses_input with the main
+    # Responses API path, so the same image-in-tool-output encoding works.
+    if prefix == "codex":
+        return True
     # Bare model names without provider prefix.
     if not prefix:
         if tail.startswith("claude") or tail.startswith("gemini"):
@@ -71,7 +77,7 @@ def supports_tool_result_image(model: str | None) -> bool:
             # Any NATIVE-routed model with recognised prefix handled above;
             # otherwise default conservative.
             bare_model = config.model_name.lower()
-            if bare_model.startswith(("anthropic/", "claude", "gemini", "google/")):
+            if bare_model.startswith(("anthropic/", "claude", "gemini", "google/", "codex/")):
                 return True
             return False
         if is_responses_api_model(config):
