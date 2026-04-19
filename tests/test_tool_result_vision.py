@@ -88,11 +88,12 @@ class TestCapabilityDetection:
         Chat Completions — even 'anthropic/...'. The sanitiser would strip
         images, so native mode would degrade to a placeholder. Return False
         to defer to the sub-agent fallback instead."""
-        # Patch at source module so the in-function `from .llm_providers
-        # import get_llm_proxy_config` picks up the patched version.
+        # Patch at source module so the in-function
+        # `from .llm_providers import get_global_fallback_base_url`
+        # picks up the patched version.
         monkeypatch.setattr(
-            "pantheon.utils.llm_providers.get_llm_proxy_config",
-            lambda: ("https://proxy.example.com", "sk-virtual"),
+            "pantheon.utils.llm_providers.get_global_fallback_base_url",
+            lambda: "https://proxy.example.com",
         )
         # Even Anthropic models should be False in proxy mode.
         assert supports_tool_result_image("anthropic/claude-sonnet-4-6") is False
@@ -103,8 +104,8 @@ class TestCapabilityDetection:
     def test_non_proxy_mode_preserves_native(self, monkeypatch):
         """Without proxy, native support stands (regression guard)."""
         monkeypatch.setattr(
-            "pantheon.utils.llm_providers.get_llm_proxy_config",
-            lambda: (None, None),
+            "pantheon.utils.llm_providers.get_global_fallback_base_url",
+            lambda: "",
         )
         assert supports_tool_result_image("anthropic/claude-sonnet-4-6") is True
         assert supports_tool_result_image("gemini/gemini-2.5-pro") is True

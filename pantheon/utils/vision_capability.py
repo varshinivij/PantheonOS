@@ -41,9 +41,8 @@ def supports_tool_result_image(model: str | None) -> bool:
     # would trick observe_images into returning image blocks that get
     # silently stripped downstream, which is worse than the sub-agent
     # fallback (which produces a text summary).
-    from .llm_providers import get_llm_proxy_config
-    proxy_base, _ = get_llm_proxy_config()
-    if proxy_base:
+    from .llm_providers import get_global_fallback_base_url
+    if get_global_fallback_base_url():
         return False
 
     bare = model.lower()
