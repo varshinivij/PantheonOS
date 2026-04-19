@@ -58,12 +58,31 @@ def _api_version(model: str) -> str:
     return "v1beta"
 
 
-def _build_url(model: str, api_key: str, *, stream: bool = True) -> str:
+def _get_gemini_api_base(base_url: str | None = None) -> str:
+    """Resolve the Gemini API base URL from call args, settings, or default."""
+    if base_url:
+        return base_url.rstrip("/")
+
+    try:
+        from pantheon.settings import get_settings
+
+        configured = get_settings().get_api_key("GEMINI_API_BASE")
+        if configured:
+            return configured.rstrip("/")
+    except Exception:
+        pass
+
+    return _GEMINI_API_BASE
+
+
+def _build_url(
+    model: str, api_key: str, *, stream: bool = True, base_url: str | None = None
+) -> str:
     """Build the Gemini REST API URL."""
     bare = model.split("/")[-1] if "/" in model else model
     version = _api_version(model)
     endpoint = "streamGenerateContent" if stream else "generateContent"
-    url = f"{_GEMINI_API_BASE}/{version}/models/{bare}:{endpoint}?key={api_key}"
+    url = f"{_get_gemini_api_base(base_url)}/{version}/models/{bare}:{endpoint}?key={api_key}"
     if stream:
         url += "&alt=sse"
     return url
@@ -311,7 +330,7 @@ class GeminiAdapter(BaseAdapter):
         if modalities:
             request_body.setdefault("generationConfig", {})["responseModalities"] = modalities
 
-        url = _build_url(model, key, stream=True)
+        url = _build_url(model, key, stream=True, base_url=base_url)
 
         try:
             stream_start_time = time.time()
@@ -488,7 +507,8 @@ class GeminiAdapter(BaseAdapter):
             raise ValueError("GEMINI_API_KEY is required")
 
         bare = model.split("/")[-1] if "/" in model else model
-        url = f"{_GEMINI_API_BASE}/v1beta/models/{bare}:embedContent?key={key}"
+        base = _get_gemini_api_base(base_url)
+        url = f"{base}/v1beta/models/{bare}:embedContent?key={key}"
 
         results = []
         async with httpx.AsyncClient(timeout=30) as client:

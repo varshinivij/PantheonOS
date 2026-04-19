@@ -28,6 +28,15 @@ from dotenv import load_dotenv
 from .utils.log import logger
 
 
+LEGACY_API_KEY_ENV_MAP = {
+    "OPENAI_API_KEY": "CUSTOM_OPENAI_API_KEY",
+    "OPENAI_API_BASE": "CUSTOM_OPENAI_API_BASE",
+    "ANTHROPIC_API_KEY": "CUSTOM_ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_BASE": "CUSTOM_ANTHROPIC_API_BASE",
+}
+_warned_legacy_api_keys: set[str] = set()
+
+
 def strip_jsonc_comments(content: str) -> str:
     """
     Strip JavaScript-style comments from JSONC content.
@@ -166,7 +175,10 @@ class Settings:
             - .env file: OPENAI_API_KEY=sk-...
             - settings.json api_keys section
 
-            Use LLM Proxy mode for secure API key handling (set LLM_API_BASE environment variable).
+            Use provider-specific API keys and optional Base URLs.
+            LLM_API_BASE acts as a global Base URL fallback when a provider-
+            specific *_API_BASE is not configured. LLM_API_KEY remains an
+            optional OpenAI-routed fallback key.
         """
         from .constant import PROJECT_ROOT
 
@@ -483,6 +495,22 @@ class Settings:
             )
             return env_value
 
+        legacy_key = LEGACY_API_KEY_ENV_MAP.get(key)
+        if legacy_key:
+            legacy_env_value = os.environ.get(legacy_key)
+            if legacy_env_value:
+                if legacy_key not in _warned_legacy_api_keys:
+                    logger.warning(
+                        f"{legacy_key} is deprecated and loaded only for compatibility. "
+                        f"Please migrate to {key}."
+                    )
+                    _warned_legacy_api_keys.add(legacy_key)
+                logger.debug(
+                    f"[SETTINGS.GET_API_KEY] ✓ Retrieved key {key} from legacy "
+                    f"os.environ[{legacy_key}] | ValueLength={len(legacy_env_value)}"
+                )
+                return legacy_env_value
+
         # 2. Fall back to settings.json
         settings_value = self._settings.get("api_keys", {}).get(key)
         if settings_value:
@@ -491,6 +519,21 @@ class Settings:
                 f"settings.json | ValueLength={len(settings_value)}"
             )
             return settings_value
+
+        if legacy_key:
+            legacy_settings_value = self._settings.get("api_keys", {}).get(legacy_key)
+            if legacy_settings_value:
+                if legacy_key not in _warned_legacy_api_keys:
+                    logger.warning(
+                        f"settings.api_keys.{legacy_key} is deprecated and loaded only for compatibility. "
+                        f"Please migrate to settings.api_keys.{key}."
+                    )
+                    _warned_legacy_api_keys.add(legacy_key)
+                logger.debug(
+                    f"[SETTINGS.GET_API_KEY] ✓ Retrieved key {key} from legacy "
+                    f"settings.json[{legacy_key}] | ValueLength={len(legacy_settings_value)}"
+                )
+                return legacy_settings_value
 
         logger.debug(f"[SETTINGS.GET_API_KEY] Key {key} not found in any source")
         return None
@@ -801,8 +844,10 @@ def get_settings(
         API keys should be set via environment variables, .env file, or
         settings.json api_keys section.
 
-        For secure API key handling, use LLM Proxy mode by setting
-        LLM_API_BASE environment variable.
+        Prefer provider-specific API keys and optional Base URLs.
+        LLM_API_BASE acts as a global Base URL fallback when a provider-
+        specific *_API_BASE is not configured. LLM_API_KEY remains an
+        optional OpenAI-routed fallback key.
     """
     global _settings
 

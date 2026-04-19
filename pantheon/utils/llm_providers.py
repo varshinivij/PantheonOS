@@ -46,6 +46,20 @@ class ProviderConfig:
 # Maps provider prefix → (api_base_url, api_key_env_var)
 OPENAI_COMPATIBLE_PROVIDERS: dict[str, tuple[str, str]] = {}
 
+# Provider-specific Base URL env vars supported by the backend.
+PROVIDER_BASE_ENV_MAP: dict[str, str] = {
+    "openai": "OPENAI_API_BASE",
+    "anthropic": "ANTHROPIC_API_BASE",
+    "gemini": "GEMINI_API_BASE",
+}
+
+# Provider-specific API key env vars for first-class providers.
+PROVIDER_API_KEY_ENV_MAP: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
 
 # ============ Provider Detection ============
 
@@ -56,8 +70,6 @@ def detect_provider(model: str, relaxed_schema: bool) -> ProviderConfig:
     Model format:
     - "gpt-4" → OpenAI provider
     - "provider/model" → Native SDK (handles anthropic, gemini, etc.)
-    - "custom_anthropic/model" → OpenAI-compatible with CUSTOM_ANTHROPIC_* env vars
-    - "custom_openai/model" → OpenAI-compatible with CUSTOM_OPENAI_* env vars
 
     Args:
         model: Model identifier string
@@ -66,61 +78,8 @@ def detect_provider(model: str, relaxed_schema: bool) -> ProviderConfig:
     Returns:
         ProviderConfig with detected provider and model name
     """
-    from pantheon.utils.model_selector import CUSTOM_ENDPOINT_ENVS
-
     base_url = None
     api_key = None
-
-    # Check for user-defined custom models (custom/model-name)
-    if "/" in model:
-        provider_prefix, model_name = model.split("/", 1)
-        provider_lower = provider_prefix.lower()
-
-        if provider_lower == "custom":
-            from .model_selector import _load_custom_models_config
-            custom_models = _load_custom_models_config()
-            if model_name in custom_models:
-                cfg = custom_models[model_name]
-                custom_base = cfg.get("api_base", "")
-                custom_key = cfg.get("api_key", "")
-                ptype = cfg.get("provider_type", "openai").lower()
-                if ptype == "anthropic":
-                    resolved = f"anthropic/{model_name}"
-                    pt = ProviderType.NATIVE
-                else:
-                    resolved = f"openai/{model_name}"
-                    pt = ProviderType.OPENAI
-                logger.debug(f"Using custom model '{model_name}' with base_url={custom_base}")
-                return ProviderConfig(
-                    provider_type=pt,
-                    model_name=resolved,
-                    base_url=custom_base or None,
-                    api_key=custom_key or None,
-                    relaxed_schema=relaxed_schema,
-                )
-
-        # Check for custom endpoint prefix (e.g., "custom_anthropic/glm-5")
-        if provider_lower in CUSTOM_ENDPOINT_ENVS:
-            config = CUSTOM_ENDPOINT_ENVS[provider_lower]
-            base_url = os.environ.get(config.api_base_env, "")
-            api_key = os.environ.get(config.api_key_env, "")
-
-            # Determine the resolved model format based on endpoint type.
-            # A provider prefix is needed to route correctly.
-            # Explicitly passed api_key in call_llm_provider overrides env vars.
-            if "anthropic" in provider_lower:
-                resolved_model = f"anthropic/{model_name}"
-            else:
-                resolved_model = f"openai/{model_name}"
-
-            logger.debug(f"Using custom endpoint '{provider_lower}' with base_url={base_url}, resolved_model={resolved_model}")
-            return ProviderConfig(
-                provider_type=ProviderType.OPENAI,
-                model_name=resolved_model,
-                base_url=base_url or None,
-                api_key=api_key or None,
-                relaxed_schema=relaxed_schema,
-            )
 
     if "/" in model:
         provider_str, model_name = model.split("/", 1)
@@ -171,89 +130,86 @@ def is_responses_api_model(config: ProviderConfig) -> bool:
     return "codex" in bare or bare.endswith("-pro")
 
 
-def get_base_url(provider: ProviderType) -> Optional[str]:
-    """Get base URL from environment variables or settings.
+def get_provider_base_url(provider_key: str) -> Optional[str]:
+    """Get a provider-specific Base URL override without applying global fallback."""
+    from pantheon.settings import get_settings
+
+    env_key = PROVIDER_BASE_ENV_MAP.get(provider_key)
+    if not env_key:
+        return None
+    return get_settings().get_api_key(env_key)
+
+
+def get_global_fallback_base_url() -> str:
+    """Return the global fallback Base URL from ``LLM_API_BASE`` if configured."""
+    from pantheon.settings import get_settings
+
+    return get_settings().get_api_key("LLM_API_BASE") or ""
+
+
+def resolve_provider_base_url(
+    provider_key: str,
+    default_base_url: str | None = None,
+) -> Optional[str]:
+    """Resolve the effective Base URL for a provider.
 
     Priority:
-    1. Custom endpoint: ``CUSTOM_{PROVIDER}_API_BASE`` (e.g. CUSTOM_OPENAI_API_BASE)
-    2. Provider-specific: ``{PROVIDER}_API_BASE`` (e.g. OPENAI_API_BASE)
-    3. Universal fallback: ``LLM_API_BASE`` (covers all providers, deprecated)
-
-    Args:
-        provider: Provider type
-
-    Returns:
-        Base URL if set, None otherwise
+    1. Provider-specific ``*_API_BASE``
+    2. Global ``LLM_API_BASE``
+    3. Catalog/default base URL
     """
-    import os
+    provider_base = get_provider_base_url(provider_key)
+    if provider_base:
+        return provider_base
+
+    fallback_base = get_global_fallback_base_url()
+    if fallback_base:
+        return fallback_base
+
+    return default_base_url
+
+
+def get_provider_api_key(
+    provider_key: str,
+    api_key_env: str | None = None,
+) -> Optional[str]:
+    """Get a provider-specific API key without applying global fallback."""
     from pantheon.settings import get_settings
-    from pantheon.utils.model_selector import CUSTOM_ENDPOINT_ENVS
+
+    env_key = api_key_env or PROVIDER_API_KEY_ENV_MAP.get(provider_key)
+    if not env_key:
+        return None
+    return get_settings().get_api_key(env_key)
+
+
+def get_openai_fallback_config() -> tuple[str, str]:
+    """Return the global fallback ``(base_url, api_key)`` values.
+
+    Each field is resolved independently from ``LLM_API_BASE`` / ``LLM_API_KEY``.
+    """
+    from pantheon.settings import get_settings
 
     settings = get_settings()
-    provider_lower = provider.value.lower()
-
-    # 1. Check custom endpoint base URL first
-    custom_key = f"custom_{provider_lower}"
-    if custom_key in CUSTOM_ENDPOINT_ENVS:
-        config = CUSTOM_ENDPOINT_ENVS[custom_key]
-        custom_base = os.environ.get(config.api_base_env, "")
-        if custom_base:
-            return custom_base
-
-    # 2. Provider-specific override
-    env_var = f"{provider.value.upper()}_API_BASE"
-    value = settings.get_api_key(env_var)
-    if value:
-        return value
-
-    # 3. Universal fallback (deprecated)
-    return settings.get_api_key("LLM_API_BASE")
+    base_url = settings.get_api_key("LLM_API_BASE") or ""
+    api_key = settings.get_api_key("LLM_API_KEY") or ""
+    return base_url, api_key
 
 
-def get_api_key_for_provider(provider: ProviderType) -> Optional[str]:
-    """Get API key from environment variables or settings.
+def get_openai_effective_config() -> tuple[str, str]:
+    """Return the effective OpenAI-routed ``(base_url, api_key)`` pair.
 
-    Priority:
-    1. Custom endpoint key: ``CUSTOM_{PROVIDER}_API_KEY`` (if custom endpoint configured)
-    2. When LLM_API_BASE is set: ``LLM_API_KEY`` (unified proxy mode)
-    3. Provider-specific: ``{PROVIDER}_API_KEY`` (e.g. OPENAI_API_KEY)
-    4. Universal fallback: ``LLM_API_KEY``
+    Resolution is field-wise:
+    1. ``OPENAI_API_BASE`` / ``OPENAI_API_KEY``
+    2. ``LLM_API_BASE`` / ``LLM_API_KEY`` fallback
 
-    Args:
-        provider: Provider type
-
-    Returns:
-        API key if set, None otherwise
+    This allows a provider-specific key to coexist with a global fallback base
+    when users want OpenAI requests to route through one shared endpoint.
     """
-    import os
-    from pantheon.settings import get_settings
-    from pantheon.utils.model_selector import CUSTOM_ENDPOINT_ENVS
+    provider_base = resolve_provider_base_url("openai") or ""
+    provider_key = get_provider_api_key("openai") or ""
+    fallback_base, fallback_key = get_openai_fallback_config()
 
-    settings = get_settings()
-    provider_lower = provider.value.lower()
-
-    # 1. Check custom endpoint key first
-    custom_key = f"custom_{provider_lower}"
-    if custom_key in CUSTOM_ENDPOINT_ENVS:
-        config = CUSTOM_ENDPOINT_ENVS[custom_key]
-        custom_key_value = os.environ.get(config.api_key_env, "")
-        if custom_key_value:
-            return custom_key_value
-
-    # 2. When LLM_API_BASE is set, LLM_API_KEY takes priority (unified proxy mode)
-    if settings.get_api_key("LLM_API_BASE"):
-        llm_key = settings.get_api_key("LLM_API_KEY")
-        if llm_key:
-            return llm_key
-
-    # 3. Provider-specific key
-    env_var = f"{provider.value.upper()}_API_KEY"
-    value = settings.get_api_key(env_var)
-    if value:
-        return value
-
-    # 4. Universal fallback
-    return settings.get_api_key("LLM_API_KEY")
+    return provider_base or fallback_base, provider_key or fallback_key
 
 
 # ============ Response Extraction ============
@@ -287,35 +243,6 @@ def _clean_message_fields(message: dict) -> None:
     # Convert empty tool_calls to None
     if "tool_calls" in message and message["tool_calls"] == []:
         message["tool_calls"] = None
-
-
-def get_llm_config(provider: ProviderType) -> tuple[str, str]:
-    """Return (base_url, api_key) for the given provider.
-
-    Single entry point for all callers that need a base URL and API key.
-    Handles proxy mode, provider-specific overrides, and settings.json.
-
-    Args:
-        provider: Provider type
-
-    Returns:
-        (base_url, api_key) — either may be empty string if not configured
-    """
-    return get_base_url(provider) or "", get_api_key_for_provider(provider) or ""
-
-
-def get_llm_proxy_config() -> tuple[str, str]:
-    """Return (base_url, api_key) when proxy mode is active, else ('', '').
-
-    Proxy mode is active when LLM_API_BASE is set (env var or settings.json).
-    Use this when you need to detect proxy mode and switch SDK behaviour.
-    For simply fetching credentials, prefer get_llm_config(provider).
-    """
-    from pantheon.settings import get_settings
-    settings = get_settings()
-    base_url = settings.get_api_key("LLM_API_BASE") or ""
-    api_key = (settings.get_api_key("LLM_API_KEY") or "") if base_url else ""
-    return base_url, api_key
 
 
 def _extract_cost_and_usage(complete_resp: Any) -> tuple[float, dict]:

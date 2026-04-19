@@ -2,7 +2,6 @@ import asyncio
 import copy
 import dataclasses
 import io
-import json as _json
 try:
     import psutil as _psutil
     _psutil_process = _psutil.Process()
@@ -34,31 +33,6 @@ if TYPE_CHECKING:
 
 
 DEFAULT_TOOLSETS = []
-
-
-def _custom_models_path() -> Path:
-    """Path to the custom models config file."""
-    from pantheon.settings import get_settings
-    return get_settings().pantheon_dir / "custom_models.json"
-
-
-def _load_custom_models() -> dict:
-    """Load user-defined custom models from custom_models.json."""
-    p = _custom_models_path()
-    if p.exists():
-        try:
-            return _json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
-
-
-def _save_custom_models(models: dict) -> None:
-    """Save user-defined custom models to custom_models.json."""
-    p = _custom_models_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(_json.dumps(models, indent=2, ensure_ascii=False), encoding="utf-8")
-
 
 class ChatRoom(ToolSet):
     """
@@ -1752,7 +1726,7 @@ class ChatRoom(ToolSet):
         try:
             import base64
             from pantheon.utils.adapters import get_adapter
-            from pantheon.utils.llm_providers import get_llm_proxy_config
+            from pantheon.utils.llm_providers import get_openai_effective_config
 
             logger.info(f"[STT] Received bytes_data type={type(bytes_data).__name__}, "
                         f"len={len(bytes_data) if hasattr(bytes_data, '__len__') else 'N/A'}")
@@ -1785,14 +1759,14 @@ class ChatRoom(ToolSet):
             audio_file.name = "audio.webm"
 
             logger.info("[STT] Calling transcription adapter...")
-            _proxy_base, _proxy_key = get_llm_proxy_config()
+            api_base, api_key = get_openai_effective_config()
             adapter = get_adapter("openai")
             response = await asyncio.wait_for(
                 adapter.atranscription(
                     model=self.speech_to_text_model,
                     file=audio_file,
-                    base_url=_proxy_base or None,
-                    api_key=_proxy_key or None,
+                    base_url=api_base or None,
+                    api_key=api_key or None,
                 ),
                 timeout=30,
             )
@@ -2363,28 +2337,6 @@ class ChatRoom(ToolSet):
             logger.error(f"Error reading store installs: {e}")
             return {"success": False, "installs": {}, "error": str(e)}
 
-    @tool
-    async def get_custom_models(self) -> dict:
-        """Get all user-defined custom models."""
-        models = _load_custom_models()
-        return {"success": True, "models": models}
-
-    @tool
-    async def save_custom_models(self, models: dict) -> dict:
-        """Save user-defined custom models.
-
-        Args:
-            models: Dict of model_name -> {api_base, api_key, provider_type}
-        """
-        try:
-            _save_custom_models(models)
-            # Reset model selector cache so new models appear
-            from pantheon.utils.model_selector import reset_model_selector
-            reset_model_selector()
-            return {"success": True, "message": "Custom models saved"}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
-
     async def reload_settings(self) -> dict:
         """Reload configuration settings from .env file and settings.json.
 
@@ -2428,7 +2380,7 @@ class ChatRoom(ToolSet):
         and whether any key is configured at all.
         """
         import os
-        from pantheon.settings import get_settings
+        from pantheon.settings import LEGACY_API_KEY_ENV_MAP, get_settings
 
         settings = get_settings()
         key_names = [
@@ -2437,20 +2389,52 @@ class ChatRoom(ToolSet):
             "GEMINI_API_KEY",
             "DEEPSEEK_API_KEY",
         ]
+        base_url_names = [
+            "OPENAI_API_BASE",
+            "ANTHROPIC_API_BASE",
+            "GEMINI_API_BASE",
+        ]
+        fallback_names = [
+            "LLM_API_BASE",
+            "LLM_API_KEY",
+        ]
+
+        def _status(name: str) -> dict:
+            value = settings.get_api_key(name)
+            if not value:
+                return {"configured": False, "source": None, "masked": None}
+
+            legacy_key = LEGACY_API_KEY_ENV_MAP.get(name)
+            source = "settings"
+            if os.environ.get(name) or (legacy_key and os.environ.get(legacy_key)):
+                source = "env"
+
+            masked = value if "BASE" in name else (value[:6] + "***" if len(value) > 6 else "***")
+            return {"configured": True, "source": source, "masked": masked}
 
         keys = {}
         for key in key_names:
-            value = settings.get_api_key(key)
-            if value:
-                # Determine source
-                source = "env" if os.environ.get(key) else "settings"
-                masked = value[:6] + "***" if len(value) > 6 else "***"
-                keys[key] = {"configured": True, "source": source, "masked": masked}
-            else:
-                keys[key] = {"configured": False, "source": None, "masked": None}
+            keys[key] = _status(key)
+
+        base_urls = {}
+        for key in base_url_names:
+            base_urls[key] = _status(key)
+
+        fallback = {}
+        for key in fallback_names:
+            fallback[key] = _status(key)
 
         has_any_key = any(v["configured"] for v in keys.values())
-        return {"keys": keys, "has_any_key": has_any_key}
+        has_any_base = any(v["configured"] for v in base_urls.values())
+        has_fallback = all(v["configured"] for v in fallback.values())
+        return {
+            "keys": keys,
+            "base_urls": base_urls,
+            "fallback": fallback,
+            "has_any_key": has_any_key,
+            "has_any_base_url": has_any_base,
+            "has_fallback": has_fallback,
+        }
 
     # ============ OAuth Management ============
 

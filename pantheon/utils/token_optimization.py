@@ -2282,7 +2282,7 @@ def estimate_total_tokens_from_chars(messages: list[dict]) -> int:
 # Opt3: Prompt cache control markers
 # ---------------------------------------------------------------------------
 
-_ANTHROPIC_MODEL_PREFIXES = ("claude", "anthropic/", "custom_anthropic/")
+_ANTHROPIC_MODEL_PREFIXES = ("claude", "anthropic/")
 _QWEN_MODEL_PREFIXES = ("qwen", "zai/")
 
 

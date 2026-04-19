@@ -321,7 +321,10 @@ async def start_services(
         - .env file: OPENAI_API_KEY=sk-...
         - settings.json api_keys section
 
-        Use LLM Proxy mode for secure API key handling (set LLM_API_BASE environment variable).
+        Prefer provider-specific API keys and optional Base URLs.
+        LLM_API_BASE acts as a global Base URL fallback when a provider-
+        specific *_API_BASE is not configured. LLM_API_KEY remains an
+        optional OpenAI-routed fallback key.
     """
     # DIAGNOSTIC: Log startup parameters for debugging
     logger.debug(f"[DIAGNOSTIC] start_services() called with auto_start_nats={auto_start_nats}, auto_ui={auto_ui}")

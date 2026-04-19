@@ -658,7 +658,6 @@ def test_pantheon_team_use_summary_defaults_to_true():
 def test_is_anthropic_model_detection():
     assert is_anthropic_model("claude-3-5-sonnet-20241022") is True
     assert is_anthropic_model("anthropic/claude-3-haiku") is True
-    assert is_anthropic_model("custom_anthropic/claude-3-opus") is True
     assert is_anthropic_model("gpt-4o") is False
     assert is_anthropic_model("gpt-4.1-mini") is False
     assert is_anthropic_model("openai/gpt-4") is False
