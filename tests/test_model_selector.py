@@ -3,7 +3,7 @@ Unit tests for the ModelSelector module.
 """
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,8 +15,10 @@ from pantheon.utils.model_selector import (
     FALLBACK_TAG,
     QUALITY_TAGS,
     ModelSelector,
+    get_ollama_cached_state,
     get_default_model,
     get_model_selector,
+    refresh_ollama_cache,
     reset_model_selector,
 )
 
@@ -124,6 +126,18 @@ class TestProviderDetection:
         ):
             result = selector.detect_available_provider()
             assert result == "deepseek"
+
+    def test_ollama_uses_cached_snapshot_without_sync_probe(self, mock_settings):
+        """Provider enumeration should only read cached Ollama state."""
+        selector = ModelSelector(mock_settings)
+
+        with patch(
+            "pantheon.utils.model_selector.get_ollama_cached_state",
+            return_value=(True, ["llama3.2"]),
+        ):
+            providers = selector._get_available_providers()
+
+        assert "ollama" in providers
 
 
 class TestModelResolution:
@@ -352,6 +366,44 @@ class TestModelListingDisplayKeys:
 
         assert "gemini" in result["models_by_provider"]
         assert "gemini-cli" in result["models_by_provider"]
+
+    def test_list_available_models_re_evaluates_cached_ollama_state(
+        self, mock_settings
+    ):
+        selector = ModelSelector(mock_settings)
+
+        with patch.object(
+            selector,
+            "_get_available_providers",
+            side_effect=[{"openai"}, {"openai", "ollama"}],
+        ), patch.object(
+            selector,
+            "detect_available_provider",
+            side_effect=["openai", "openai"],
+        ):
+            first = selector.list_available_models()
+            selector._available_providers = None
+            second = selector.list_available_models()
+
+        assert "ollama" not in first["available_providers"]
+        assert "ollama" in second["available_providers"]
+
+class TestOllamaRefresh:
+    @pytest.mark.asyncio
+    async def test_refresh_ollama_cache_updates_snapshot(self, mock_settings):
+        selector = ModelSelector(mock_settings)
+        assert selector is not None
+
+        with patch(
+            "pantheon.utils.model_selector.fetch_ollama_status",
+            new=AsyncMock(return_value=(True, ["llama3.2", "qwen2.5"])),
+        ):
+            result = await refresh_ollama_cache(force=True)
+
+        available, models = get_ollama_cached_state()
+        assert result == (True, ["llama3.2", "qwen2.5"])
+        assert available is True
+        assert models == ["llama3.2", "qwen2.5"]
 
 
 class TestAutoGeneration:

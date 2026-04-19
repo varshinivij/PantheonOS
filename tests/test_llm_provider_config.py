@@ -98,7 +98,7 @@ def test_model_selector_does_not_expose_custom_endpoint_providers(monkeypatch):
         patch("pantheon.settings.get_settings", return_value=_mock_settings()),
         patch("pantheon.utils.oauth.CodexOAuthManager") as codex_mgr,
         patch("pantheon.utils.oauth.GeminiCliOAuthManager") as gemini_mgr,
-        patch("pantheon.utils.model_selector._detect_ollama", return_value=False),
+        patch("pantheon.utils.model_selector.get_ollama_cached_state", return_value=(False, [])),
     ):
         codex_mgr.return_value.is_authenticated.return_value = False
         gemini_mgr.return_value.is_authenticated.return_value = False

@@ -2011,10 +2011,10 @@ class ChatRoom(ToolSet):
             }
         """
         try:
-            from pantheon.utils.model_selector import get_model_selector
+            from pantheon.utils.model_selector import get_model_selector, refresh_ollama_cache
 
+            asyncio.create_task(refresh_ollama_cache())
             selector = get_model_selector()
-            # Clear provider cache so dynamic providers (Ollama, OAuth) are re-detected
             selector._available_providers = None
             selector._detected_provider = None
             return selector.list_available_models()
@@ -2622,9 +2622,9 @@ class ChatRoom(ToolSet):
             Dict with running status, model list, and URL.
         """
         try:
-            from pantheon.utils.model_selector import _detect_ollama, _list_ollama_models
-            running = _detect_ollama(url)
-            models = _list_ollama_models(url) if running else []
+            from pantheon.utils.model_selector import fetch_ollama_status
+
+            running, models = await fetch_ollama_status(url)
             return {"running": running, "models": models, "url": url}
-        except Exception as e:
+        except Exception:
             return {"running": False, "models": [], "url": url}

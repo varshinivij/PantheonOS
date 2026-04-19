@@ -14,6 +14,7 @@ Usage:
     models = selector.resolve_model("high,vision")  # Quality + capability combo
 """
 
+import time
 from typing import TYPE_CHECKING
 
 from .log import logger
@@ -35,38 +36,58 @@ _NOT_FOUND = object()
 
 # ============ Local Provider Detection ============
 
-_ollama_cache: dict | None = None
-_ollama_cache_time: float = 0
+_OLLAMA_BASE_URL = "http://localhost:11434"
+_OLLAMA_CACHE_TTL_SECONDS = 30
+_ollama_available = False
+_ollama_models: list[str] = []
+_ollama_last_checked = 0.0
 
 
-def _detect_ollama(base_url: str = "http://localhost:11434") -> bool:
-    """Check if Ollama is running locally."""
+def get_ollama_cached_state() -> tuple[bool, list[str]]:
+    return _ollama_available, list(_ollama_models)
+
+
+async def fetch_ollama_status(
+    base_url: str = _OLLAMA_BASE_URL,
+) -> tuple[bool, list[str]]:
     try:
         import httpx
-        resp = httpx.get(f"{base_url}/api/tags", timeout=2)
-        return resp.is_success
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base_url}/api/tags", timeout=2.0)
+        if not resp.is_success:
+            return False, []
+        models = [m["name"] for m in resp.json().get("models", [])]
+        return True, models
     except Exception:
-        return False
+        return False, []
 
 
-def _list_ollama_models(base_url: str = "http://localhost:11434") -> list[str]:
-    """List available models from local Ollama instance (cached 30s)."""
-    import time
-    global _ollama_cache, _ollama_cache_time
-    if _ollama_cache is not None and time.time() - _ollama_cache_time < 30:
-        return _ollama_cache
+async def refresh_ollama_cache(
+    force: bool = False, base_url: str = _OLLAMA_BASE_URL
+) -> tuple[bool, list[str]]:
+    global _ollama_available, _ollama_models, _ollama_last_checked
 
-    try:
-        import httpx
-        resp = httpx.get(f"{base_url}/api/tags", timeout=5)
-        if resp.is_success:
-            models = [m["name"] for m in resp.json().get("models", [])]
-            _ollama_cache = models
-            _ollama_cache_time = time.time()
-            return models
-    except Exception:
-        pass
-    return []
+    now = time.time()
+    if (
+        not force
+        and _ollama_last_checked > 0
+        and now - _ollama_last_checked < _OLLAMA_CACHE_TTL_SECONDS
+    ):
+        return get_ollama_cached_state()
+
+    available, models = await fetch_ollama_status(base_url)
+    _ollama_available = available
+    _ollama_models = list(models)
+    _ollama_last_checked = time.time()
+    return get_ollama_cached_state()
+
+
+def reset_ollama_cache() -> None:
+    global _ollama_available, _ollama_models, _ollama_last_checked
+    _ollama_available = False
+    _ollama_models = []
+    _ollama_last_checked = 0.0
 
 # ============ Default Configuration ============
 # Built-in defaults based on February 2026 flagship models
@@ -241,7 +262,7 @@ PROVIDER_API_KEYS = {
     "qwen": "DASHSCOPE_API_KEY",
     "codex": "",  # OAuth-based, no env var key
     "gemini-cli": "",  # OAuth-based, no env var key
-    "ollama": "",  # Local, no env var key — detected by _detect_ollama()
+    "ollama": "",  # Local, no env var key — exposed when cached Ollama status is available
 }
 
 # ============ Image Generation Model Defaults ============
@@ -283,7 +304,6 @@ class ModelSelector:
         if self._available_providers is not None:
             return self._available_providers
 
-        import os
         from pantheon.settings import get_settings
 
         settings = get_settings()
@@ -307,13 +327,10 @@ class ModelSelector:
         except Exception:
             pass
 
-        # Check local Ollama
-        try:
-            from pantheon.utils.model_selector import _detect_ollama
-            if _detect_ollama():
-                self._available_providers.add("ollama")
-        except Exception:
-            pass
+        # Ollama is refreshed by async chatroom code; selector only reads cached state.
+        ollama_available, _ = get_ollama_cached_state()
+        if ollama_available:
+            self._available_providers.add("ollama")
 
         # Universal OpenAI-compatible fallback: expose OpenAI when fallback is configured.
         llm_base = settings.get_api_key("LLM_API_BASE") or ""
@@ -378,9 +395,9 @@ class ModelSelector:
         Returns:
             Dict mapping quality levels to model lists
         """
-        # Ollama: dynamically list local models
+        # Ollama models are maintained by a background refresh so this stays non-blocking.
         if provider == "ollama":
-            models = _list_ollama_models()
+            _available, models = get_ollama_cached_state()
             if models:
                 prefixed = [f"ollama/{m}" for m in models]
                 return {"high": prefixed, "normal": prefixed, "low": prefixed}
@@ -771,6 +788,7 @@ def reset_model_selector() -> None:
     """Reset the global ModelSelector instance (for testing)."""
     global _selector_instance
     _selector_instance = None
+    reset_ollama_cache()
 
 
 def get_default_model() -> list[str]:
@@ -786,6 +804,10 @@ __all__ = [
     "ModelSelector",
     "get_model_selector",
     "reset_model_selector",
+    "reset_ollama_cache",
+    "fetch_ollama_status",
+    "refresh_ollama_cache",
+    "get_ollama_cached_state",
     "get_default_model",
     "PROVIDER_API_KEYS",
     "CAPABILITY_MAP",

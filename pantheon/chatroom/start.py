@@ -677,6 +677,13 @@ async def start_services(
         id_hash=id_hash,  # Pass id_hash to ensure stable Service ID
     )
 
+    try:
+        from pantheon.utils.model_selector import refresh_ollama_cache
+
+        asyncio.create_task(refresh_ollama_cache(force=True))
+    except Exception as exc:
+        logger.debug("[STARTUP] Failed to prewarm Ollama detection: {}", exc)
+
     # ===== Step 2.5: Verify NATS TCP connectivity (diagnostic) =====
     if auto_start_nats and server_info is not None:
         nats_tcp_url = server_info["tcp_url"]
