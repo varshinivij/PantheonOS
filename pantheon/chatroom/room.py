@@ -2496,6 +2496,7 @@ class ChatRoom(ToolSet):
             logger.error(f"Error reading store installs: {e}")
             return {"success": False, "installs": {}, "error": str(e)}
 
+    @tool
     async def reload_settings(self) -> dict:
         """Reload configuration settings from .env file and settings.json.
 

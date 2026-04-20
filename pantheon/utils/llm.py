@@ -517,6 +517,7 @@ def stream_chunk_builder(chunks: list[dict]) -> Any:
 
     full_content = ""
     full_reasoning = ""
+    full_images: list = []
     tool_calls_map: dict[int, dict] = {}  # index → tool_call dict
     finish_reason = None
     usage = {}
@@ -549,6 +550,11 @@ def stream_chunk_builder(chunks: list[dict]) -> Any:
                 full_reasoning += delta["reasoning_content"]
             elif "reasoning" in delta and delta["reasoning"]:
                 full_reasoning += delta["reasoning"]
+
+            # Accumulate generated images (Gemini image models emit these via
+            # the gemini adapter; downstream image_gen reads message.images).
+            if "images" in delta and delta["images"]:
+                full_images.extend(delta["images"])
 
             # Accumulate role
             if "role" in delta and delta["role"]:
@@ -612,12 +618,15 @@ def stream_chunk_builder(chunks: list[dict]) -> Any:
         content=effective_content,
         tool_calls=final_tool_calls,
         reasoning_content=full_reasoning or None,
+        images=full_images or None,
     )
 
     def message_model_dump():
         d = {"role": message.role, "content": message.content, "tool_calls": message.tool_calls}
         if message.reasoning_content:
             d["reasoning_content"] = message.reasoning_content
+        if message.images:
+            d["images"] = message.images
         return d
     message.model_dump = message_model_dump
 
