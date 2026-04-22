@@ -6,6 +6,8 @@ Supports text-only models (DALL-E, Imagen), multimodal models (Gemini Nano Banan
 and native image editing models (OpenAI gpt-image).
 """
 
+from pathlib import Path
+
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.llm_providers import (
     get_openai_effective_config,
@@ -29,6 +31,7 @@ MULTIMODAL_IMAGE_MODELS = {
 
 # Models that support native image editing via aimage_edit API (accept reference images)
 IMAGE_EDIT_MODELS = {
+    "gpt-image-2",
     "gpt-image-1",
     "gpt-image-1.5",
     "chatgpt-image-latest",
@@ -325,7 +328,7 @@ class ImageGenerationToolSet(ToolSet):
             if path.startswith("file://"):
                 path = path[7:]
             resolved = self.image_store.normalize_local_path(path)
-            resolved_paths.append(resolved)
+            resolved_paths.append(Path(resolved))
 
         from pantheon.utils.adapters import get_adapter
 

@@ -159,10 +159,8 @@
     // ===== Image Generation Configuration =====
     // Model selection for generate_image tool
     // Options: "high", "normal", "low", or specific model name
-    // - "high": gemini/gemini-3-pro-image-preview (Nano Banana Pro, best quality)
-    // - "normal": gemini/gemini-3.1-flash-image-preview (Nano Banana 2, fast)
-    // - "low": gemini/gemini-2.5-flash-image (Nano Banana first-gen, stable)
-    "image_gen_model": "normal",
+    // Factory default is explicit to keep the template aligned with current OpenAI image routing.
+    "image_gen_model": "gpt-image-2",
     // Custom image generation models (optional - override code defaults)
     // "image_gen_models": {
     //     "gemini": {
@@ -170,8 +168,9 @@
     //         "normal": ["gemini/gemini-3-pro-image-preview"]
     //     },
     //     "openai": {
-    //         "high": ["dall-e-3"],
-    //         "normal": ["dall-e-3"]
+    //         "high": ["gpt-image-2"],
+    //         "normal": ["gpt-image-2"],
+    //         "low": ["gpt-image-2"]
     //     }
     // },
     // ===== Context Compression Configuration =====

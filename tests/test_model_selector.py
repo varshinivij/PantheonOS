@@ -9,6 +9,7 @@ import pytest
 
 from pantheon.utils.model_selector import (
     CAPABILITY_MAP,
+    DEFAULT_IMAGE_GEN_MODELS,
     DEFAULT_PROVIDER_MODELS,
     DEFAULT_PROVIDER_PRIORITY,
     ULTIMATE_FALLBACK,
@@ -196,6 +197,26 @@ class TestModelResolution:
         assert isinstance(models, list)
         # Should just return normal models since unknown_capability is not in CAPABILITY_MAP
         assert len(models) > 0
+
+    def test_openai_image_defaults_prefer_gpt_image_2(self):
+        """OpenAI image defaults should start with the latest GPT image model."""
+        openai_models = DEFAULT_IMAGE_GEN_MODELS["openai"]
+
+        assert openai_models["high"][0] == "gpt-image-2"
+        assert openai_models["normal"][0] == "gpt-image-2"
+        assert openai_models["low"][0] == "gpt-image-2"
+
+    def test_resolve_image_gen_model_returns_gpt_image_2_for_openai(self, mock_settings):
+        """OpenAI-only image generation should resolve to gpt-image-2 first."""
+        selector = ModelSelector(mock_settings)
+
+        with patch(
+            "pantheon.utils.model_selector.ModelSelector._get_available_providers",
+            return_value={"openai"},
+        ):
+            models = selector.resolve_image_gen_model("normal")
+
+        assert models[0] == "gpt-image-2"
 
 
 class TestCapabilityFiltering:

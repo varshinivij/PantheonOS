@@ -243,6 +243,75 @@ class TestToolSetBasics:
         assert calls["api_key"] == "gemini-key"
         assert calls["base_url"] == "https://fallback.example/v1"
 
+    @pytest.mark.asyncio
+    async def test_gpt_image_2_with_references_uses_native_image_edit_without_fallback(
+        self, image_toolset, monkeypatch, test_images
+    ):
+        calls = {}
+
+        class FakeAdapter:
+            async def aimage_edit(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model="gpt-image-2",
+                    usage=None,
+                )
+
+        async def fail_if_called(_reference_images):
+            raise AssertionError("_describe_reference_images should not be used for gpt-image-2")
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.delenv("LLM_API_BASE", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+        monkeypatch.setattr(image_toolset, "_describe_reference_images", fail_if_called)
+
+        result = await image_toolset.generate_image(
+            prompt="Turn the first image into a watercolor illustration",
+            reference_images=test_images,
+            model="gpt-image-2",
+        )
+
+        assert result["success"] is True
+        assert calls["model"] == "gpt-image-2"
+        assert calls["image"] == [Path(p) for p in test_images]
+        assert calls["api_key"] == "test-openai-key"
+
+    @pytest.mark.asyncio
+    async def test_gpt_image_2_edit_passes_path_objects_to_openai_sdk(
+        self, image_toolset, monkeypatch, test_images
+    ):
+        calls = {}
+
+        class FakeAdapter:
+            async def aimage_edit(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model="gpt-image-2",
+                    usage=None,
+                )
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="Make the input image look like a watercolor painting",
+            reference_images=test_images,
+            model="gpt-image-2",
+        )
+
+        assert result["success"] is True
+        assert all(isinstance(item, Path) for item in calls["image"])
+
 
 # ============================================================================
 # Gemini Tests (Multimodal + Imagen)

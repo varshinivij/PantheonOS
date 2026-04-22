@@ -318,9 +318,9 @@ DEFAULT_IMAGE_GEN_MODELS = {
     # OpenAI: GPT-Image series
     # https://platform.openai.com/docs/models
     "openai": {
-        "high": ["chatgpt-image-latest", "gpt-image-1.5"],
-        "normal": ["chatgpt-image-latest", "gpt-image-1.5"],
-        "low": ["gpt-image-1"],
+        "high": ["gpt-image-2", "chatgpt-image-latest", "gpt-image-1.5"],
+        "normal": ["gpt-image-2", "chatgpt-image-latest", "gpt-image-1.5"],
+        "low": ["gpt-image-2", "gpt-image-1"],
     },
 }
 
