@@ -157,7 +157,9 @@ class JupyterKernelToolSet(ToolSet):
         import sys
 
         env = os.environ.copy()
-        env.pop("LS_COLORS", None)
+
+        for _drop_var in ("LS_COLORS", "LESSOPEN", "LESSCLOSE", "PANTHEON_CONTEXT"):
+            env.pop(_drop_var, None)
 
         # Get paths from current sys.path and existing PYTHONPATH
         # Prepend sys.path to give it priority for the kernel subprocess
@@ -171,12 +173,17 @@ class JupyterKernelToolSet(ToolSet):
 
         env["PYTHONPATH"] = os.pathsep.join(unique_paths)
 
-        # Do NOT include PANTHEON_CONTEXT in the spawn environment.
-        # Large context causes E2BIG on execve(). Context is injected after
-        # kernel start via _context_prefix_code().
-        env.pop("PANTHEON_CONTEXT", None)
+        context_vars = {
+            k: v for k, v in self._current_context_dict().items()
+            if not k.startswith("toolu_")
+        }
 
-        return env
+        return build_context_env(
+            workdir=self._get_effective_workdir() or self.workdir,
+            context_variables=context_vars,
+            base_env=env,
+            optimize=True,
+        )
 
     def _context_prefix_code(self) -> str:
         from pantheon.internal.package_runtime.context import build_context_payload, export_context
