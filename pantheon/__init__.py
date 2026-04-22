@@ -28,4 +28,4 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 logging.getLogger("mcp.server").setLevel(logging.WARNING)
 logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
