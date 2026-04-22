@@ -272,6 +272,32 @@
         "skill_index_max_items": 50, // Max number of skills listed in system prompt
         "skill_index_max_tokens": 2000 // Approx token budget for skill index
     },
+    // ===== Agents Configuration =====
+    "agents": {
+        // Heartbeat: periodic agent turns to surface anything needing attention.
+        // Reply HEARTBEAT_OK when nothing needs attention; omit it for alerts.
+        "heartbeat": {
+            // Interval between turns. Use "0m" to disable.
+            // Examples: "30m", "1h", "2h30m"
+            "every": "0m",
+            // Optional model override for heartbeat runs (null = use agent default)
+            "model": null,
+            // Keep only HEARTBEAT.md from bootstrap files (reduces per-run token cost)
+            "lightContext": false,
+            // Max chars allowed after HEARTBEAT_OK before treating reply as an alert
+            "ackMaxChars": 300,
+            // Custom prompt body (null = built-in default)
+            "prompt": null,
+            // Restrict heartbeats to a time window (null = always active)
+            // "activeHours": { "start": "09:00", "end": "22:00", "timezone": "America/New_York" }
+            "activeHours": null,
+            // Where to deliver alerts: "console" | "ui" | "none" | "slack" | "telegram" | "discord"
+            // Set interactively with: develop heartbeat  or  /heartbeat on
+            "target": "console",
+            // Recipient ID for external channel targets (Telegram chat_id, Slack #channel, ...)
+            "to": null
+        }
+    },
     // ===== LLM Retry Configuration =====
     // Exponential backoff retry for transient LLM API errors (e.g., mid-stream overloaded)
     "llm_retry": {

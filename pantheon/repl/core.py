@@ -154,13 +154,18 @@ class Repl(ReplUI):
         from .handlers.builtin.mcp import MCPCommandHandler
         from .handlers.builtin.edit import EditHandler
         from .handlers.builtin.revert import RevertCommandHandler
+        from .handlers.builtin.heartbeat import HeartbeatCommandHandler
         self.handlers: list[CommandHandler] = [
             BashCommandHandler(self.console, self),
             ViewCommandHandler(self.console, self),
             MCPCommandHandler(self.console, self),
             EditHandler(self.console, self),
             RevertCommandHandler(self.console, self),
+            HeartbeatCommandHandler(self.console, self),
         ]
+
+        # Heartbeat engine (started in run() after setup)
+        self._heartbeat_engine = None
 
         # Save terminal state for restoration on exit
         self._saved_terminal_attrs = None
@@ -191,6 +196,7 @@ class Repl(ReplUI):
         # Pending user approval for notify_user        # Pending operations state
         self._pending_approval: dict | None = None
         self._pending_clear_confirmation: bool = False  # For /clear confirmation
+        self._pending_heartbeat_setup: dict | None = None  # For heartbeat wizard
 
     def _create_chatroom_from_agent(
         self, agent: Agent | Team, memory_dir: str
@@ -237,6 +243,39 @@ class Repl(ReplUI):
             if hasattr(agent, "setup_bg_notify_queue"):
                 agent.setup_bg_notify_queue(self.message_queue)
 
+    def _start_heartbeat_engine(self) -> None:
+        """Initialise and start the heartbeat engine if configured."""
+        try:
+            from pantheon.settings import get_settings
+            from pantheon.heartbeat import HeartbeatEngine
+
+            settings = get_settings()
+            settings._ensure_loaded()
+            hb_cfg: dict = (
+                settings._settings
+                .get("agents", {})
+                .get("heartbeat", {})
+            )
+
+            every = hb_cfg.get("every", "0m")
+            from pantheon.heartbeat import parse_interval
+            if parse_interval(str(every)) == 0:
+                return  # disabled
+
+            self._heartbeat_engine = HeartbeatEngine(hb_cfg, self)
+            self._heartbeat_engine.start()
+        except Exception as exc:
+            from pantheon.utils.log import logger
+            logger.debug(f"[heartbeat] startup skipped: {exc}")
+
+    async def _handle_heartbeat_wizard_input(self, message: str) -> None:
+        """Delegate a wizard-step message to the HeartbeatCommandHandler."""
+        from .handlers.builtin.heartbeat import HeartbeatCommandHandler
+        for handler in self.handlers:
+            if isinstance(handler, HeartbeatCommandHandler):
+                await handler.handle_wizard_input(message)
+                return
+
     def _setup_signal_handlers(self):
         """Setup signal handlers for better interrupt management."""
         self._interrupt_count = 0
@@ -256,6 +295,13 @@ class Repl(ReplUI):
 
     async def _cleanup_resources(self):
         """Clean up resources before exit."""
+        # Stop heartbeat engine
+        try:
+            if self._heartbeat_engine:
+                self._heartbeat_engine.stop()
+        except Exception:
+            pass
+
         # Clean up ChatRoom resources (stops learning pipeline which saves skillbook)
         try:
             if hasattr(self, '_chatroom') and self._chatroom:
@@ -760,6 +806,9 @@ class Repl(ReplUI):
         # Hook bg task completion → message_queue (must be after queue creation)
         self._setup_bg_complete_hooks()
 
+        # Start heartbeat engine if configured
+        self._start_heartbeat_engine()
+
         # Print greeting first (REPL shows immediately)
         await self.print_greeting()
 
@@ -921,6 +970,11 @@ class Repl(ReplUI):
 
         self._add_to_history(current_message)
         
+        # Check if we're in the heartbeat setup wizard
+        if self._pending_heartbeat_setup is not None:
+            await self._handle_heartbeat_wizard_input(current_message)
+            return
+
         # Check if we're waiting for /clear confirmation
         if self._pending_clear_confirmation:
             self._pending_clear_confirmation = False
