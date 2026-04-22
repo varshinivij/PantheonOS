@@ -29,6 +29,9 @@ class TestSkillList:
         result = json.loads(await toolset.skill_list())
         assert result["count"] == 1
         assert result["skills"][0]["name"] == "demo"
+        assert result["skills"][0]["display_name"] == "demo"
+        assert result["skills"][0]["identifier"] == "demo"
+        assert result["skills"][0]["path"] == "demo"
 
 
 class TestSkillView:
@@ -38,6 +41,9 @@ class TestSkillView:
         result = json.loads(await toolset.skill_view("test-skill"))
         assert result["success"]
         assert result["name"] == "test-skill"
+        assert result["display_name"] == "test-skill"
+        assert result["identifier"] == "test-skill"
+        assert result["path"] == "test-skill"
         assert "When running unit tests" in result["content"]
 
     @pytest.mark.asyncio
@@ -53,6 +59,14 @@ class TestSkillView:
         result = json.loads(await toolset.skill_view("test-skill", "references/api.md"))
         assert result["success"]
         assert result["content"] == "API docs"
+
+    @pytest.mark.asyncio
+    async def test_view_supporting_file_in_custom_subdir(self, toolset):
+        toolset._runtime.store.create_skill("test-skill", SAMPLE_SKILL_CONTENT)
+        toolset._runtime.store.write_supporting_file("test-skill", "styles/neurips_plot.md", "Plot style")
+        result = json.loads(await toolset.skill_view("test-skill", "styles/neurips_plot.md"))
+        assert result["success"]
+        assert result["content"] == "Plot style"
 
 
 class TestSkillManageCreate:

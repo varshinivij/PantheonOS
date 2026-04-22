@@ -17,7 +17,6 @@ MAX_NAME_LENGTH = 128  # extended to support category/skill-name paths
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_CONTENT_SIZE = 100_000  # ~36k tokens
 MAX_FILE_SIZE = 1_048_576  # 1 MiB
-ALLOWED_SUBDIRS = frozenset({"references", "templates", "scripts", "assets"})
 
 # ── Injection safety patterns ──
 
@@ -227,13 +226,21 @@ def validate_content_size(content: str) -> str | None:
 
 def validate_file_path(file_path: str) -> str | None:
     """Validate supporting file path. Returns error or None."""
-    if ".." in Path(file_path).parts:
+    if not file_path:
+        return "File path is empty."
+
+    path = Path(file_path)
+    if path.is_absolute():
+        return "Absolute paths are not allowed."
+
+    if ".." in path.parts:
         return "Path traversal (..) not allowed."
-    parts = Path(file_path).parts
+
+    parts = path.parts
     if not parts:
         return "File path is empty."
-    if parts[0] not in ALLOWED_SUBDIRS:
-        return f"File must be under one of: {', '.join(sorted(ALLOWED_SUBDIRS))}."
+    if parts[-1] == "SKILL.md":
+        return "SKILL.md is reserved; use skill_view()/skill_manage() for the main skill file."
     return None
 
 
@@ -252,14 +259,22 @@ def security_scan(content: str) -> str | None:
 def _discover_linked_files(skill_dir: Path) -> dict[str, list[str]]:
     """Discover supporting files in skill directory."""
     linked: dict[str, list[str]] = {}
-    for subdir_name in sorted(ALLOWED_SUBDIRS):
-        subdir = skill_dir / subdir_name
-        if subdir.is_dir():
-            files = sorted(
-                str(p.relative_to(subdir))
-                for p in subdir.rglob("*")
-                if p.is_file()
-            )
-            if files:
-                linked[subdir_name] = files
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file():
+            continue
+
+        rel_path = path.relative_to(skill_dir)
+        if rel_path == Path("SKILL.md"):
+            continue
+        if any(part.startswith(".") for part in rel_path.parts):
+            continue
+
+        if len(rel_path.parts) == 1:
+            bucket = "."
+            stored = rel_path.name
+        else:
+            bucket = rel_path.parts[0]
+            stored = str(Path(*rel_path.parts[1:]))
+
+        linked.setdefault(bucket, []).append(stored)
     return linked

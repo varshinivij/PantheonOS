@@ -10,7 +10,6 @@ from pathlib import Path
 from pantheon.utils.log import logger
 
 from .types import (
-    ALLOWED_SUBDIRS,
     MAX_FILE_SIZE,
     SkillEntry,
     SkillHeader,
@@ -235,7 +234,7 @@ class SkillStore:
     def write_supporting_file(
         self, name: str, file_path: str, content: str
     ) -> Path:
-        """Write a supporting file (references/scripts/templates/assets).
+        """Write a supporting file inside a skill directory.
 
         Returns path to written file.
         """
@@ -312,10 +311,15 @@ class SkillStore:
         if not self.skills_dir.exists():
             return
         for root, dirs, files in os.walk(self.skills_dir):
-            # Skip hidden directories
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ALLOWED_SUBDIRS]
             if "SKILL.md" in files:
                 yield Path(root) / "SKILL.md"
+                # A directory that already contains SKILL.md is a leaf skill;
+                # do not descend into its supporting files/subdirectories.
+                dirs[:] = []
+                continue
+
+            # Skip hidden directories while continuing to search category paths.
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

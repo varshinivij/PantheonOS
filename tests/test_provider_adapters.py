@@ -167,6 +167,93 @@ async def test_llm_uses_catalog_output_param_for_openai(monkeypatch):
     assert "max_tokens" not in captured
 
 
+@pytest.mark.asyncio
+async def test_llm_rewrites_explicit_max_tokens_to_provider_specific_param(monkeypatch):
+    from pantheon.utils import llm as llm_module
+    from pantheon.utils import adapters as adapters_module
+
+    captured = {}
+
+    class DummyAdapter:
+        async def acompletion(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "model": kwargs["model"],
+                },
+                {
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "choices": [],
+                },
+            ]
+
+    monkeypatch.setattr(adapters_module, "get_adapter", lambda _sdk: DummyAdapter())
+
+    resp = await llm_module.acompletion(
+        messages=[{"role": "user", "content": "hello"}],
+        model="openai/gpt-5.4-mini",
+        model_params={"temperature": 0.0, "max_tokens": 1234},
+    )
+
+    assert resp.choices[0].message.content == "ok"
+    assert captured["max_completion_tokens"] == 1234
+    assert "max_tokens" not in captured
+
+
+@pytest.mark.asyncio
+async def test_llm_preserves_explicit_token_param_for_unknown_provider(monkeypatch):
+    from pantheon.utils import llm as llm_module
+    from pantheon.utils import adapters as adapters_module
+
+    captured = {}
+
+    class DummyAdapter:
+        async def acompletion(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "model": kwargs["model"],
+                },
+                {
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "choices": [],
+                },
+            ]
+
+    monkeypatch.setattr(adapters_module, "get_adapter", lambda _sdk: DummyAdapter())
+
+    resp = await llm_module.acompletion(
+        messages=[{"role": "user", "content": "hello"}],
+        model="unknown/some-model",
+        model_params={"max_tokens": 321},
+    )
+
+    assert resp.choices[0].message.content == "ok"
+    assert captured["max_tokens"] == 321
+
+
 # ============ stream_chunk_builder unit tests ============
 
 

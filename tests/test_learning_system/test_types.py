@@ -92,11 +92,12 @@ class TestValidateFilePath:
         assert validate_file_path("scripts/deploy.sh") is None
         assert validate_file_path("templates/config.yaml") is None
         assert validate_file_path("assets/data.json") is None
+        assert validate_file_path("styles/neurips_plot.md") is None
 
     def test_invalid_paths(self):
         assert validate_file_path("../etc/passwd") is not None
+        assert validate_file_path("/tmp/test.txt") is not None
         assert validate_file_path("SKILL.md") is not None
-        assert validate_file_path("other/file.txt") is not None
         assert validate_file_path("") is not None
 
 
@@ -135,7 +136,12 @@ class TestParseSkillFile:
         refs = skill_dir / "references"
         refs.mkdir()
         (refs / "api.md").write_text("API docs")
+        styles = skill_dir / "styles"
+        styles.mkdir()
+        (styles / "neurips_plot.md").write_text("Plot style")
 
         entry = parse_skill_file(skill_dir / "SKILL.md")
         assert "references" in entry.linked_files
         assert "api.md" in entry.linked_files["references"]
+        assert "styles" in entry.linked_files
+        assert "neurips_plot.md" in entry.linked_files["styles"]

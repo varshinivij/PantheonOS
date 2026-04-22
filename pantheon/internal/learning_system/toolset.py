@@ -33,7 +33,7 @@ SKILL_MANAGE_DESCRIPTION = (
     "Create when: complex task succeeded (3+ tool calls), errors overcome, "
     "user-corrected approach worked, non-trivial workflow discovered.\n\n"
     "Good skills: trigger conditions, numbered steps, pitfalls, verification.\n\n"
-    "For supporting files (references/, scripts/, templates/, assets/), "
+    "For supporting files inside the skill directory (for example references/, scripts/, styles/), "
     "use file_manager tools to read/write them directly in the skill directory."
 )
 
@@ -53,10 +53,10 @@ class SkillToolSet(ToolSet):
         """List all available skills with names and descriptions.
 
         Use this to discover what skills exist before starting a task.
-        If a skill matches your task, load it with skill_view(name).
+        If a skill matches your task, load it with skill_view(name=<path>).
 
         Returns:
-            JSON with skills list: [{name, description, tags}]
+            JSON with skills list: [{display_name, path, identifier, description, tags}]
         """
         store = self._runtime.store
         if not store:
@@ -65,8 +65,10 @@ class SkillToolSet(ToolSet):
         headers = store.scan_headers()
         skills = [
             {
-                "name": h.name,
+                "name": h.name,  # deprecated alias for display_name
+                "display_name": h.name,
                 "path": h.path,  # relative path key, e.g. "bioinformatics/scrna-qc"
+                "identifier": h.path,
                 "description": h.description,
                 "tags": h.tags,
             }
@@ -76,7 +78,7 @@ class SkillToolSet(ToolSet):
             "success": True,
             "count": len(skills),
             "skills": skills,
-            "hint": "Use skill_view(name) with the 'path' value to load a skill's full content.",
+            "hint": "Use skill_view(name=<identifier>) with the 'identifier' or 'path' value to load a skill's full content. 'display_name' is human-readable only.",
         })
 
     @tool
@@ -86,8 +88,10 @@ class SkillToolSet(ToolSet):
         """View a skill's full content or a specific supporting file.
 
         Args:
-            name: Skill name (e.g., "high-mito-qc").
-            file_path: Optional path to a supporting file (e.g., "references/thresholds.md").
+            name: Skill identifier/path from skill_list() (e.g., "bio/high-mito-qc").
+                  Leaf-name lookup is still accepted for backwards compatibility.
+            file_path: Optional relative path to a supporting file inside the skill directory
+                       (e.g., "references/thresholds.md" or "styles/neurips_plot.md").
                        If omitted, returns the full SKILL.md content.
 
         Returns:
@@ -99,16 +103,25 @@ class SkillToolSet(ToolSet):
 
         # Load supporting file
         if file_path:
+            entry = store.load_skill(name)
+            if not entry:
+                return self._json({
+                    "success": False,
+                    "error": f"Skill '{name}' not found. Use skill_list() to see available skills.",
+                })
             try:
-                content = store.load_file(name, file_path)
+                content = store.load_file(entry.path, file_path)
                 if content is None:
                     return self._json({
                         "success": False,
-                        "error": f"File '{file_path}' not found in skill '{name}'.",
+                        "error": f"File '{file_path}' not found in skill '{entry.path}'.",
                     })
                 return self._json({
                     "success": True,
-                    "name": name,
+                    "path": entry.path,
+                    "identifier": entry.path,
+                    "name": entry.name,
+                    "display_name": entry.name,
                     "file_path": file_path,
                     "content": content,
                 })
@@ -125,7 +138,10 @@ class SkillToolSet(ToolSet):
 
         result: dict[str, Any] = {
             "success": True,
+            "path": entry.path,
+            "identifier": entry.path,
             "name": entry.name,
+            "display_name": entry.name,
             "description": entry.description,
             "content": entry.content,
         }
@@ -135,7 +151,7 @@ class SkillToolSet(ToolSet):
             result["related_skills"] = entry.related_skills
         if entry.linked_files:
             result["linked_files"] = entry.linked_files
-            result["hint"] = "Use file_manager to read linked files in the skill directory."
+            result["hint"] = "Use file_manager or skill_view(name=<identifier>, file_path=...) to read linked files in the skill directory."
         if entry.version:
             result["version"] = entry.version
 

@@ -290,6 +290,11 @@ class TestConvertModelParamsForResponses:
         assert result == {"max_output_tokens": 1024}
         assert "max_tokens" not in result
 
+    def test_max_completion_tokens(self):
+        result = _convert_model_params_for_responses({"max_completion_tokens": 1024})
+        assert result == {"max_output_tokens": 1024}
+        assert "max_completion_tokens" not in result
+
     def test_reasoning_effort(self):
         result = _convert_model_params_for_responses({"reasoning_effort": "high"})
         assert result == {"reasoning": {"effort": "high"}}

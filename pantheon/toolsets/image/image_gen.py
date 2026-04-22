@@ -20,6 +20,7 @@ from pantheon.utils.vision import (
     expand_image_references_for_llm,
 )
 from pantheon.utils.provider_registry import find_provider_for_model
+from pantheon.utils.log import logger
 
 # Multimodal models that support image input + output via acompletion API
 # Gemini Nano Banana series: Pro / Nano Banana 2 / Nano Banana first-gen
@@ -159,6 +160,10 @@ class ImageGenerationToolSet(ToolSet):
         model = model or self.default_model
 
         try:
+            logger.info(
+                f"[IMAGE_GEN] Starting generate_image | model={model} "
+                f"reference_images={len(reference_images or [])}"
+            )
             if self._is_multimodal_model(model):
                 # Multimodal model: use acompletion API (supports image in/out)
                 return await self._multimodal_image_gen(
@@ -173,6 +178,10 @@ class ImageGenerationToolSet(ToolSet):
                     )
                 elif reference_images:
                     # Fallback: describe reference images using vision model
+                    logger.warning(
+                        f"[IMAGE_GEN] Model {model} does not support native image edit; "
+                        f"falling back to reference-image description"
+                    )
                     description = await self._describe_reference_images(
                         reference_images
                     )
@@ -180,6 +189,7 @@ class ImageGenerationToolSet(ToolSet):
                         prompt = f"{prompt}. Reference: {description}"
                 return await self._text_input_image_gen(prompt, model)
         except Exception as e:
+            logger.error(f"[IMAGE_GEN] generate_image failed | model={model} error={e}")
             return {"success": False, "error": str(e)}
 
     async def _text_input_image_gen(
@@ -321,6 +331,10 @@ class ImageGenerationToolSet(ToolSet):
         reference_images: list[str],
     ) -> dict:
         """Native image editing via aimage_edit API (OpenAI gpt-image models)."""
+        logger.info(
+            f"[IMAGE_GEN] Starting native image edit | model={model} "
+            f"reference_images={len(reference_images)}"
+        )
         # Resolve file paths (strip file:// prefix, normalize)
         resolved_paths = []
         for ref in reference_images:
@@ -371,6 +385,10 @@ class ImageGenerationToolSet(ToolSet):
         if data_uris:
             result["base64_uri"] = data_uris
             result["hidden_to_model"] = ["base64_uri"]
+        logger.info(
+            f"[IMAGE_GEN] Native image edit completed | model={model} "
+            f"outputs={len(saved_paths)}"
+        )
         return result
 
     async def _describe_reference_images(self, reference_images: list[str]) -> str:

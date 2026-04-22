@@ -309,7 +309,7 @@ def _convert_model_params_for_responses(model_params: dict | None) -> dict:
     """Map model_params to Responses API compatible kwargs.
 
     Conversions:
-    - max_tokens → max_output_tokens
+    - max_tokens/max_completion_tokens/max_output_tokens → max_output_tokens
     - reasoning_effort → {"reasoning": {"effort": value}}
     - temperature, top_p → pass through
     - stream_options, num_retries → dropped
@@ -321,13 +321,61 @@ def _convert_model_params_for_responses(model_params: dict | None) -> dict:
     for key, value in model_params.items():
         if key in drop_keys:
             continue
-        if key == "max_tokens":
+        if key in {"max_tokens", "max_completion_tokens", "max_output_tokens"}:
             result["max_output_tokens"] = value
         elif key == "reasoning_effort":
             result["reasoning"] = {"effort": value}
         else:
             result[key] = value
     return result
+
+
+def _normalize_output_token_param(
+    model: str,
+    model_params: dict | None,
+    *,
+    api_mode: str = "chat",
+    force_param: str | None = None,
+) -> dict:
+    """Normalize output-token parameter names for the target model/API.
+
+    This accepts any of ``max_tokens``, ``max_completion_tokens``, or
+    ``max_output_tokens`` from callers and rewrites the value to the provider's
+    preferred parameter name. If no explicit token limit is provided, it fills
+    one from the model catalog when available.
+    """
+    from .provider_registry import get_model_info, get_output_token_param
+
+    normalized = dict(model_params or {})
+    token_keys = ("max_output_tokens", "max_completion_tokens", "max_tokens")
+    token_value = None
+    source_param = None
+
+    for key in token_keys:
+        if key in normalized:
+            token_value = normalized.pop(key)
+            source_param = key
+            break
+
+    target_param = force_param
+    if target_param is None:
+        try:
+            target_param = get_output_token_param(model, api_mode=api_mode)
+        except Exception:
+            target_param = None
+
+    if token_value is None:
+        try:
+            max_out = get_model_info(model).get("max_output_tokens")
+            if max_out and max_out > 0:
+                token_value = max_out
+        except Exception:
+            token_value = None
+
+    if token_value is not None:
+        normalized[target_param or source_param or "max_tokens"] = token_value
+
+    return normalized
 
 
 async def acompletion_responses(
@@ -346,7 +394,6 @@ async def acompletion_responses(
     Returns a normalised message dict compatible with ``extract_message_from_response``.
     """
     from openai import AsyncOpenAI
-    from .provider_registry import get_model_info, get_output_token_param
     from .llm_providers import get_openai_effective_config
 
     # ========== Build client ==========
@@ -361,18 +408,11 @@ async def acompletion_responses(
     # ========== Convert inputs ==========
     instructions, input_items = _convert_messages_to_responses_input(messages)
     converted_tools = _convert_tools_for_responses(tools)
-    response_model_params = dict(model_params or {})
-    if not any(
-        key in response_model_params
-        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
-    ):
-        try:
-            max_out = get_model_info(model).get("max_output_tokens")
-            token_param = get_output_token_param(model, api_mode="responses")
-            if token_param and max_out and max_out > 0:
-                response_model_params[token_param] = max_out
-        except Exception:
-            pass
+    response_model_params = _normalize_output_token_param(
+        model,
+        model_params,
+        api_mode="responses",
+    )
     extra_params = _convert_model_params_for_responses(response_model_params)
 
     # ========== Build kwargs ==========
@@ -681,8 +721,6 @@ async def acompletion(
         find_provider_for_model,
         get_provider_config,
         completion_cost,
-        get_model_info,
-        get_output_token_param,
     )
     from .adapters import get_adapter
     from .llm_providers import (
@@ -699,22 +737,12 @@ async def acompletion(
     provider_key, model_name, provider_config = find_provider_for_model(model)
     sdk_type = provider_config.get("sdk", "openai")
 
-    # ========== Ensure output token limit is set from the catalog ==========
-    # Different vendors use different parameter names for the same concept.
-    # The catalog records the preferred parameter name; we use it here so the
-    # first request is correct for known providers/models.
-    model_params = dict(model_params or {})
-    if not any(
-        key in model_params
-        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
-    ):
-        try:
-            max_out = get_model_info(model).get("max_output_tokens")
-            token_param = get_output_token_param(model, api_mode="chat")
-            if token_param and max_out and max_out > 0:
-                model_params[token_param] = max_out
-        except Exception:
-            pass  # Fall through to provider default
+    # ========== Normalize output token limit for the target provider ==========
+    model_params = _normalize_output_token_param(
+        model,
+        model_params,
+        api_mode="chat",
+    )
 
     # ========== Mode Detection & Configuration ==========
     openai_effective_base, openai_effective_key = get_openai_effective_config()
@@ -734,8 +762,12 @@ async def acompletion(
         effective_api_key = fallback_key
         sdk_type = "openai"
         effective_model = model_name
-        if "max_output_tokens" in model_params:
-            model_params["max_tokens"] = model_params.pop("max_output_tokens")
+        model_params = _normalize_output_token_param(
+            model,
+            model_params,
+            api_mode="chat",
+            force_param="max_tokens",
+        )
     elif provider_key == "openai":
         effective_base_url = openai_specific_base or openai_effective_base or provider_config.get("base_url")
         effective_api_key = openai_specific_key or openai_effective_key

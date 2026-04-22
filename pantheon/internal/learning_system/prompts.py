@@ -4,7 +4,7 @@ SKILLS_GUIDANCE = """\
 ## Skills (mandatory)
 
 Before starting a task, scan the skills below. If a skill matches or is even \
-partially relevant to your task, you MUST load it with `skill_view(name)` and \
+partially relevant to your task, you MUST load it with `skill_view(name=<path>)` and \
 follow its instructions. Err on the side of loading — it is always better to \
 have context you don't need than to miss critical steps, pitfalls, or \
 established workflows. Skills encode the user's preferred approach and \

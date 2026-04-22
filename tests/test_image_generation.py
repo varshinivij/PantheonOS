@@ -312,6 +312,51 @@ class TestToolSetBasics:
         assert result["success"] is True
         assert all(isinstance(item, Path) for item in calls["image"])
 
+    @pytest.mark.asyncio
+    async def test_gpt_image_2_edit_emits_info_logs(
+        self, image_toolset, monkeypatch, test_images
+    ):
+        entries = []
+
+        class FakeLogger:
+            def debug(self, message, *args, **kwargs):
+                entries.append(("debug", str(message)))
+
+            def info(self, message, *args, **kwargs):
+                entries.append(("info", str(message)))
+
+            def warning(self, message, *args, **kwargs):
+                entries.append(("warning", str(message)))
+
+            def error(self, message, *args, **kwargs):
+                entries.append(("error", str(message)))
+
+        class FakeAdapter:
+            async def aimage_edit(self, **kwargs):
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model="gpt-image-2",
+                    usage=None,
+                )
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+        monkeypatch.setattr("pantheon.toolsets.image.image_gen.logger", FakeLogger(), raising=False)
+
+        result = await image_toolset.generate_image(
+            prompt="Make the input image look like a watercolor painting",
+            reference_images=test_images,
+            model="gpt-image-2",
+        )
+
+        assert result["success"] is True
+        info_messages = [message for level, message in entries if level == "info"]
+        assert any("Starting native image edit" in message for message in info_messages)
+        assert any("Native image edit completed" in message for message in info_messages)
+
 
 # ============================================================================
 # Gemini Tests (Multimodal + Imagen)

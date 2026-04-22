@@ -891,6 +891,8 @@ When working with {domain}.
         # 每个 skill 都有 path 字段
         for s in result["skills"]:
             assert "path" in s, f"skill {s['name']} 缺少 path 字段"
+            assert s["identifier"] == s["path"]
+            assert "display_name" in s
 
         rt.store.delete_skill("bio/scrna-qc")
         rt.store.delete_skill("devops/deploy-flyio")
