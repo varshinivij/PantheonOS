@@ -37,6 +37,17 @@ When delegating, always provide a clear Task Brief:
 
 ## Expected Outcome
 - Detail deliverables, format, quality bar, file names or schemas, validation requirements
+
+## Reference Tracking (for research/analysis tasks, optional)
+When the task involves literature search, web research, or external data sources,
+ask the sub-agent to produce a structured reference file:
+- Write references to `references/refs_{agent_name}.json`
+- For each source: include title, authors, year, DOI/PMID (if paper), URL, source type
+- Use `[ref_xxx]` citation markers in your response text when referencing sources
+- JSON format:
+  ```json
+  {"references": [{"id": "ref_001", "type": "paper", "title": "...", "authors": ["..."], "year": "...", "doi": "...", "pmid": "...", "url": "...", "source": "..."}]}
+  ```
 ```
 
 ### Workflow & Tools

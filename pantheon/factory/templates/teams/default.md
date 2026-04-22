@@ -27,6 +27,8 @@ leader:
 
 {{agentic_general}}
 
+{{coding_dev}}
+
 {{visual_verification}}
 
 ## Task Execution Strategy
