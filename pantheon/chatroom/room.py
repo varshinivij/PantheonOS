@@ -1519,7 +1519,7 @@ class ChatRoom(ToolSet):
             # 6. Update FileManager root on Endpoint (if embedded)
             if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
                 tsm = self._endpoint.toolset_manager
-                for ts in tsm._toolsets.values():
+                for ts in tsm.local_toolsets.values():
                     if hasattr(ts, 'path'):
                         ts.path = Path(resolved)
 
