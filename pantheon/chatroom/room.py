@@ -25,6 +25,7 @@ from pantheon.team import PantheonTeam
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.log import logger
 from pantheon.utils.misc import run_func
+from .projects import ProjectManager
 from .special_agents import get_suggestion_generator
 from .thread import Thread
 
@@ -126,6 +127,10 @@ class ChatRoom(ToolSet):
 
         # Initialize template manager (supports old and new formats, manages agents.yaml library)
         self.template_manager = get_template_manager()
+
+        # Project manager — register current workspace as active project
+        _ws = workspace_path or str(get_settings().workspace)
+        self.project_manager = ProjectManager(active_path=_ws)
 
         self.description = description
 
@@ -1417,6 +1422,75 @@ class ChatRoom(ToolSet):
         except Exception as e:
             logger.error(f"Error setting chat project: {e}")
             return {"success": False, "message": str(e)}
+
+    # ── Project Management ──────────────────────────────────────────
+
+    @tool
+    async def list_projects(self) -> dict:
+        """List all registered projects."""
+        return {"projects": self.project_manager.list_projects()}
+
+    @tool
+    async def get_active_project(self) -> dict:
+        """Get the currently active project."""
+        p = self.project_manager.active_project
+        if not p:
+            return {"active": None}
+        d = p.to_dict()
+        d["is_active"] = True
+        return {"active": d}
+
+    @tool
+    async def register_project(self, path: str, name: str = "") -> dict:
+        """Register a directory as a project.
+
+        Args:
+            path: Absolute path to the project directory.
+            name: Display name (defaults to directory name).
+        """
+        try:
+            resolved = str(Path(path).resolve())
+            if not Path(resolved).is_dir():
+                return {"success": False, "message": f"Directory not found: {resolved}"}
+            info = self.project_manager.register(resolved, name)
+            return {"success": True, "project": info.to_dict()}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    @tool
+    async def remove_project(self, path: str) -> dict:
+        """Remove a project from the registry (does not delete files).
+
+        Args:
+            path: Path of the project to remove.
+        """
+        ok = self.project_manager.remove(path)
+        return {"success": ok, "message": "Removed" if ok else "Not found"}
+
+    @tool
+    async def switch_project(self, path: str) -> dict:
+        """Switch the active project to a different directory.
+
+        Args:
+            path: Path of the registered project to switch to.
+        """
+        resolved = str(Path(path).resolve())
+        info = self.project_manager.set_active(resolved)
+        if not info:
+            return {"success": False, "message": f"Project not registered: {resolved}"}
+        return {
+            "success": True,
+            "project": info.to_dict(),
+            "message": f"Switched to {info.name}",
+        }
+
+    @tool
+    async def get_project_settings(self) -> dict:
+        """Get settings with scope info (global vs project)."""
+        p = self.project_manager.active_project
+        if not p:
+            return {"success": False, "message": "No active project"}
+        return self.project_manager.get_config_scope(p.path)
 
     @tool
     async def revert_to_message(self, chat_id: str, message_id: str) -> dict:
