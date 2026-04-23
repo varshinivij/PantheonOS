@@ -1523,7 +1523,15 @@ class ChatRoom(ToolSet):
                     if hasattr(ts, 'path'):
                         ts.path = Path(resolved)
 
-            # 7. Clear per-chat team cache (stale references)
+            # 7. Reset memory system singleton (points to old .pantheon/memory-store)
+            try:
+                import pantheon.internal.memory_system.plugin as _mem_plugin
+                _mem_plugin._memory_runtime = None
+                logger.info("[switch_project] memory runtime singleton reset")
+            except Exception:
+                pass
+
+            # 8. Clear per-chat team cache (stale references)
             self.chat_teams.clear()
 
             return {
