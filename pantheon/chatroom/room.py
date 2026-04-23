@@ -1495,11 +1495,11 @@ class ChatRoom(ToolSet):
             os.chdir(resolved)
             logger.info(f"[switch_project] chdir → {resolved}")
 
-            # 2. Reset and reload Settings singleton
-            from pantheon.settings import reset_settings
-            reset_settings()
-            new_settings = get_settings(work_dir=Path(resolved))
-            new_settings.reload()
+            # 2. Reset Settings singleton and replace with new work_dir
+            import pantheon.settings as _settings_mod
+            _settings_mod._settings = None
+            _settings_mod._settings = _settings_mod.Settings(Path(resolved))
+            _settings_mod._settings.reload()
 
             # 3. Ensure .pantheon directory exists
             pantheon_dir = Path(resolved) / ".pantheon"
