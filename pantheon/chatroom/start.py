@@ -731,7 +731,7 @@ async def start_services(
         service_id = generate_service_id(id_hash)
 
         # Get NATS WebSocket URL from server_info
-        nats_ws_url = server_info.get("ws_url", "ws://localhost:8080")
+        nats_ws_url = server_info.get("ws_url", "ws://127.0.0.1:8080")
 
         # ── Emit machine-parseable ready event ──────────────────────────────
         # Tauri (and any other host process) can listen on stdout for this line
