@@ -1472,6 +1472,12 @@ class ChatRoom(ToolSet):
     async def switch_project(self, path: str) -> dict:
         """Switch the active project to a different directory.
 
+        This performs a full runtime context switch:
+        - Changes working directory
+        - Reloads settings from new .pantheon/
+        - Switches memory manager to new project's chats
+        - Reloads templates, agents, skills from new project
+
         Args:
             path: Path of the registered project to switch to.
         """
@@ -1479,11 +1485,55 @@ class ChatRoom(ToolSet):
         info = self.project_manager.set_active(resolved)
         if not info:
             return {"success": False, "message": f"Project not registered: {resolved}"}
-        return {
-            "success": True,
-            "project": info.to_dict(),
-            "message": f"Switched to {info.name}",
-        }
+
+        if not Path(resolved).is_dir():
+            return {"success": False, "message": f"Directory does not exist: {resolved}"}
+
+        try:
+            # 1. Change process working directory
+            import os
+            os.chdir(resolved)
+            logger.info(f"[switch_project] chdir → {resolved}")
+
+            # 2. Reset and reload Settings singleton
+            from pantheon.settings import reset_settings
+            reset_settings()
+            new_settings = get_settings(work_dir=Path(resolved))
+            new_settings.reload()
+
+            # 3. Ensure .pantheon directory exists
+            pantheon_dir = Path(resolved) / ".pantheon"
+            pantheon_dir.mkdir(parents=True, exist_ok=True)
+            (pantheon_dir / "memory").mkdir(parents=True, exist_ok=True)
+
+            # 4. Switch MemoryManager
+            new_memory_dir = pantheon_dir / "memory"
+            self.memory_dir = new_memory_dir
+            self.memory_manager = MemoryManager(new_memory_dir)
+            logger.info(f"[switch_project] memory → {new_memory_dir}")
+
+            # 5. Reload TemplateManager (reads dirs from settings)
+            self.template_manager = get_template_manager(work_dir=Path(resolved))
+            logger.info(f"[switch_project] templates reloaded")
+
+            # 6. Update FileManager root on Endpoint (if embedded)
+            if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
+                tsm = self._endpoint.toolset_manager
+                for ts in tsm._toolsets.values():
+                    if hasattr(ts, 'path'):
+                        ts.path = Path(resolved)
+
+            # 7. Clear per-chat team cache (stale references)
+            self.chat_teams.clear()
+
+            return {
+                "success": True,
+                "project": info.to_dict(),
+                "message": f"Switched to {info.name}",
+            }
+        except Exception as e:
+            logger.error(f"[switch_project] Failed: {e}")
+            return {"success": False, "message": str(e)}
 
     @tool
     async def get_project_settings(self) -> dict:
