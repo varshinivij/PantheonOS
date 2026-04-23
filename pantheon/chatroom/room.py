@@ -129,7 +129,8 @@ class ChatRoom(ToolSet):
         self.template_manager = get_template_manager()
 
         # Project manager — register current workspace as active project
-        _ws = workspace_path or str(get_settings().workspace)
+        from pantheon.settings import get_settings as _get_settings
+        _ws = workspace_path or str(_get_settings().workspace)
         self.project_manager = ProjectManager(active_path=_ws)
 
         self.description = description
