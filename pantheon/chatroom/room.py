@@ -1523,13 +1523,26 @@ class ChatRoom(ToolSet):
                     if hasattr(ts, 'path'):
                         ts.path = Path(resolved)
 
-            # 7. Reset memory system singleton (points to old .pantheon/memory-store)
+            # 7. Reset memory system — singleton + cached plugins
             try:
                 import pantheon.internal.memory_system.plugin as _mem_plugin
                 _mem_plugin._memory_runtime = None
-                logger.info("[switch_project] memory runtime singleton reset")
             except Exception:
                 pass
+            # Recreate plugins with new settings so MemoryRuntime
+            # initializes from the new project's .pantheon/memory-store
+            try:
+                from pantheon.team.plugin_registry import create_plugins
+                self._plugins = create_plugins(_settings_mod._settings)
+                from pantheon.internal.memory_system.plugin import MemorySystemPlugin
+                self._memory_plugin = None
+                for p in self._plugins:
+                    if isinstance(p, MemorySystemPlugin):
+                        self._memory_plugin = p
+                        break
+            except Exception as e:
+                logger.warning(f"[switch_project] plugin reset failed: {e}")
+            logger.info("[switch_project] memory system + plugins reset")
 
             # 8. Clear per-chat team cache (stale references)
             self.chat_teams.clear()
