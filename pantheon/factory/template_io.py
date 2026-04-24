@@ -1171,66 +1171,61 @@ class FileBasedTemplateManager:
             raise
 
     def _resolve_template_path(self, kind: str, template_id: str) -> Optional[Path]:
-        """Resolve template path for user override (user > system)."""
+        """Resolve template path: project > global > factory."""
+        from pantheon.settings import get_settings
+        settings = get_settings()
+
         if kind == "agents":
-            user_path = self.agents_dir / f"{template_id}.md"
+            project_path = self.agents_dir / f"{template_id}.md"
+            global_path = settings.global_agents_dir / f"{template_id}.md"
             system_dir = self.system_templates_dir / "agents"
         elif kind == "teams":
-            user_path = self.teams_dir / f"{template_id}.md"
+            project_path = self.teams_dir / f"{template_id}.md"
+            global_path = settings.global_teams_dir / f"{template_id}.md"
             system_dir = self.system_templates_dir / "teams"
         else:
             raise ValueError(f"Unknown template kind: {kind}")
 
-        if user_path.exists():
-            return user_path
-
+        if project_path.exists():
+            return project_path
+        if global_path.exists():
+            return global_path
         system_path = system_dir / f"{template_id}.md"
         if system_path.exists():
             return system_path
-
         return None
 
     def _list_templates(
         self, kind: str, resolve_refs: bool = True
     ) -> List[Union[AgentConfig, TeamConfig]]:
-        """List templates for a given kind with user override handling.
+        """List templates with 3-layer priority: project → global → factory.
 
         Scans **recursively** so agents nested in subdirectories (e.g.
         ``agents/single_cell/leader.md``) are returned alongside top-level
         ones. ``source_path`` is set on every item so callers can rebuild
         the subdirectory-preserving relative path.
         """
+        from pantheon.settings import get_settings
+        settings = get_settings()
+
         if kind == "agents":
-            user_dir = self.agents_dir
+            project_dir = self.agents_dir
+            global_dir = settings.global_agents_dir
             system_dir = self.system_templates_dir / "agents"
         elif kind == "teams":
-            user_dir = self.teams_dir
+            project_dir = self.teams_dir
+            global_dir = settings.global_teams_dir
             system_dir = self.system_templates_dir / "teams"
         else:
             raise ValueError(f"Unknown template kind: {kind}")
 
         items = []
-        user_ids = set()
+        seen_ids = set()
 
-        for path in user_dir.rglob("*.md"):
-            if not path.is_file():
-                continue
-            try:
-                if kind == "agents":
-                    item = self._read_agent_from_path(path)
-                else:
-                    item = self._read_team_from_path(path)
-                    if resolve_refs:
-                        item = self._resolve_agent_references(item, path.parent)
-                item.source_path = str(path)
-            except Exception as exc:
-                logger.error(f"Failed to parse {kind[:-1]} {path}: {exc}")
-                continue
-            items.append(item)
-            user_ids.add(item.id)
-
-        if system_dir.exists():
-            for path in system_dir.rglob("*.md"):
+        def _scan_dir(scan_dir: Path, source_label: str):
+            if not scan_dir.exists():
+                return
+            for path in scan_dir.rglob("*.md"):
                 if not path.is_file():
                     continue
                 try:
@@ -1242,11 +1237,17 @@ class FileBasedTemplateManager:
                             item = self._resolve_agent_references(item, path.parent)
                     item.source_path = str(path)
                 except Exception as exc:
-                    logger.error(f"Failed to parse system {kind[:-1]} {path}: {exc}")
+                    logger.error(f"Failed to parse {kind[:-1]} {path}: {exc}")
                     continue
-                if item.id in user_ids:
+                if item.id in seen_ids:
                     continue
+                seen_ids.add(item.id)
                 items.append(item)
+
+        # Priority: project > global > factory
+        _scan_dir(project_dir, "project")
+        _scan_dir(global_dir, "global")
+        _scan_dir(system_dir, "factory")
 
         return items
 

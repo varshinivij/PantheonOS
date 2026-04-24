@@ -248,12 +248,24 @@ class Settings:
         return self.pantheon_dir / "agents"
 
     @property
+    def global_agents_dir(self) -> Path:
+        return self.user_home / "agents"
+
+    @property
     def teams_dir(self) -> Path:
         return self.pantheon_dir / "teams"
 
     @property
+    def global_teams_dir(self) -> Path:
+        return self.user_home / "teams"
+
+    @property
     def prompts_dir(self) -> Path:
         return self.pantheon_dir / "prompts"
+
+    @property
+    def global_prompts_dir(self) -> Path:
+        return self.user_home / "prompts"
 
     @property
     def memory_dir(self) -> Path:
@@ -270,6 +282,10 @@ class Settings:
     @property
     def skills_dir(self) -> Path:
         return self.pantheon_dir / "skills"
+
+    @property
+    def global_skills_dir(self) -> Path:
+        return self.user_home / "skills"
 
     @property
     def learning_dir(self) -> Path:
