@@ -161,9 +161,12 @@ call_agent("researcher",
    Deliverables:
    - {workdir}/research/literature_review.md (≥3 sources, with citation keys)
    - {workdir}/research/references.bib (bibtex entries for every cited source)
+   - {workdir}/references/refs_researcher.json (canonical structured references following agentic_general's reference schema)
    - {workdir}/research/gap_analysis.md (what the paper should contribute)
    For bio mode, prefer PubMed/PMC sources.")
 ```
+
+After researcher returns, read `{workdir}/references/refs_researcher.json` and merge it into `{workdir}/references.json` using the canonical `agentic_general` reference schema.
 
 # Step 5: Outline
 
@@ -187,6 +190,7 @@ call_agent("writer",
    Outline: {workdir}/draft/outline.md.
    Materials: {workdir}/materials/.
    References: {workdir}/research/references.bib and {workdir}/materials/references_seed.bib (if present).
+   Preserve canonical reference tracking in {workdir}/references.json and {workdir}/references/refs_*.json per agentic_general.
    Merge all bibtex into {workdir}/draft/references.bib.
    Deliverable: {workdir}/draft/paper.md (single Markdown file, pandoc academic extensions).
    Use [@key] for citations. Use @fig:id / @tbl:id / @eq:id for cross-references.")

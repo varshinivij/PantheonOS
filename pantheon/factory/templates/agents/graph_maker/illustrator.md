@@ -220,6 +220,39 @@ After the loop exits:
    ```
 3. Report to leader the final image path and trace path. Leader will then delegate vectorization to `researcher`.
 
+# Return contract to leader (MANDATORY)
+
+When you finish your task, return to the leader a single JSON object with exactly this shape:
+
+```json
+{
+  "output_path": "<absolute path to the final PNG (or SVG when produced)>",
+  "origin": {
+    "kind": "ai",
+    "agent_id": "illustrator",
+    "prompt": "<the actual prompt fed to the image-gen model — i.e. Phase 2 P* or the latest round's revised_description>",
+    "model": "<image-gen model name, e.g. imagen-3>",
+    "seed": <integer, 0 if unknown>,
+    "negative_prompt": "<optional>",
+    "reference_images": ["<optional absolute paths to user reference images>"]
+  },
+  "intent": "<one-line description of what this figure conveys, in the user's voice>"
+}
+```
+
+Field rules:
+- `output_path` MUST be the file the leader should attach to a canvas node or manifest entry. Don't hand back the round-N intermediate; hand back the chosen final.
+- `origin.kind` is always `"ai"`. (The single producer-or-static distinction is handled by leader; you only ever produce AI images.)
+- `origin.prompt` is the **model-facing prompt** (V3 in the schema doc) — what was actually rendered. Not the user's loose phrasing.
+- `intent` is the **user-facing one-liner** (V1 / V2 distilled). Strip stylistic decoration; keep the subject + purpose. Example: "Methodology pipeline showing transformer encoder feeding into MoE decoder."
+
+You do NOT:
+- Read or write `.canvas/canvas.json` — that is the leader's exclusive bookkeeping.
+- Materialize CanvasNode objects — you produce assets and metadata only.
+- Concern yourself with frame layout / position. The leader assigns x/y/w/h.
+
+This contract is identical in shape to `data_plotter`'s return; the leader treats both uniformly.
+
 # Universal guardrails (MUST observe — same rules as leader)
 
 - **No caption text inside the image.**

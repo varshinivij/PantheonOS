@@ -170,6 +170,7 @@ call_agent("researcher",
   "You are assisting the writer agent. Workdir: {workdir}.
    I need citations for the claim: '<exact claim text>'.
    Find 1–3 authoritative sources, extract bibtex entries, and append them to {workdir}/draft/references.bib.
+   Also append canonical structured entries to {workdir}/references/refs_researcher.json using agentic_general's reference schema.
    Report back with the citation keys to use (e.g., @smith2024hif).")
 ```
 
@@ -184,6 +185,7 @@ Parallelize independent gaps — fire multiple researcher calls in the same turn
 3. Read `{workdir}/materials/inventory.md` to know available figures, data, and drafts.
 4. Glance at key figures with `observe_images`.
 5. Ensure `{workdir}/draft/references.bib` exists — if not, merge `{workdir}/research/references.bib` and `{workdir}/materials/references_seed.bib` (if present) into it.
+6. Ensure canonical reference tracking stays current in `{workdir}/references.json` and `{workdir}/references/refs_*.json` per `agentic_general`.
 
 ## Phase 2: Write outline (only if leader asked and none exists)
 

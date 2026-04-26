@@ -272,6 +272,11 @@ sub-agent delegations. Only create when the task involves external sources
 (research, analysis, literature review, etc.). Do not create for pure
 coding or simple Q&A tasks.
 
+**Canonical contract**:
+- `references.json` is the machine-readable source of truth for UI/reference tracking.
+- `references/refs_<agent>.json` stores per-agent structured source output.
+- `.bib` files are bibliography/export artifacts and do not replace the canonical JSON registry.
+
 **When to create/update**:
 - After delegating a research or analysis task whose results include
   literature or external sources
@@ -298,6 +303,13 @@ coding or simple Q&A tasks.
   ]
 }
 ```
+
+**Strict schema rules**:
+- Root must be an object with a `references` array. Do not emit a top-level array.
+- Use `id`, not `citation_key`.
+- Use `type`, not `source_type`.
+- Use `source` for publication/source label text.
+- Prefer `year` as a string for consistency across agents and UI consumers.
 
 **Supported reference types**: `paper`, `database`, `url`, `dataset`
 

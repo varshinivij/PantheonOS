@@ -135,7 +135,17 @@ RUN echo "Installing single-cell packages (venv: ${VENV_PATH})" && \
     echo "Verifying single-cell packages installation..." && \
     ${VENV_PATH}/bin/python -c "import anndata, scanpy, scrublet, leidenalg; print('✓ Single-cell packages verified successfully')"
 
-# ── Layer 3.6: Install pip in venv ──────────────────────────────────────────
+# ── Layer 3.6: paper writing and graph maker extras ─────────────────────────
+# Install AFTER uv sync so these lightweight runtime extras are not removed by
+# sync cleanup. System-side CLI dependencies live in the production stage.
+RUN echo "Installing paper/graph maker packages (venv: ${VENV_PATH})" && \
+    uv pip install --python ${VENV_PATH}/bin/python --no-cache \
+    weasyprint \
+    svgutils && \
+    echo "Verifying paper/graph maker packages installation..." && \
+    ${VENV_PATH}/bin/python -c "import weasyprint, svgutils; print('Paper/graph maker packages verified successfully')"
+
+# ── Layer 3.7: Install pip in venv ──────────────────────────────────────────
 # uv creates venvs without pip by design (recommends using 'uv pip' instead).
 # However, for compatibility with shell tools and standard workflows, we install pip.
 # This allows 'pip list' and other pip commands to work correctly in the venv.
@@ -190,6 +200,12 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     libxshmfence1 \
     # Fonts for better rendering (removed emoji fonts to save ~20MB)
     fonts-liberation \
+    # Paper writing and graph maker dependencies
+    pandoc \
+    pandoc-crossref \
+    librsvg2-bin \
+    libgdk-pixbuf-2.0-0 \
+    shared-mime-info \
     # R environment for single-cell analysis
     r-base \
     r-base-dev \

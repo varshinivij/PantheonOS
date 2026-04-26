@@ -42,12 +42,15 @@ When delegating, always provide a clear Task Brief:
 When the task involves literature search, web research, or external data sources,
 ask the sub-agent to produce a structured reference file:
 - Write references to `references/refs_{agent_name}.json`
+- This JSON file must follow the canonical `agentic_general` reference schema
+- If the task also produces `.bib`, treat `.bib` as a secondary export artifact, not the canonical registry
 - For each source: include title, authors, year, DOI/PMID (if paper), URL, source type
 - Use `[ref_xxx]` citation markers in your response text when referencing sources
 - JSON format:
   ```json
   {"references": [{"id": "ref_001", "type": "paper", "title": "...", "authors": ["..."], "year": "...", "doi": "...", "pmid": "...", "url": "...", "source": "..."}]}
   ```
+- Do not emit a top-level array. Do not rename `id` to `citation_key`. Do not rename `type` to `source_type`.
 ```
 
 ### Workflow & Tools
@@ -102,4 +105,3 @@ call_agent(
 ```python
 call_agent("researcher", "Do analysis fast.")
 ```
-

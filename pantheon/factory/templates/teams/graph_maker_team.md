@@ -2,12 +2,15 @@
 category: scientific_visualization
 description: |
   AI team for autonomous scientific figure production.
-  Produces publication-quality figures as PNG + PDF + SVG triplets — covering data-driven plots, BioRender-style conceptual illustrations, and multi-panel composite figures.
+  Always produces PNG (required for canvas display). Adds PDF + SVG only when
+  the task calls for publication / LaTeX / vector-editable output.
+  Covers data-driven plots, BioRender-style conceptual illustrations, and multi-panel
+  composite figures. Works with or without a live canvas UI.
 icon: 🎨
 id: graph_maker_team
 name: Graph Maker Team
 type: team
-version: 1.0.0
+version: 1.1.0
 agents:
   - graph_maker/leader
   - researcher
@@ -17,39 +20,54 @@ agents:
 
 # Graph Maker Team
 
-A specialized AI team for autonomous scientific figure production. Delivers publication-ready figures in three formats per figure (PNG for preview, PDF vector for LaTeX embed, SVG vector for Illustrator/Inkscape editing). Covers data-driven plotting, BioRender-style conceptual illustrations, and composite multi-panel figures.
+A specialized AI team for autonomous scientific figure production. Delivers figures as PNG (always) and optionally PDF + SVG for publication workflows. Covers data-driven plotting, BioRender-style conceptual illustrations, and composite multi-panel figures.
+
+Works in two contexts:
+- **With canvas UI** (medrix-scientist): outputs land in `.canvas/assets/`; layout is declared via `agent_output.json` which the frontend merges into the live canvas.
+- **Without canvas UI** (API / pipeline): same output format — `agent_output.json` acts as a standalone delivery manifest; PNG files are usable immediately by any downstream tool.
 
 ## Team Structure
 
 | Agent | Role | Key Capabilities |
 |-------|------|------------------|
-| **leader** | Orchestrator | Intent triage, style card authoring, quality control |
-| **researcher** | Generalist support | Data EDA, format detection, journal style lookup, package installation, PNG→SVG/PDF vectorization |
-| **data_plotter** | Plot producer | Jupyter-based matplotlib/seaborn/plotly figures with internal observe→critic→revise loop, multi-panel composition (gridspec / svgutils), three-format export |
+| **leader** | Orchestrator | CANVAS_CONTEXT parsing (optional), intent triage, execution depth inference, style card authoring, **layout declaration via agent_output.json**, quality control |
+| **researcher** | On-demand specialist | Journal/venue lookup for unknown targets, digestion of user-attached PDFs/datasets/external figures, "in the style of paper X" research. **NOT a default step.** Package installs, routine EDA, and known-journal lookups are NOT routed here. |
+| **data_plotter** | Plot producer | Jupyter-based matplotlib/seaborn/plotly figures with internal observe→critic→revise loop, multi-panel composition, format-conditional export (PNG always; PDF+SVG when `style_card.export_formats` includes them). Performs its own EDA inline. |
 | **illustrator** | Illustration producer | Methodology / concept / pathway diagrams via a four-phase PaperBanana pipeline (Plan → Style → Render → Critic, T ≤ 3 rounds) using `generate_image` |
 
 ## Deliverables
 
 For every finalized figure:
-- `{workdir}/outputs/figures/<name>.png` (300–600 DPI raster preview)
-- `{workdir}/outputs/figures/<name>.pdf` (vector, LaTeX-embed ready)
-- `{workdir}/outputs/figures/<name>.svg` (vector, editable in Illustrator/Inkscape)
+- `{workdir}/.canvas/assets/<name>.png` — always (required for canvas display)
+- `{workdir}/.canvas/assets/<name>.pdf` — only when `export_formats` includes "pdf"
+- `{workdir}/.canvas/assets/<name>.svg` — only when `export_formats` includes "svg"
 
 Plus:
-- `{workdir}/outputs/figure_legends.md` — caption + legend per figure
-- `{workdir}/outputs/figure_manifest.json` — machine-readable index
+- `{workdir}/.canvas/agent_output.json` — structured layout manifest (canvas nodes with positions, origins, intents); consumed by frontend if present, otherwise a standalone record
+- `{workdir}/.canvas/figure_legends.md` — caption + legend per figure
+- `{workdir}/.canvas/figure_manifest.json` — machine-readable index
+
+## Output Format Rule
+
+Leader infers `export_formats` from message intent and writes it into `style_card.json`:
+
+| Signal words in message | export_formats |
+|---|---|
+| publication / paper / LaTeX / journal / submit / vector / editable | `["png", "pdf", "svg"]` |
+| quick / sketch / draft / show me / try / idea | `["png"]` |
+| Unclear | `["png"]` (default) — offer publication version at end if task looks heavy |
 
 ## Supported Intents
 
 | Intent | Pipeline |
 |---|---|
 | **data-only** | `data_plotter` only |
-| **illustration-only** | `illustrator` (four-phase) → `researcher` vectorizes PNG → three-format export |
+| **illustration-only** | `illustrator` (four-phase) → if publication task, `researcher` vectorizes PNG to SVG/PDF |
 | **composite-panel** | Both sub-agents in parallel → `data_plotter` composes with svgutils |
 
 ## Style Governance
 
-Every task begins with a canonical `{workdir}/inputs/style_card.json` — the single source of truth for DPI, colors, fonts, and figure dimensions. Sub-agents MUST read and apply the style card; leader enforces consistency across figures.
+Every task begins with a canonical `{workdir}/inputs/style_card.json` — the single source of truth for DPI, colors, fonts, figure dimensions, and export formats. Sub-agents MUST read and apply the style card; leader enforces consistency across figures.
 
 The `aesthetic_guide` field in `style_card.json` names a style file distributed via the **`figure_styling` skill** (`skills/figure_styling/styles/<aesthetic_guide>.md`). Sub-agents load that file on demand — it is NOT inlined into their system prompts. Built-in style files:
 
@@ -61,41 +79,84 @@ The `aesthetic_guide` field in `style_card.json` names a style file distributed 
 
 Users can extend with additional files (e.g., `nature_figure.md`, `ieee_figure.md`) and reference them by id in `style_card.json`. Conflict priority: **user references > style_card.json > figure_styling/<aesthetic_guide> > agent defaults**.
 
+## Canvas Integration
+
+The team is **canvas-agnostic by default** — it works with or without a live canvas UI.
+
+| Context | canvas.json | CANVAS_CONTEXT | agent_output.json |
+|---|---|---|---|
+| **Canvas UI active** (medrix) | Present — leader reads for current layout state | Present — carries entry_point, active_frame_id, selection | Frontend reads, merges into canvas, then deletes |
+| **No canvas UI** (API/pipeline) | Absent or not provided — leader starts from empty canvas | Absent — leader parses intent from plain text | Stays in workdir as standalone delivery manifest |
+
+### Canvas-mode contract (when UI is active)
+
+- **canvas.json**: leader reads it to understand existing nodes. Never writes to it directly (frontend owns it).
+- **agent_output.json**: leader writes this at the end of every turn. Declares every node produced: source path, origin, intent, position, parent frame. Frontend upserts these into the live canvas.
+- **Frame snapshots**: frontend renders touched frames to `.canvas/frames/<frame_id>_latest.png` + `_latest.meta.json`. Leader reads these for visual critique when running thorough tasks.
+- **CANVAS_CONTEXT block**: when present, carries `entry_point`, `canvas_path`, `active_frame_id`, `selection`. Leader uses these to target the right frame/node without re-reading the entire canvas.
+- **Layout responsibility**: node positioning and frame composition are the leader's job — sub-agents are layout-blind and produce assets only.
+- **Field discipline**: leader never touches `producer=static` nodes or `locked_by_user=true` nodes.
+
+### Graceful degradation (no canvas UI)
+
+When there is no canvas UI, CANVAS_CONTEXT is absent and canvas.json may not exist. Leader:
+1. Treats the message as `entry_point: chat_send`, no active frame, no selection.
+2. Skips reading canvas.json (or reads it if it happens to exist).
+3. Still writes `agent_output.json` — the same CanvasDocument-schema file serves as both the canvas layout spec and a standalone delivery manifest.
+4. Skips frame PNG visual verification (`.canvas/frames/` won't exist).
+
+## Execution Depth
+
+Leader infers execution depth from message language — no explicit mode flag.
+
+| Signal | Behavior |
+|---|---|
+| quick / sketch / try / draft / show me | Single-shot sub-agent call, skip multi-round critic, return immediately |
+| publication / paper / journal / final / polished | Full Plan→Style→Render→Critic loop (2–3 rounds), AskUserQuestion at key decision points, cross-frame visual consistency check |
+| Unclear | Lightweight; offer thorough version at end if output looks insufficient |
+
 ## Workdir Layout
 
 ```
 {workdir}/
   environment.md              # plotting dependency audit
   inputs/
-    data/
-    brief.md                  # figure intent, audience, journal
-    style_card.json           # canonical style spec
+    data/                     # user-provided data files
+    brief.json                # structured (S, C) brief — MANDATORY
+    style_card.json           # canonical style spec (DPI, colors, fonts, export_formats)
+    references/               # normalized reference material (if user provided refs)
   drafts/
-    notebooks/                # data_plotter notebooks
-    illustrations/            # illustrator raw PNGs
-    panels/                   # single-panel intermediates
-  outputs/
-    figures/
-      Fig1_main.{png,pdf,svg}
-      Fig2_pathway.{png,pdf,svg}
+    notebooks/                # data_plotter intermediates
+    illustrations/            # illustrator raw PNGs + plan/style/critic traces
+    panels/                   # composite-panel intermediates
+  .canvas/
+    canvas.json               # existing canvas state (read-only; may be absent)
+    agent_output.json         # leader's layout output (write at end of turn)
+    assets/                   # final figure deliverables
+      Fig1_main.png
+      Fig1_main.pdf           # only if export_formats includes "pdf"
+      Fig1_main.svg           # only if export_formats includes "svg"
       ...
+    frames/                   # frame PNG snapshots (frontend writes; leader reads)
     figure_legends.md
     figure_manifest.json
 ```
 
 ## Core Workflow
 
-1. **Triage**: Classify intent (data / illustration / composite); detect target (journal / slides / web); write `inputs/brief.md`.
-2. **Style card**: Author `inputs/style_card.json` with DPI, fonts, colors, figure sizes.
-3. **Environment audit**: `researcher` checks matplotlib/seaborn/plotly/svgutils/Pillow/inkscape.
-4. **Data EDA** (data-only or composite): `researcher` writes `drafts/eda_summary.md` and recommends plot types.
-5. **Figure production** (parallelized across independent figures):
+1. **Triage**: Classify intent (data / illustration / composite); detect target (journal / slides / web); infer `export_formats`; write `inputs/brief.json`.
+2. **Reference detection**: Scan user message for reference figures/URLs/documents; if found, `researcher` normalizes them.
+3. **Style card**: Author `inputs/style_card.json` with DPI, fonts, colors, figure sizes, and `export_formats`.
+4. **Canvas state** (if canvas.json exists): read relevant frame/node slice based on CANVAS_CONTEXT.
+5. **Environment audit** (optional, only if tools missing): `researcher` checks matplotlib/seaborn/plotly/svgutils/Pillow/inkscape.
+6. **Figure production** (parallelized across independent figures):
    - Data panels → `data_plotter` with style card injection
-   - Conceptual panels → `scientific_illustrator` → PNG, then `researcher` vectorizes to SVG/PDF
-6. **Composition** (composite intent): `data_plotter` composes via svgutils and exports triplet.
-7. **Verification**: leader runs `file` + `observe_images` on each figure; re-delegates on failure.
-8. **Manifest + legends**: leader writes `outputs/figure_manifest.json` and finalizes `figure_legends.md`.
-9. **Delivery**: concise summary of figure paths returned to user.
+   - Conceptual panels → `illustrator` → if publication, `researcher` vectorizes PNG to SVG/PDF
+7. **Composition** (composite intent): `data_plotter` composes via svgutils; exports per `export_formats`.
+8. **Verification**: leader runs `observe_images` on each PNG; re-delegates on failure.
+9. **agent_output.json**: leader writes canvas node declarations for all produced figures with positions, origins, and intents.
+10. **Manifest + legends**: write `.canvas/figure_manifest.json` and `.canvas/figure_legends.md`.
+11. **Delivery**: concise summary of figure paths returned to user.
 
 ## Agent Call Relationships
 
@@ -113,97 +174,65 @@ Users can extend with additional files (e.g., `nature_figure.md`, `ieee_figure.m
               │researcher│ │ data_plotter │ │ illustrator  │
               └──────────┘ └──────────────┘ └──────────────┘
                    ▲              │                    │
-                   │              │                    │
-                   │              ▼                    ▼
-                   └────── (data_plotter/illustrator → researcher for tools, vectorization)
-                                  │                    │
-                                  └────── (data_plotter → illustrator for inline illustrations)
+                   └──────────────┴────────────────────┘
+                        (sub-agents → researcher for tools/vectorize)
 ```
-
-```mermaid
-graph TD
-    User([User]) --> Leader[leader]
-    Leader -->|EDA, tools, vectorize| Researcher[researcher]
-    Leader -->|data figures, panels| DataPlotter[data_plotter]
-    Leader -->|concept illustrations| Illustrator[illustrator]
-    DataPlotter -->|EDA, install pkg, vectorize| Researcher
-    DataPlotter -->|inline illustration sub-panel| Illustrator
-    Illustrator -->|vectorize PNG → SVG/PDF| Researcher
-    style Leader fill:#4A90E2,stroke:#2E5C8A,color:#fff
-    style Researcher fill:#7ED321,stroke:#5FA319,color:#fff
-    style DataPlotter fill:#F5A623,stroke:#C77E1B,color:#fff
-    style Illustrator fill:#BD10E0,stroke:#8B0CA6,color:#fff
-    style User fill:#333,stroke:#000,color:#fff
-```
-
-## Call Relationship Summary
 
 | Caller | Can Call | Purpose |
 |--------|----------|---------|
 | **leader** | `researcher`, `data_plotter`, `illustrator` | Orchestrate end-to-end |
-| **data_plotter** | `researcher`, `illustrator` | EDA/tools/vectorize; request inline illustration sub-panels |
-| **illustrator** | `researcher` | Vectorize produced PNG; install tools |
+| **data_plotter** | `researcher`, `illustrator` | EDA/tools; request inline illustration sub-panels |
+| **illustrator** | `researcher` | Vectorize PNG; install tools |
 | **researcher** | _(none)_ | Leaf node — provides services |
 
 ---
 
 ## End-to-End Interaction Flow (Data Contracts & File Formats)
 
-This section documents the complete workflow, intermediate data files, and
-their schemas. It is the single source of truth for how the four agents
-exchange information. The leader agent SHOULD treat the schemas below as
-binding contracts.
-
 ### Workdir Layout Overview
 
 ```
 {workdir}/
-├── environment.md                       # Step 5 env audit
-├── triage.md                            # Step 1 classification (optional)
+├── environment.md
+├── triage.md                            (optional)
 ├── inputs/
-│   ├── data/                            # user data files (copy or symlink)
-│   ├── brief.json                       # Step 3 core contract
-│   ├── style_card.json                  # Step 4 visual contract
-│   └── references/                      # Step 2 output (may be absent)
-│       ├── local/                       # Stage A downloaded/extracted refs
-│       │   ├── user_fig_copy.png
-│       │   ├── paper_page3.png
-│       │   └── ...
-│       └── normalized.json              # Stage A + B output
+│   ├── data/
+│   ├── brief.json
+│   ├── style_card.json
+│   └── references/
+│       ├── local/
+│       └── normalized.json
 ├── drafts/
-│   ├── eda_summary.md                   # Step 6 output
-│   ├── notebooks/                       # data_plotter intermediates
+│   ├── notebooks/
 │   │   ├── <name>.ipynb
-│   │   ├── <name>_round0.png            # low-DPI preview
-│   │   ├── <name>_round0.json           # critic JSON
-│   │   ├── <name>_round1.png
-│   │   ├── <name>_round1.json
-│   │   └── <name>_trace.json            # round log
-│   ├── illustrations/                   # illustrator intermediates
-│   │   ├── <id>_references.md           # Phase 0 (optional)
-│   │   ├── <id>_plan.md                 # Phase 1
-│   │   ├── <id>_style.md                # Phase 2
-│   │   ├── <id>_round0.png              # Phase 3
-│   │   ├── <id>_round0.json             # Phase 4
-│   │   ├── <id>_round1.png
-│   │   ├── <id>_round1.json
+│   │   ├── <name>_round<t>.png
+│   │   ├── <name>_round<t>.json
+│   │   └── <name>_trace.json
+│   ├── illustrations/
+│   │   ├── <id>_plan.md
+│   │   ├── <id>_style.md
+│   │   ├── <id>_round<t>.png
+│   │   ├── <id>_round<t>.json
 │   │   ├── <id>_final.png
 │   │   └── <id>_trace.json
-│   └── panels/                          # composite-panel intermediates
-└── outputs/
-    ├── figures/                         # final triplet deliverables
-    │   ├── Fig1_main.png
-    │   ├── Fig1_main.pdf
-    │   ├── Fig1_main.svg
+│   └── panels/
+└── .canvas/
+    ├── canvas.json                      (read-only; may be absent)
+    ├── agent_output.json                (leader writes at end of turn)
+    ├── assets/
+    │   ├── Fig1_main.png                (always)
+    │   ├── Fig1_main.pdf                (if export_formats includes "pdf")
+    │   ├── Fig1_main.svg                (if export_formats includes "svg")
     │   └── ...
+    ├── frames/                          (frontend writes; leader reads for vision checks)
     ├── figure_legends.md
-    └── figure_manifest.json             # machine-readable index
+    └── figure_manifest.json
 ```
 
 ### Flow Overview (Leader Orchestration)
 
 ```
-User Message
+User Message (+ optional CANVAS_CONTEXT)
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -211,84 +240,74 @@ User Message
 │   Classify intent ∈ {data-only, illustration-only,       │
 │                      composite-panel}                    │
 │   Infer category, aspect_ratio, target, journal,         │
-│   audience. Do NOT write brief.json yet.                 │
+│   export_formats. Do NOT write brief.json yet.           │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Step 2  REFERENCE DETECTION (leader internal scan)       │
 │   Scan user message → strong_hits + keyword_hits         │
-│   has_references = boolean                               │
 │                                                          │
 │   if has_references:                                     │
-│       → Stage A (researcher): normalize heterogeneous    │
-│         material (images, PDFs, URLs, directories)       │
+│       → Stage A (researcher): normalize material         │
 │       → Stage B (researcher, conditional): Top-K pick    │
 │       produces: inputs/references/normalized.json        │
-│   else:                                                  │
-│       skip retrieval → rely on aesthetic guide loaded    │
-│       from `figure_styling` skill                        │
+│   else: skip retrieval                                   │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Step 3  WRITE brief.json                                 │
-│   Freeze Step 1 + Step 2 into a structured contract.     │
 │   → inputs/brief.json                                    │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Step 4  WRITE style_card.json                            │
-│   Auto-pick aesthetic_guide ∈ {neurips_diagram,          │
-│     neurips_plot, custom, null}                          │
-│   Sub-agents load the matching file from the             │
-│     `figure_styling` skill:                              │
-│     skills/figure_styling/styles/<aesthetic_guide>.md    │
-│   If has_references → notes records refs-override-guide  │
+│   Set export_formats based on task intent:               │
+│     exploratory → ["png"]                                │
+│     publication → ["png","pdf","svg"]                    │
 │   → inputs/style_card.json                               │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
-┌─────────────────────────┐   ┌────────────────────────────┐
-│ Step 5  ENV AUDIT       │   │ Step 6  DATA EDA           │
-│ (researcher)            │——→│ (researcher, parallel)     │
-│ Check matplotlib /      │   │ Condition: intent has data │
-│ inkscape / monolith /   │   │ → drafts/eda_summary.md    │
-│ svgutils / Pillow       │   │                            │
-│ → environment.md        │   │                            │
-└─────────────────────────┘   └────────────────────────────┘
-     │
-     ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Step 7  FIGURE PRODUCTION (parallel per figure)          │
-│                                                          │
+│ Step 5  FIGURE PRODUCTION (parallel per figure)          │
 │   data_plotter  (statistical_plot)                       │
 │   illustrator   (diagram / illustration)                 │
-│                                                          │
 │   Each sub-agent runs its own internal iteration         │
-│   (T ≤ 2–3 rounds).                                       │
+│   (T ≤ 2–3 rounds). Exports per export_formats.         │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Step 7.5  VECTORIZE (illustration-only)                  │
-│   (researcher) inkscape/potrace PNG → SVG + PDF          │
-│   → outputs/figures/<name>.{svg,pdf}                     │
+│ Step 6  VECTORIZE (illustration, publication only)       │
+│   (researcher) inkscape/potrace PNG → SVG/PDF            │
+│   Only when export_formats includes "svg" or "pdf"       │
+│   → .canvas/assets/<name>.{svg,pdf}                      │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Step 8  VERIFICATION (leader)                            │
-│   ls + `file` + observe_images per figure.               │
-│   Re-delegate with feedback on failure.                  │
+│ Step 7  VERIFICATION (leader)                            │
+│   observe_images per figure; re-delegate on failure.     │
+│   If frame PNG exists: read for cross-frame consistency. │
+└──────────────────────────────────────────────────────────┘
+     │
+     ▼
+┌──────────────────────────────────────────────────────────┐
+│ Step 8  WRITE agent_output.json                          │
+│   Declare all produced nodes with positions, origins,    │
+│   intents. Frontend merges if present; file stays as     │
+│   standalone manifest otherwise.                         │
+│   → .canvas/agent_output.json                            │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Step 9  MANIFEST & LEGENDS                               │
-│   → outputs/figure_manifest.json                         │
-│   → outputs/figure_legends.md                            │
+│   → .canvas/figure_manifest.json                         │
+│   → .canvas/figure_legends.md                            │
 └──────────────────────────────────────────────────────────┘
      │
      ▼
@@ -297,97 +316,37 @@ Step 10  DELIVERY summary → User
 
 ### Core Data File Schemas
 
-#### `inputs/brief.json` — the core contract
-
-Generated by leader in Step 3; every sub-agent reads this for task specs.
+#### `inputs/brief.json`
 
 ```json
 {
   "intent": "illustration-only",
-
   "figures": [
     {
       "id": "Fig1",
       "name": "Fig1_framework",
       "category": "agent_reasoning",
-      "S_source_context": "Our PaperBanana framework orchestrates five specialized agents: Retriever, Planner, Stylist, Visualizer, and Critic. The Retriever selects top-K references. The Planner produces detailed description P. The Stylist refines into P*. Visualizer and Critic form a T=3 refinement loop.",
-      "C_communicative_intent": "Overview of the PaperBanana framework with Linear Planning Phase and Iterative Refinement Loop",
+      "S_source_context": "...",
+      "C_communicative_intent": "...",
       "aspect_ratio": "1.8:1",
-      "notes": "Left-to-right narrative flow. Highlight Critic closed-loop edge."
+      "notes": "Left-to-right narrative flow."
     }
   ],
-
   "target": "journal",
   "journal": "neurips",
   "audience": "specialist",
-
   "references": {
     "has_references": true,
     "trigger_reason": "user message contained arxiv URL plus keyword '模仿'",
     "raw_mentions": [
-      {
-        "type": "url",
-        "value": "https://arxiv.org/abs/2601.23265",
-        "context": "模仿这篇论文 Fig 2 的风格"
-      },
-      {
-        "type": "image_path",
-        "value": "/Users/me/ref_fig.png",
-        "context": "参考 /Users/me/ref_fig.png"
-      }
+      {"type": "url", "value": "https://arxiv.org/abs/2601.23265", "context": "模仿这篇论文 Fig 2 的风格"}
     ],
     "normalized_path": "{workdir}/inputs/references/normalized.json"
   }
 }
 ```
 
-#### `inputs/references/normalized.json` — reference materials normalized
-
-Produced by researcher in Stage A (and optional Stage B).
-
-```json
-{
-  "entries": [
-    {
-      "id": "ref_0",
-      "source_type": "image",
-      "source_path": "/abs/workdir/inputs/references/local/ref_fig_copy.png",
-      "source_origin": "/Users/me/ref_fig.png",
-      "context": "参考 /Users/me/ref_fig.png",
-      "visual_summary": "Left-to-right 3-stage pipeline. Palette: pale lavender #F3E5F5 for zones, deep orange #E67E22 for trainable modules, cool blue #3498DB for frozen. Sans-serif Helvetica bold for labels. Snowflake icons on frozen modules. Rounded rectangles with 8px radius.",
-      "category_guess": "agent_reasoning",
-      "relevance": "high",
-      "status": "ok"
-    },
-    {
-      "id": "ref_1",
-      "source_type": "pdf_figure",
-      "source_path": "/abs/workdir/inputs/references/local/arxiv_2601_23265_page3.png",
-      "source_origin": "https://arxiv.org/abs/2601.23265",
-      "context": "模仿这篇论文 Fig 2 的风格",
-      "visual_summary": "Two-stage architecture diagram. Cream background #F5F5DC zones. Dashed borders indicate logical groupings. Orthogonal connectors with labeled operators (⊕, ⊗). Serif italicized math variables.",
-      "category_guess": "agent_reasoning",
-      "relevance": "high",
-      "status": "ok"
-    }
-  ],
-  "summary": {
-    "total": 2,
-    "ok": 2,
-    "failed": 0,
-    "dominant_category": "agent_reasoning"
-  },
-  "selected": {
-    "selected_ids": ["ref_0", "ref_1"],
-    "rationale_per_pick": {
-      "ref_0": "Same category (agent_reasoning) and same pipeline structure — direct visual match",
-      "ref_1": "Same category, similar architecture diagram with dashed zones — complementary"
-    }
-  }
-}
-```
-
-#### `inputs/style_card.json` — visual contract
+#### `inputs/style_card.json`
 
 ```json
 {
@@ -401,10 +360,7 @@ Produced by researcher in Stage A (and optional Stage B).
     "double_column": [7.2, 5.0]
   },
   "font_family": "Helvetica",
-  "font_size": {
-    "axis_label": 9, "tick": 8, "legend": 8,
-    "title": 10, "panel_letter": 11
-  },
+  "font_size": { "axis_label": 9, "tick": 8, "legend": 8, "title": 10, "panel_letter": 11 },
   "colors": {
     "primary": "#1a365d",
     "secondary": "#2c5282",
@@ -414,229 +370,43 @@ Produced by researcher in Stage A (and optional Stage B).
     "sequential_cmap": "viridis"
   },
   "line_width": 1.2,
-  "export_formats": ["png", "pdf", "svg"],
-  "notes": "User provided references (ref_0, ref_1); their visual style takes priority over the aesthetic guide loaded from the `figure_styling` skill on conflict."
+  "export_formats": ["png"],
+  "notes": "Exploratory task — PNG only. Switch to [\"png\",\"pdf\",\"svg\"] for submission."
 }
 ```
 
-### Illustrator Internal Data Flow (Phase 0 + four-phase pipeline)
+#### `.canvas/agent_output.json` — canvas layout declaration
 
-```
-brief.json + style_card.json + normalized.json (optional)
-                     │
-                     ▼
-     ┌────────────────────────────────┐
-     │ Phase 0 — References Digest    │  (only when has_references=true)
-     │   observe_images(each ref)     │
-     │   → <id>_references.md         │
-     └────────────────────────────────┘
-                     │
-                     ▼
-     ┌────────────────────────────────┐
-     │ Phase 1 — Plan (semantic)      │
-     │   in: S, C, category,          │
-     │       <id>_references.md       │
-     │   out: elements + connections  │
-     │   → <id>_plan.md  (P)          │
-     └────────────────────────────────┘
-                     │
-                     ▼
-     ┌────────────────────────────────┐
-     │ Phase 2 — Style (aesthetic)    │
-     │   in: P + style_card +         │
-     │       figure_styling skill     │
-     │       (style file of           │
-     │        aesthetic_guide)        │
-     │       + references digest      │
-     │   priority: refs > guide       │
-     │   → <id>_style.md  (P*)        │
-     └────────────────────────────────┘
-                     │
-                     ▼
-        ┌────────────────────┐
-        │ Phase 3 — Render t │ ←────────┐
-        │  generate_image(P) │          │
-        │  → <id>_round<t>.png          │
-        └────────────────────┘          │
-                     │                  │
-                     ▼                  │
-        ┌────────────────────┐          │
-        │ Phase 4 — Critic t │          │
-        │  observe_images +  │          │
-        │  JSON critique     │          │
-        │  → <id>_round<t>.json         │
-        └────────────────────┘          │
-                     │                  │
-                     ▼                  │
-           critic.revised_description   │
-           == "No changes needed."?     │
-                 │                      │
-           NO: t<T_max → next round ────┘
-           YES or t==T_max: break
-                     │
-                     ▼
-            <id>_final.png + <id>_trace.json
-                     │
-                     ▼
-            (→ researcher vectorizes)
-                     │
-                     ▼
-       outputs/figures/<name>.{png,pdf,svg}
-```
-
-#### `drafts/illustrations/<id>_references.md` (Phase 0 output)
-
-```markdown
-# References digest for Fig1
-
-### ref_0 — /Users/me/ref_fig.png
-- Layout: left-to-right 3-stage pipeline
-- Palette: #F3E5F5 (zones), #E67E22 (trainable), #3498DB (frozen)
-- Typography: Helvetica bold labels
-- Iconography: ❄️ snowflake on frozen modules
-- Borders: rounded rectangles, 8px radius
-- Takeaway: adopt zones + icon convention + palette
-
-### ref_1 — https://arxiv.org/abs/2601.23265 (Fig 2)
-- Layout: two-stage with dashed zones
-- Palette: #F5F5DC cream background
-- Typography: serif italic for math variables
-- Operators: inline ⊕ ⊗ on connectors
-- Takeaway: adopt operator placement + cream zone idea
-
-### Consolidated guidance
-- Palette: use ref_0 primary (#F3E5F5 zones, #E67E22 trainable, #3498DB frozen)
-- Typography: Helvetica bold for labels; serif italic ONLY for math variables
-- Borders: rounded rect 8px (ref_0) + dashed for logical grouping (ref_1)
-- Icons: ❄️ frozen, 🔥 trainable
-- Operators: place ⊕/⊗ inline on connectors (ref_1)
-```
-
-#### `drafts/illustrations/<id>_round<t>.json` (Critic output)
+Written by leader at the end of every turn. Frontend upserts these nodes if canvas UI is active; otherwise the file remains as a delivery record.
 
 ```json
 {
-  "round": 0,
-  "faithfulness_issues": [
-    "Stylist agent (2nd module) is missing from the render despite being in S"
+  "version": "1.0",
+  "nodes": [
+    {
+      "id": "shape:frame-panel1",
+      "type": "frame",
+      "x": 100, "y": 100, "width": 900, "height": 650,
+      "label": "Figure 1 — Framework Overview",
+      "layout": "grid",
+      "color": "#7c3aed",
+      "children": ["shape:img-fig1"]
+    },
+    {
+      "id": "shape:img-fig1",
+      "type": "agent-image",
+      "x": 110, "y": 140, "width": 860, "height": 590,
+      "source": ".canvas/assets/Fig1_framework.png",
+      "producer": "ai",
+      "origin": { "kind": "ai", "agent_id": "illustrator", "prompt": "...", "model": "generate_image" },
+      "intent": "PaperBanana framework overview with linear planning and iterative refinement loop"
+    }
   ],
-  "readability_issues": [
-    "Critic → Visualizer feedback arrow is too thin and the dashed style is hard to see"
-  ],
-  "aesthetics_issues": [
-    "Module colors are too saturated vs ref_0's muted palette"
-  ],
-  "critic_suggestions": "Add the Stylist module between Planner and Visualizer. Strengthen the Critic→Visualizer feedback arrow to 2px dashed. Desaturate module colors to match ref_0 (#E67E22 → #E8A87C).",
-  "revised_description": "(Full revised description here — starts from round 0's description, modifies the three identified issues, preserves everything else.)"
+  "edges": []
 }
 ```
 
-#### `drafts/illustrations/<id>_trace.json`
-
-```json
-{
-  "id": "Fig1",
-  "name": "Fig1_framework",
-  "category": "agent_reasoning",
-  "aspect_ratio": "1.78:1",
-  "rounds_executed": 2,
-  "rounds": [
-    {"round": 0, "description_file": "Fig1_style.md", "image_file": "Fig1_round0.png", "critique_file": "Fig1_round0.json", "stopped_here": false},
-    {"round": 1, "description_file": "Fig1_round0.json#revised_description", "image_file": "Fig1_round1.png", "critique_file": "Fig1_round1.json", "stopped_here": true}
-  ],
-  "final_image": "Fig1_final.png",
-  "stop_reason": "no_changes_needed",
-  "references_consulted": ["ref_0", "ref_1"]
-}
-```
-
-### Data_plotter Internal Data Flow (Pre-round + Critic loop)
-
-```
-brief.json + style_card.json + normalized.json (optional)
-                     │
-                     ▼
-   ┌─────────────────────────────────┐
-   │ Pre-round: Reference Absorption │  (only when has_references=true)
-   │   observe_images(each ref)      │
-   │   → extract rcParams-level      │
-   │     overrides                   │
-   │   priority chain:               │
-   │     refs > style_card           │
-   │         > figure_styling/       │
-   │           neurips_plot > dflt   │
-   └─────────────────────────────────┘
-                     │
-                     ▼
-   ┌─────────────────────────────────┐
-   │ Notebook Setup Cells            │
-   │   Cell 1: imports               │
-   │   Cell 2: rcParams (w/ ref ovr) │
-   │   Cell 3+: load data + plot     │
-   └─────────────────────────────────┘
-                     │
-                     ▼
-        ┌──────────────────────┐
-        │ Round 0 Render       │ ←────────┐
-        │  run notebook cells  │          │
-        │  savefig PNG preview │          │
-        │  → <name>_round0.png │          │
-        └──────────────────────┘          │
-                     │                    │
-                     ▼                    │
-        ┌──────────────────────┐          │
-        │ Round 0 Critic       │          │
-        │  observe_images +    │          │
-        │  JSON critique       │          │
-        │  → <name>_round0.json│          │
-        └──────────────────────┘          │
-                     │                    │
-          revised_code_hints ==           │
-          "No changes needed."?           │
-                     │                    │
-          NO: t<T_max → edit code ────────┘
-          YES or t==T_max: break
-                     │
-                     ▼
-      ┌──────────────────────────┐
-      │ Final Export Cell        │
-      │  savefig PDF + SVG + PNG │
-      │  (fonttype=42, dpi=600)  │
-      └──────────────────────────┘
-                     │
-                     ▼
-       outputs/figures/<name>.{png,pdf,svg}
-                     │
-                     ▼
-             <name>_trace.json
-```
-
-#### `drafts/notebooks/<name>_round<t>.json` (Critic output)
-
-```json
-{
-  "round": 0,
-  "faithfulness_issues": [
-    "Category 'baseline' is missing — raw data has 4 categories but plot shows 3"
-  ],
-  "readability_issues": [
-    "x-axis tick labels overlap at 11pt",
-    "Legend covers top-right data cluster"
-  ],
-  "aesthetics_issues": [
-    "Top/right spines visible; neurips_plot calls for 'open' look"
-  ],
-  "style_card_violations": [
-    "Axis labels render in Times New Roman; style_card specifies Helvetica"
-  ],
-  "critic_suggestions": "Add the missing 'baseline' category. Rotate x-tick labels 30° with ha='right'. Move legend to bbox_to_anchor=(1.02, 1). Remove top/right spines.",
-  "revised_code_hints": "ax.set_xticklabels(labels, rotation=30, ha='right'); ax.legend(bbox_to_anchor=(1.02,1), loc='upper left'); ax.spines[['top','right']].set_visible(False); add missing 'baseline' row from raw_data.csv"
-}
-```
-
-### Final Delivery Files
-
-#### `outputs/figure_manifest.json`
+#### `.canvas/figure_manifest.json`
 
 ```json
 {
@@ -648,105 +418,161 @@ brief.json + style_card.json + normalized.json (optional)
       "category": "agent_reasoning",
       "source_agent": "illustrator",
       "formats": {
-        "png": "/abs/workdir/outputs/figures/Fig1_framework.png",
-        "pdf": "/abs/workdir/outputs/figures/Fig1_framework.pdf",
-        "svg": "/abs/workdir/outputs/figures/Fig1_framework.svg"
+        "png": "{workdir}/.canvas/assets/Fig1_framework.png"
       },
-      "dpi": 600,
+      "dpi": 300,
       "size_inches": [7.2, 4.0],
       "aspect_ratio": "1.80:1",
       "aesthetic_guide": "neurips_diagram",
-      "references_used": ["ref_0", "ref_1"],
+      "references_used": [],
       "critic_rounds": 2,
-      "caption_file": "/abs/workdir/outputs/figure_legends.md#fig1"
+      "caption_file": "{workdir}/.canvas/figure_legends.md#fig1"
     }
   ]
 }
 ```
 
-#### `outputs/figure_legends.md`
+### Illustrator Internal Data Flow
 
-```markdown
-## Fig1 — Framework overview  <a id="fig1"></a>
+```
+brief.json + style_card.json + normalized.json (optional)
+                     │
+     ┌───────────────▼─────────────────┐
+     │ Phase 0 — References Digest     │  (only when has_references=true)
+     │   observe_images(each ref)      │
+     │   → <id>_references.md          │
+     └─────────────────────────────────┘
+                     │
+     ┌───────────────▼─────────────────┐
+     │ Phase 1 — Plan (semantic)       │
+     │   → <id>_plan.md                │
+     └─────────────────────────────────┘
+                     │
+     ┌───────────────▼─────────────────┐
+     │ Phase 2 — Style (aesthetic)     │
+     │   refs > style_card > guide     │
+     │   → <id>_style.md               │
+     └─────────────────────────────────┘
+                     │
+        ┌────────────▼───────────┐
+        │ Phase 3 — Render t     │ ←────────┐
+        │  generate_image(P*)    │          │
+        │  → <id>_round<t>.png  │          │
+        └────────────────────────┘          │
+                     │                      │
+        ┌────────────▼───────────┐          │
+        │ Phase 4 — Critic t     │          │
+        │  observe_images + JSON │          │
+        │  → <id>_round<t>.json │          │
+        └────────────────────────┘          │
+                     │                      │
+          "No changes needed."? ────NO──────┘
+                     │YES
+                     ▼
+            <id>_final.png
+                     │
+     (if export_formats has pdf/svg)
+                     │
+     ┌───────────────▼─────────────────┐
+     │ researcher vectorizes           │
+     │  inkscape → SVG/PDF             │
+     └─────────────────────────────────┘
+                     │
+                     ▼
+       .canvas/assets/<name>.{png,[pdf],[svg]}
+```
 
-**Figure 1.** Overview of the PaperBanana framework. The Linear Planning
-Phase (left) consists of Retriever, Planner, and Stylist agents. The
-Iterative Refinement Loop (right) couples the Visualizer and Critic
-agents across T=3 rounds. Trainable modules (🔥) are shown in orange;
-frozen modules (❄️) in blue. Dashed arrows indicate critic feedback.
+### Data_plotter Internal Data Flow
+
+```
+brief.json + style_card.json + normalized.json (optional)
+                     │
+   ┌─────────────────▼───────────────────┐
+   │ Pre-round: Reference Absorption     │  (only when has_references=true)
+   │   observe_images → rcParams overrides│
+   └─────────────────────────────────────┘
+                     │
+   ┌─────────────────▼───────────────────┐
+   │ Notebook Setup                      │
+   │   Cell 1: imports                   │
+   │   Cell 2: rcParams (+ ref overrides)│
+   │   Cell 3+: load data + plot         │
+   └─────────────────────────────────────┘
+                     │
+        ┌────────────▼───────────┐
+        │ Round 0 Render         │ ←────────┐
+        │  savefig PNG preview   │          │
+        └────────────────────────┘          │
+                     │                      │
+        ┌────────────▼───────────┐          │
+        │ Round 0 Critic         │          │
+        │  observe_images + JSON │          │
+        └────────────────────────┘          │
+                     │                      │
+          "No changes needed."? ────NO──────┘
+                     │YES
+                     ▼
+   ┌─────────────────────────────────────┐
+   │ Final Export                        │
+   │  PNG always                         │
+   │  PDF, SVG only if in export_formats │
+   └─────────────────────────────────────┘
+                     │
+                     ▼
+       .canvas/assets/<name>.png [+ .pdf] [+ .svg]
+```
+
+### Priority Chain
+
+```
+User message intent
+  > user references (raw_mentions)
+    > normalized.json visual summaries
+      > style_card.json
+        > aesthetic_guide file (figure_styling skill)
+          > agent built-in defaults
 ```
 
 ### Three Typical Scenarios
 
-#### Scenario A — No reference material
+#### Scenario A — Exploratory, no canvas UI
 
 ```
-User: "Draw a Transformer architecture diagram"
-      │
-Step 1: intent=illustration-only, category=generative_learning
+User (API call): "Draw a quick Transformer architecture diagram"
+  │
+Step 1: intent=illustration-only, export_formats=["png"]
 Step 2: has_references=false
-Step 3: brief.json (references.has_references=false)
-Step 4: style_card.aesthetic_guide=neurips_diagram
-Step 5–6: env audit
-Step 7: illustrator skips Phase 0
-         Phase 1: loads figure_styling/styles/neurips_diagram.md via skill
-         Phase 2: relies entirely on that aesthetic guide
-         Phase 3–4: standard T=2 loop
-Step 7.5: researcher vectorizes
-Step 8–9: verify + manifest
+Step 4: style_card.export_formats=["png"]
+Step 5: illustrator → Phase 1-4, T=2 rounds → _final.png
+Step 6: SKIP (png only)
+Step 8: agent_output.json written (standalone manifest)
+→ .canvas/assets/Fig1_transformer.png
 ```
 
-#### Scenario B — User provided an image reference
+#### Scenario B — Publication, with canvas UI
 
 ```
-User: "Reference /Users/me/ref.png's style; draw a RAG pipeline"
-      │
-Step 1: intent=illustration-only, category=agent_reasoning
-Step 2: strong_hit (image path) + keyword ("reference") → has_references=true
-        Stage A: researcher observe_images(ref.png) → normalized.json (1 entry)
-        Stage B skipped (only 1 entry)
-Step 3: brief.json.references = { has, raw_mentions, normalized_path }
-Step 4: style_card.notes = "user-provided refs take priority"
-Step 7: illustrator
-         Phase 0: observe ref.png → digest
-         Phase 1: borrow layout structure from ref
-         Phase 2: ref palette / typography OVERRIDE aesthetic guide defaults
-         Phase 3–4: loop
+User (canvas): "Publication-ready volcano plot for Nature submission"
+  │
+Step 1: intent=data-only, export_formats=["png","pdf","svg"]
+Step 4: style_card.export_formats=["png","pdf","svg"]
+Step 5: data_plotter → T=3 critic rounds → savefig all three formats
+Step 7: leader reads frame PNG snapshot for visual consistency
+Step 8: agent_output.json → frontend merges node at correct position
+→ .canvas/assets/Fig1_volcano.{png,pdf,svg}
 ```
 
-#### Scenario C — User provided an arXiv URL + data file
+#### Scenario C — With reference + data
 
 ```
-User: "Mimic https://arxiv.org/abs/xxx's plot style; draw acc vs params"
-      + attached /data/results.csv
-      │
-Step 1: intent=data-only, category=statistical_plot
-Step 2: strong_hit (URL) + keyword ("mimic") → has_references=true
-        Stage A: researcher web_crawl + pdftoppm → extract N figures →
-                 observe each → normalized.json
-        Stage B: if N>5, pick Top-5 by category=statistical_plot
-Step 3: brief.json (includes references.normalized_path)
-Step 4: style_card.aesthetic_guide=neurips_plot, notes=refs override
-Step 6: researcher EDA on /data/results.csv
-Step 7: data_plotter
-         Pre-round: observe refs → extract rcParams overrides
-                    (palette, fonts, spines)
-         Cell 2: apply style_card + refs overrides + neurips_plot defaults
+User: "Mimic https://arxiv.org/abs/xxx's style; plot acc vs params"
+  + /data/results.csv
+  │
+Step 2: URL + keyword → researcher normalizes → normalized.json
+Step 4: export_formats=["png"] (quick by default)
+Step 5: data_plotter
+         Pre-round: observe refs → rcParams overrides
          Round 0–2: critic loop
-         Final: savefig PDF + SVG + PNG
+         Final: savefig PNG only
+Step 8: agent_output.json written
 ```
-
-### Priority Chain (used throughout the flow)
-
-```
-User message (trigger source)
-  > user references (brief.json.references.raw_mentions)
-    > normalized.json.entries[].visual_summary
-      > style_card.json (explicit overrides)
-        > aesthetic_guide file from figure_styling skill
-          (styles/neurips_diagram.md / styles/neurips_plot.md / custom)
-          > agent built-in defaults
-```
-
-Any downstream conflict is resolved along this chain:
-**user intent > user material > explicit config > built-in guide > defaults**.

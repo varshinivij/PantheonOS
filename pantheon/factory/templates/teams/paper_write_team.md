@@ -387,6 +387,8 @@ Formal statement here.
 | `materials/inventory.md` | 3 | researcher | If A/B/D | Material index |
 | `research/literature_review.md` | 4 | researcher | If B/C/D | Literature synthesis |
 | `research/references.bib` | 4 | researcher | If B/C/D | Auto bibtex |
+| `references/refs_researcher.json` | 4 / 6 | researcher | If B/C/D or evidence-gap fill | Per-agent canonical reference entries |
+| `references.json` | 4 / 6 | leader | If references used | Aggregated canonical reference registry |
 | `research/gap_analysis.md` | 4 | researcher | If B/C/D | Paper contribution |
 | `draft/outline.md` | 5 | writer | Always | Structure skeleton |
 | **`draft/paper.md`** | 6 | writer | **Always (SSoT)** | **Single source of truth** |
@@ -403,6 +405,8 @@ Formal statement here.
 > `.pantheon/skills/paper_writing/themes/` and are read by reporter via the
 > skills mechanism. Reporter decides how to apply them (embed in HTML or
 > pass via pandoc `--css`).
+>
+> **Reference note**: `references.json` and `references/refs_*.json` are the canonical structured reference artifacts for agent/UI tracking. `.bib` files remain required for pandoc/LaTeX export and citation rendering, but they do not replace the canonical JSON registry.
 
 ---
 
