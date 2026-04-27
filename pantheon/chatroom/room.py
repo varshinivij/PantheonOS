@@ -1561,6 +1561,20 @@ class ChatRoom(ToolSet):
             logger.error(f"[switch_project] Failed: {e}")
             return {"success": False, "message": str(e)}
 
+    def _find_teams_using_agent(self, agent_id: str) -> list[str]:
+        """Find all teams that reference a given agent by ID."""
+        teams_using = []
+        try:
+            all_teams = self.template_manager.file_manager.list_teams(resolve_refs=False)
+            for team in all_teams:
+                for agent in team.agents:
+                    if agent.id == agent_id:
+                        teams_using.append(team.name)
+                        break
+        except Exception:
+            pass
+        return teams_using
+
     @tool
     async def change_template_scope(
         self,
@@ -1631,8 +1645,9 @@ class ChatRoom(ToolSet):
             return {"success": False, "message": "Project and global are the same directory"}
 
         try:
+            warnings = []
+
             if kind == "skills":
-                # For skills, move the directory containing SKILL.md
                 skill_dir = src if src.is_dir() else src.parent
                 rel = skill_dir.relative_to(src_base)
                 dst = dst_base / rel
@@ -1643,6 +1658,23 @@ class ChatRoom(ToolSet):
                     shutil.rmtree(dst)
                 shutil.copytree(skill_dir, dst)
                 shutil.rmtree(skill_dir)
+            elif kind == "teams":
+                # Check for path-referenced agents that won't move with the team
+                try:
+                    team = self.template_manager.file_manager._read_team_from_path(src)
+                    for agent in team.agents:
+                        sp = agent.source_path or ''
+                        if sp and ('/' in sp or sp.endswith('.md')):
+                            warnings.append(f"Agent '{agent.id}' uses path reference '{sp}' which may break after move")
+                except Exception:
+                    pass
+                rel = src.relative_to(src_base)
+                dst = dst_base / rel
+                if dst.exists() and not overwrite:
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                src.unlink()
             else:
                 rel = src.relative_to(src_base)
                 dst = dst_base / rel
@@ -1653,7 +1685,10 @@ class ChatRoom(ToolSet):
                 src.unlink()
 
             logger.info(f"[change_scope] Moved {kind}/{rel} → {target_scope}")
-            return {"success": True, "message": f"Moved to {target_scope}"}
+            result: dict = {"success": True, "message": f"Moved to {target_scope}"}
+            if warnings:
+                result["warnings"] = warnings
+            return result
         except Exception as e:
             logger.error(f"[change_scope] Failed: {e}")
             return {"success": False, "message": str(e)}
@@ -2406,10 +2441,24 @@ class ChatRoom(ToolSet):
         return template_manager.write_template_file(file_path, content)
 
     @tool
-    async def delete_template_file(self, file_path: str) -> dict:
+    async def delete_template_file(self, file_path: str, force: bool = False) -> dict:
         """
         Delete a template markdown file.
+
+        Args:
+            file_path: Path to template file (e.g. "agents/researcher.md")
+            force: If True, delete even if referenced by teams
         """
+        # Check if deleting an agent that's referenced by teams
+        if file_path.startswith("agents/") and not force:
+            agent_id = Path(file_path).stem
+            teams_using = self._find_teams_using_agent(agent_id)
+            if teams_using:
+                return {
+                    "success": False,
+                    "message": f"Agent '{agent_id}' is used by: {', '.join(teams_using)}. Set force=True to delete anyway.",
+                    "referenced_by": teams_using,
+                }
         template_manager = self.template_manager
         return template_manager.delete_template_file(file_path)
 
