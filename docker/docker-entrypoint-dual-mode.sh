@@ -211,25 +211,13 @@ else
     # Wait for NATS server (if NATS_MONITOR_URL is set)
     if [ -n "$NATS_MONITOR_URL" ]; then
         echo "Waiting for NATS server at $NATS_MONITOR_URL..."
-        timeout 30 bash -c "until curl -sf $NATS_MONITOR_URL/healthz > /dev/null 2>&1; do sleep 1; done" || {
+        timeout 30 bash -c "until curl -sf $NATS_MONITOR_URL/healthz > /dev/null 2>&1; do sleep 0.2; done" || {
             echo "ERROR: NATS server is not ready"
             exit 1
         }
         echo "✓ NATS is ready"
     else
         echo "Skipping NATS health check (NATS_MONITOR_URL not set)"
-    fi
-
-    # Wait for Qdrant server (if QDRANT_HTTP_URL is set)
-    if [ -n "$QDRANT_HTTP_URL" ]; then
-        echo "Waiting for Qdrant server at $QDRANT_HTTP_URL..."
-        timeout 30 bash -c "until curl -sf $QDRANT_HTTP_URL/healthz > /dev/null 2>&1; do sleep 1; done" || {
-            echo "ERROR: Qdrant server is not ready at $QDRANT_HTTP_URL"
-            exit 1
-        }
-        echo "✓ Qdrant is ready"
-    else
-        echo "Skipping Qdrant health check (QDRANT_HTTP_URL not set)"
     fi
 
     echo ""
