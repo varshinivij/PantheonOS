@@ -1236,6 +1236,7 @@ class FileBasedTemplateManager:
                         if resolve_refs:
                             item = self._resolve_agent_references(item, path.parent)
                     item.source_path = str(path)
+                    item.scope = source_label
                 except Exception as exc:
                     logger.error(f"Failed to parse {kind[:-1]} {path}: {exc}")
                     continue

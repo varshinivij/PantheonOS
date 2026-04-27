@@ -25,6 +25,7 @@ class AgentConfig:
     mcp_servers: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     source_path: Optional[str] = None
+    scope: str = "project"
 
     def to_dict(self) -> dict:
         """Convert to dictionary"""
@@ -39,6 +40,7 @@ class AgentConfig:
             "mcp_servers": self.mcp_servers,
             "tags": self.tags,
             "source_path": self.source_path,
+            "scope": self.scope,
         }
 
     @classmethod
@@ -91,6 +93,7 @@ class TeamConfig:
     agents: List[AgentConfig] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     source_path: Optional[str] = None
+    scope: str = "project"
 
     @property
     def all_agents(self) -> List[str]:
@@ -109,6 +112,7 @@ class TeamConfig:
             "agents": [a.to_dict() for a in self.agents],
             "tags": self.tags,
             "source_path": self.source_path,
+            "scope": self.scope,
         }
 
     @classmethod
