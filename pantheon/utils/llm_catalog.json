@@ -655,9 +655,9 @@
       "openai_compatible": true,
       "chat_output_token_param": "max_tokens",
       "models": {
-        "glm-5": {
-          "max_input_tokens": 131072,
-          "max_output_tokens": 16384,
+        "glm-5.1": {
+          "max_input_tokens": 200000,
+          "max_output_tokens": 128000,
           "input_cost_per_million": 1.0,
           "output_cost_per_million": 4.0,
           "supports_vision": true,
@@ -670,6 +670,25 @@
           "supports_pdf_input": false,
           "supports_computer_use": false,
           "supports_assistant_prefill": false
+        },
+        "glm-5": {
+          "max_input_tokens": 200000,
+          "max_output_tokens": 128000,
+          "input_cost_per_million": 1.0,
+          "output_cost_per_million": 4.0,
+          "supports_vision": true,
+          "supports_function_calling": true,
+          "supports_response_schema": true,
+          "supports_reasoning": true,
+          "supports_audio_input": false,
+          "supports_audio_output": false,
+          "supports_web_search": true,
+          "supports_pdf_input": false,
+          "supports_computer_use": false,
+          "supports_assistant_prefill": false,
+          "deprecated": true,
+          "deprecation_date": "2026-04-20",
+          "replacement": "glm-5.1"
         },
         "glm-4.6": {
           "max_input_tokens": 131072,
