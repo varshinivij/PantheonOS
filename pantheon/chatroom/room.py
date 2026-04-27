@@ -1593,16 +1593,30 @@ class ChatRoom(ToolSet):
         project_dir, global_dir = kind_dirs[kind]
         src = Path(source_path)
 
-        if not src.exists():
-            return {"success": False, "message": f"Source not found: {source_path}"}
+        # If relative path (e.g. "teams/test.md"), resolve against project/global dirs
+        if not src.is_absolute():
+            for base in [project_dir, global_dir]:
+                candidate = base / source_path.split('/', 1)[-1] if '/' in source_path else base / source_path
+                if candidate.exists():
+                    src = candidate
+                    break
+            # Also try resolving under .pantheon/
+            if not src.is_absolute() or not src.exists():
+                pantheon_dir = settings.pantheon_dir
+                candidate = pantheon_dir / source_path
+                if candidate.exists():
+                    src = candidate
 
-        # Determine which base this source belongs to and compute relative path
+        if not src.exists():
+            return {"success": False, "message": f"Source not found: {source_path} (resolved: {src})"}
+
+        # Determine which base this source belongs to
         if str(src).startswith(str(project_dir)):
             src_base = project_dir
         elif str(src).startswith(str(global_dir)):
             src_base = global_dir
         else:
-            return {"success": False, "message": f"Source path not in project or global dir"}
+            return {"success": False, "message": f"Source path not in project or global dir: {src}"}
 
         if target_scope == "global":
             dst_base = global_dir
