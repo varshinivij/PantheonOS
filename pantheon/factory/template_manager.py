@@ -278,22 +278,30 @@ class TemplateManager:
         self._save_factory_hashes(factory_hashes)
 
     def _ensure_default_templates(self):
-        """Copy all default templates (agents, teams, prompts, skills).
+        """Sync factory defaults to ~/.pantheon/ (global), NOT project dir.
 
         Respects the `default_template_auto_update` setting for agents/teams/prompts:
         - True (default): overwrite existing files with latest factory versions.
         - False: only copy files that don't exist yet (preserves user edits).
-        Skills are always copy-missing-only regardless of the setting,
-        since they contain user-generated data.
+        Skills are always copy-missing-only regardless of the setting.
+
+        New projects start clean and inherit via 3-layer fallback:
+        project → global (~/.pantheon/) → factory
         """
         overwrite = self.settings.default_template_auto_update
         if overwrite:
             logger.info("default_template_auto_update=true: overwriting agents/teams/prompts with latest factory defaults")
-        # agents/teams/prompts: respect overwrite flag
+
+        # Target: global ~/.pantheon/ dirs
+        global_agents = self.settings.global_agents_dir
+        global_teams = self.settings.global_teams_dir
+        global_prompts = self.settings.global_prompts_dir
+        global_skills = self.settings.global_skills_dir
+
         for subdir, dest_dir, label in [
-            ("agents", self.agents_dir, "agent(s)"),
-            ("teams", self.teams_dir, "team(s)"),
-            ("prompts", self.prompts_dir, "prompt(s)"),
+            ("agents", global_agents, "agent(s)"),
+            ("teams", global_teams, "team(s)"),
+            ("prompts", global_prompts, "prompt(s)"),
         ]:
             try:
                 self._copy_missing_templates(
@@ -301,10 +309,9 @@ class TemplateManager:
                 )
             except Exception as e:
                 logger.error(f"Failed to copy default {label}: {e}")
-        # skills: always copy-missing-only (user-generated data, never overwrite)
         try:
             self._copy_missing_templates(
-                self.system_templates_dir / "skills", self.settings.skills_dir, "skill(s)", overwrite=False
+                self.system_templates_dir / "skills", global_skills, "skill(s)", overwrite=False
             )
         except Exception as e:
             logger.error(f"Failed to copy default skill(s): {e}")
