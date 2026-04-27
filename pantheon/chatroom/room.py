@@ -1595,17 +1595,19 @@ class ChatRoom(ToolSet):
 
         # If relative path (e.g. "teams/test.md"), resolve against project/global dirs
         if not src.is_absolute():
+            # Strip kind prefix if present (e.g. "teams/test.md" → "test.md")
+            rel_name = source_path
+            if '/' in source_path:
+                prefix = source_path.split('/')[0]
+                if prefix in ('agents', 'teams', 'skills'):
+                    rel_name = source_path.split('/', 1)[1]
+
+            # Try project first, then global
             for base in [project_dir, global_dir]:
-                candidate = base / source_path.split('/', 1)[-1] if '/' in source_path else base / source_path
+                candidate = base / rel_name
                 if candidate.exists():
                     src = candidate
                     break
-            # Also try resolving under .pantheon/
-            if not src.is_absolute() or not src.exists():
-                pantheon_dir = settings.pantheon_dir
-                candidate = pantheon_dir / source_path
-                if candidate.exists():
-                    src = candidate
 
         if not src.exists():
             return {"success": False, "message": f"Source not found: {source_path} (resolved: {src})"}
@@ -1624,6 +1626,9 @@ class ChatRoom(ToolSet):
             dst_base = project_dir
         else:
             return {"success": False, "message": f"Unknown target_scope: {target_scope}"}
+
+        if project_dir.resolve() == global_dir.resolve():
+            return {"success": False, "message": "Project and global are the same directory"}
 
         try:
             if kind == "skills":
