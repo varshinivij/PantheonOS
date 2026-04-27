@@ -58,6 +58,7 @@ class PromptResolver:
         self,
         prompts_dir: Optional[Path] = None,
         user_prompts_dir: Optional[Path] = None,
+        global_prompts_dir: Optional[Path] = None,
     ):
         """
         Initialize the prompt resolver.
@@ -65,13 +66,14 @@ class PromptResolver:
         Args:
             prompts_dir: Directory containing system prompt templates.
                         Defaults to templates/prompts/ in this package.
-            user_prompts_dir: Directory containing user prompt templates.
-                             User prompts take priority over system prompts.
+            user_prompts_dir: Directory containing user/project prompt templates (highest priority).
+            global_prompts_dir: Directory containing global prompt templates (~/.pantheon/prompts/).
         """
         if prompts_dir is None:
             prompts_dir = Path(__file__).parent / "templates" / "prompts"
         self.prompts_dir = prompts_dir
         self.user_prompts_dir = user_prompts_dir
+        self.global_prompts_dir = global_prompts_dir
         # Cache: name -> (content, param_definitions)
         self._cache: Dict[str, tuple] = {}
 
@@ -291,14 +293,21 @@ class PromptResolver:
             path = None
             cache_key = name
 
-            # Priority 1: User prompts directory
+            # Priority 1: Project prompts directory
             if self.user_prompts_dir is not None:
                 user_path = self.user_prompts_dir / f"{name}.md"
                 if user_path.exists():
                     path = user_path
                     cache_key = f"user:{name}"
 
-            # Priority 2: System prompts directory (fallback)
+            # Priority 2: Global prompts directory (~/.pantheon/prompts/)
+            if path is None and self.global_prompts_dir is not None:
+                global_path = self.global_prompts_dir / f"{name}.md"
+                if global_path.exists():
+                    path = global_path
+                    cache_key = f"global:{name}"
+
+            # Priority 3: System prompts directory (factory fallback)
             if path is None:
                 path = self.prompts_dir / f"{name}.md"
 
@@ -365,15 +374,16 @@ _prompt_resolver: Optional[PromptResolver] = None
 def init_prompt_resolver(
     user_prompts_dir: Optional[Path] = None,
     system_prompts_dir: Optional[Path] = None,
+    global_prompts_dir: Optional[Path] = None,
 ) -> PromptResolver:
-    """Initialize the global PromptResolver with user prompts directory.
+    """Initialize the global PromptResolver.
 
-    This should be called early (e.g., from TemplateManager.__init__) to configure
-    user prompts directory. User prompts take priority over system prompts.
+    Priority: project (user_prompts_dir) > global > system (factory).
 
     Args:
-        user_prompts_dir: User prompts directory (higher priority)
-        system_prompts_dir: System prompts directory (defaults to templates/prompts/)
+        user_prompts_dir: Project prompts directory (highest priority)
+        system_prompts_dir: System/factory prompts directory
+        global_prompts_dir: Global ~/.pantheon/prompts/ directory
 
     Returns:
         The initialized PromptResolver instance
@@ -382,6 +392,7 @@ def init_prompt_resolver(
     _prompt_resolver = PromptResolver(
         prompts_dir=system_prompts_dir,
         user_prompts_dir=user_prompts_dir,
+        global_prompts_dir=global_prompts_dir,
     )
     return _prompt_resolver
 

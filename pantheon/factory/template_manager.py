@@ -40,10 +40,11 @@ class TemplateManager:
         # Auto-bootstrap template system on initialization
         self.bootstrap()
 
-        # Initialize prompt resolver with user prompts directory (higher priority)
+        # Initialize prompt resolver: project > global > system
         init_prompt_resolver(
             user_prompts_dir=self.prompts_dir,
             system_prompts_dir=self.system_templates_dir / "prompts",
+            global_prompts_dir=self.settings.global_prompts_dir,
         )
 
     @property
