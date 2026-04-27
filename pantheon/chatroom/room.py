@@ -25,6 +25,7 @@ from pantheon.team import PantheonTeam
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.log import logger
 from pantheon.utils.misc import run_func
+from .projects import ProjectManager
 from .special_agents import get_suggestion_generator
 from .thread import Thread
 
@@ -126,6 +127,11 @@ class ChatRoom(ToolSet):
 
         # Initialize template manager (supports old and new formats, manages agents.yaml library)
         self.template_manager = get_template_manager()
+
+        # Project manager — register current workspace as active project
+        from pantheon.settings import get_settings as _get_settings
+        _ws = workspace_path or str(_get_settings().workspace)
+        self.project_manager = ProjectManager(active_path=_ws)
 
         self.description = description
 
@@ -1505,6 +1511,288 @@ class ChatRoom(ToolSet):
             logger.error(f"Error setting chat project: {e}")
             return {"success": False, "message": str(e)}
 
+    # ── Project Management ──────────────────────────────────────────
+
+    @tool
+    async def list_projects(self) -> dict:
+        """List all registered projects."""
+        return {"projects": self.project_manager.list_projects()}
+
+    @tool
+    async def get_active_project(self) -> dict:
+        """Get the currently active project."""
+        p = self.project_manager.active_project
+        if not p:
+            return {"active": None}
+        d = p.to_dict()
+        d["is_active"] = True
+        return {"active": d}
+
+    @tool
+    async def register_project(self, path: str, name: str = "") -> dict:
+        """Register a directory as a project.
+
+        Args:
+            path: Absolute path to the project directory.
+            name: Display name (defaults to directory name).
+        """
+        try:
+            resolved = str(Path(path).resolve())
+            if not Path(resolved).is_dir():
+                return {"success": False, "message": f"Directory not found: {resolved}"}
+            info = self.project_manager.register(resolved, name)
+            return {"success": True, "project": info.to_dict()}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    @tool
+    async def remove_project(self, path: str) -> dict:
+        """Remove a project from the registry (does not delete files).
+
+        Args:
+            path: Path of the project to remove.
+        """
+        ok = self.project_manager.remove(path)
+        return {"success": ok, "message": "Removed" if ok else "Not found"}
+
+    @tool
+    async def switch_project(self, path: str) -> dict:
+        """Switch the active project to a different directory.
+
+        This performs a full runtime context switch:
+        - Changes working directory
+        - Reloads settings from new .pantheon/
+        - Switches memory manager to new project's chats
+        - Reloads templates, agents, skills from new project
+
+        Args:
+            path: Path of the registered project to switch to.
+        """
+        resolved = str(Path(path).resolve())
+        info = self.project_manager.set_active(resolved)
+        if not info:
+            return {"success": False, "message": f"Project not registered: {resolved}"}
+
+        if not Path(resolved).is_dir():
+            return {"success": False, "message": f"Directory does not exist: {resolved}"}
+
+        try:
+            # 1. Change process working directory
+            import os
+            os.chdir(resolved)
+            logger.info(f"[switch_project] chdir → {resolved}")
+
+            # 2. Reset Settings singleton and replace with new work_dir
+            import pantheon.settings as _settings_mod
+            _settings_mod._settings = None
+            _settings_mod._settings = _settings_mod.Settings(Path(resolved))
+            _settings_mod._settings.reload()
+
+            # 3. Ensure .pantheon directory exists
+            pantheon_dir = Path(resolved) / ".pantheon"
+            pantheon_dir.mkdir(parents=True, exist_ok=True)
+            (pantheon_dir / "memory").mkdir(parents=True, exist_ok=True)
+
+            # 4. Switch MemoryManager
+            new_memory_dir = pantheon_dir / "memory"
+            self.memory_dir = new_memory_dir
+            self.memory_manager = MemoryManager(new_memory_dir)
+            logger.info(f"[switch_project] memory → {new_memory_dir}")
+
+            # 5. Reload TemplateManager (reads dirs from settings)
+            self.template_manager = get_template_manager(work_dir=Path(resolved))
+            logger.info(f"[switch_project] templates reloaded")
+
+            # 6. Update FileManager root on Endpoint (if embedded)
+            if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
+                tsm = self._endpoint.toolset_manager
+                for ts in tsm.local_toolsets.values():
+                    if hasattr(ts, 'path'):
+                        ts.path = Path(resolved)
+
+            # 7. Reset memory + learning system singletons
+            try:
+                import pantheon.internal.memory_system.plugin as _mem_plugin
+                _mem_plugin._memory_runtime = None
+            except Exception:
+                pass
+            try:
+                import pantheon.internal.learning_system.plugin as _learn_plugin
+                _learn_plugin._learning_runtime = None
+            except Exception:
+                pass
+            # Recreate plugins with new settings so MemoryRuntime
+            # initializes from the new project's .pantheon/memory-store
+            try:
+                from pantheon.team.plugin_registry import create_plugins
+                self._plugins = create_plugins(_settings_mod._settings)
+                from pantheon.internal.memory_system.plugin import MemorySystemPlugin
+                self._memory_plugin = None
+                for p in self._plugins:
+                    if isinstance(p, MemorySystemPlugin):
+                        self._memory_plugin = p
+                        break
+            except Exception as e:
+                logger.warning(f"[switch_project] plugin reset failed: {e}")
+            logger.info("[switch_project] memory system + plugins reset")
+
+            # 8. Clear per-chat team cache (stale references)
+            self.chat_teams.clear()
+
+            return {
+                "success": True,
+                "project": info.to_dict(),
+                "message": f"Switched to {info.name}",
+            }
+        except Exception as e:
+            logger.error(f"[switch_project] Failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    def _find_teams_using_agent(self, agent_id: str) -> list[str]:
+        """Find all teams that reference a given agent by ID."""
+        teams_using = []
+        try:
+            all_teams = self.template_manager.file_manager.list_teams(resolve_refs=False)
+            for team in all_teams:
+                for agent in team.agents:
+                    if agent.id == agent_id:
+                        teams_using.append(team.name)
+                        break
+        except Exception:
+            pass
+        return teams_using
+
+    @tool
+    async def change_template_scope(
+        self,
+        kind: str,
+        source_path: str,
+        target_scope: str,
+        overwrite: bool = False,
+    ) -> dict:
+        """Move a template/agent/skill between project and global scope.
+
+        Args:
+            kind: "agents", "teams", or "skills"
+            source_path: Absolute path to the source file or directory
+            target_scope: "global" or "project"
+            overwrite: If True, overwrite existing at target
+        """
+        import shutil
+        from pantheon.settings import get_settings as _gs
+        settings = _gs()
+        user_home = Path.home() / ".pantheon"
+
+        kind_dirs = {
+            "agents": (settings.agents_dir, user_home / "agents"),
+            "teams": (settings.teams_dir, user_home / "teams"),
+            "skills": (settings.skills_dir, user_home / "skills"),
+        }
+        if kind not in kind_dirs:
+            return {"success": False, "message": f"Unknown kind: {kind}. Use agents/teams/skills"}
+
+        project_dir, global_dir = kind_dirs[kind]
+        src = Path(source_path)
+
+        # If relative path, resolve against project/global dirs
+        if not src.is_absolute():
+            rel_name = source_path
+            # Strip .pantheon/<kind>/ prefix if present
+            for strip_prefix in [f'.pantheon/{kind}/', f'.pantheon/']:
+                if rel_name.startswith(strip_prefix):
+                    rel_name = rel_name[len(strip_prefix):]
+                    break
+            # Strip bare kind prefix (e.g. "teams/test.md" → "test.md")
+            if '/' in rel_name:
+                first = rel_name.split('/')[0]
+                if first in ('agents', 'teams', 'skills'):
+                    rel_name = rel_name.split('/', 1)[1]
+
+            # Try project first, then global
+            for base in [project_dir, global_dir]:
+                candidate = base / rel_name
+                if candidate.exists():
+                    src = candidate
+                    break
+
+        if not src.exists():
+            return {"success": False, "message": f"Source not found: {source_path} (resolved: {src})"}
+
+        # Determine which base this source belongs to
+        if str(src).startswith(str(project_dir)):
+            src_base = project_dir
+        elif str(src).startswith(str(global_dir)):
+            src_base = global_dir
+        else:
+            return {"success": False, "message": f"Source path not in project or global dir: {src}"}
+
+        if target_scope == "global":
+            dst_base = global_dir
+        elif target_scope == "project":
+            dst_base = project_dir
+        else:
+            return {"success": False, "message": f"Unknown target_scope: {target_scope}"}
+
+        if project_dir.resolve() == global_dir.resolve():
+            return {"success": False, "message": "Project and global are the same directory"}
+
+        try:
+            warnings = []
+
+            if kind == "skills":
+                skill_dir = src if src.is_dir() else src.parent
+                rel = skill_dir.relative_to(src_base)
+                dst = dst_base / rel
+                if dst.exists() and not overwrite:
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
+                dst_base.mkdir(parents=True, exist_ok=True)
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(skill_dir, dst)
+                shutil.rmtree(skill_dir)
+            elif kind == "teams":
+                # Check for path-referenced agents that won't move with the team
+                try:
+                    team = self.template_manager.file_manager._read_team_from_path(src)
+                    for agent in team.agents:
+                        sp = agent.source_path or ''
+                        if sp and ('/' in sp or sp.endswith('.md')):
+                            warnings.append(f"Agent '{agent.id}' uses path reference '{sp}' which may break after move")
+                except Exception:
+                    pass
+                rel = src.relative_to(src_base)
+                dst = dst_base / rel
+                if dst.exists() and not overwrite:
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                src.unlink()
+            else:
+                rel = src.relative_to(src_base)
+                dst = dst_base / rel
+                if dst.exists() and not overwrite:
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                src.unlink()
+
+            logger.info(f"[change_scope] Moved {kind}/{rel} → {target_scope}")
+            result: dict = {"success": True, "message": f"Moved to {target_scope}"}
+            if warnings:
+                result["warnings"] = warnings
+            return result
+        except Exception as e:
+            logger.error(f"[change_scope] Failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    @tool
+    async def get_project_settings(self) -> dict:
+        """Get settings with scope info (global vs project)."""
+        p = self.project_manager.active_project
+        if not p:
+            return {"success": False, "message": "No active project"}
+        return self.project_manager.get_config_scope(p.path)
+
     @tool
     async def revert_to_message(self, chat_id: str, message_id: str) -> dict:
         """Revert chat memory to a specific message by ID.
@@ -2178,7 +2466,7 @@ class ChatRoom(ToolSet):
                     }
 
             # No template found, return default template info
-            template_manager = get_template_manager()
+            template_manager = self.template_manager
             default_template = template_manager.get_template("default")
             if default_template:
                 return {
@@ -2205,7 +2493,7 @@ class ChatRoom(ToolSet):
     async def validate_template(self, template: dict) -> dict:
         """Validate if a template is compatible with current endpoint."""
         try:
-            template_manager = get_template_manager()
+            template_manager = self.template_manager
             return template_manager.validate_template_dict(template)
         except Exception as e:
             logger.error(f"Error validating template compatibility: {e}")
@@ -2219,8 +2507,7 @@ class ChatRoom(ToolSet):
         List available template files.
         """
         logger.debug(f"Listing template files... {file_type}")
-        template_manager = get_template_manager()
-        return template_manager.list_template_files(file_type)
+        return self.template_manager.list_template_files(file_type)
 
     @tool
     async def read_template_file(
@@ -2234,7 +2521,7 @@ class ChatRoom(ToolSet):
             resolve_refs: If True, resolve agent references to full configs.
                          Use False for editing, True for applying template to chat.
         """
-        template_manager = get_template_manager()
+        template_manager = self.template_manager
         return template_manager.read_template_file(file_path, resolve_refs=resolve_refs)
 
     @tool
@@ -2242,15 +2529,29 @@ class ChatRoom(ToolSet):
         """
         Write/update a template markdown file.
         """
-        template_manager = get_template_manager()
+        template_manager = self.template_manager
         return template_manager.write_template_file(file_path, content)
 
     @tool
-    async def delete_template_file(self, file_path: str) -> dict:
+    async def delete_template_file(self, file_path: str, force: bool = False) -> dict:
         """
         Delete a template markdown file.
+
+        Args:
+            file_path: Path to template file (e.g. "agents/researcher.md")
+            force: If True, delete even if referenced by teams
         """
-        template_manager = get_template_manager()
+        # Check if deleting an agent that's referenced by teams
+        if file_path.startswith("agents/") and not force:
+            agent_id = Path(file_path).stem
+            teams_using = self._find_teams_using_agent(agent_id)
+            if teams_using:
+                return {
+                    "success": False,
+                    "message": f"Agent '{agent_id}' is used by: {', '.join(teams_using)}. Set force=True to delete anyway.",
+                    "referenced_by": teams_using,
+                }
+        template_manager = self.template_manager
         return template_manager.delete_template_file(file_path)
 
     # Model Management Methods
@@ -2629,11 +2930,46 @@ class ChatRoom(ToolSet):
     async def get_installed_store_packages(self) -> dict:
         """Get locally installed store packages with their versions.
 
+        Verifies files still exist — removes stale entries.
+
         Returns:
             dict with package_id -> {name, type, version, installed_at}
         """
         try:
             installs = self._load_store_installs()
+            settings = get_settings()
+            user_home = Path.home() / ".pantheon"
+            stale = []
+
+            for pkg_id, info in installs.items():
+                name = info.get("name", "")
+                pkg_type = info.get("type", "skill")
+                exists = False
+
+                if pkg_type == "skill":
+                    for base in [settings.skills_dir, user_home / "skills"]:
+                        if (base / name / "SKILL.md").exists() or (base / name).exists():
+                            exists = True
+                            break
+                elif pkg_type == "agent":
+                    for base in [settings.agents_dir, user_home / "agents"]:
+                        if (base / f"{name}.md").exists():
+                            exists = True
+                            break
+                elif pkg_type == "team":
+                    for base in [settings.teams_dir, user_home / "teams"]:
+                        if (base / f"{name}.md").exists():
+                            exists = True
+                            break
+
+                if not exists:
+                    stale.append(pkg_id)
+
+            if stale:
+                for pkg_id in stale:
+                    del installs[pkg_id]
+                self._save_store_installs(installs)
+
             return {"success": True, "installs": installs}
         except Exception as e:
             logger.error(f"Error reading store installs: {e}")

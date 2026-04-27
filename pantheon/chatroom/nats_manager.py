@@ -367,7 +367,7 @@ class NATSManager:
 
             return {
                 "tcp_url": f"nats://localhost:{tcp_port}",
-                "ws_url": f"ws://localhost:{ws_port}",
+                "ws_url": f"ws://127.0.0.1:{ws_port}",
                 "http_url": f"http://localhost:{http_port}",
                 "config_file": instance_data.get("config_file"),
                 "log_file": instance_data.get("log_file"),
@@ -468,7 +468,7 @@ class NATSManager:
         # 7. Return connection info
         server_info = {
             "tcp_url": f"nats://localhost:{self.tcp_port}",
-            "ws_url": f"ws://localhost:{self.ws_port}",
+            "ws_url": f"ws://127.0.0.1:{self.ws_port}",
             "http_url": f"http://localhost:{self.http_port}",
             "config_file": str(self._config_file),
             "log_file": str(log_file),

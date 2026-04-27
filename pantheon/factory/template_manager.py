@@ -40,10 +40,11 @@ class TemplateManager:
         # Auto-bootstrap template system on initialization
         self.bootstrap()
 
-        # Initialize prompt resolver with user prompts directory (higher priority)
+        # Initialize prompt resolver: project > global > system
         init_prompt_resolver(
             user_prompts_dir=self.prompts_dir,
             system_prompts_dir=self.system_templates_dir / "prompts",
+            global_prompts_dir=self.settings.global_prompts_dir,
         )
 
     @property
@@ -278,22 +279,30 @@ class TemplateManager:
         self._save_factory_hashes(factory_hashes)
 
     def _ensure_default_templates(self):
-        """Copy all default templates (agents, teams, prompts, skills).
+        """Sync factory defaults to ~/.pantheon/ (global), NOT project dir.
 
         Respects the `default_template_auto_update` setting for agents/teams/prompts:
         - True (default): overwrite existing files with latest factory versions.
         - False: only copy files that don't exist yet (preserves user edits).
-        Skills are always copy-missing-only regardless of the setting,
-        since they contain user-generated data.
+        Skills are always copy-missing-only regardless of the setting.
+
+        New projects start clean and inherit via 3-layer fallback:
+        project → global (~/.pantheon/) → factory
         """
         overwrite = self.settings.default_template_auto_update
         if overwrite:
             logger.info("default_template_auto_update=true: overwriting agents/teams/prompts with latest factory defaults")
-        # agents/teams/prompts: respect overwrite flag
+
+        # Target: global ~/.pantheon/ dirs
+        global_agents = self.settings.global_agents_dir
+        global_teams = self.settings.global_teams_dir
+        global_prompts = self.settings.global_prompts_dir
+        global_skills = self.settings.global_skills_dir
+
         for subdir, dest_dir, label in [
-            ("agents", self.agents_dir, "agent(s)"),
-            ("teams", self.teams_dir, "team(s)"),
-            ("prompts", self.prompts_dir, "prompt(s)"),
+            ("agents", global_agents, "agent(s)"),
+            ("teams", global_teams, "team(s)"),
+            ("prompts", global_prompts, "prompt(s)"),
         ]:
             try:
                 self._copy_missing_templates(
@@ -301,10 +310,9 @@ class TemplateManager:
                 )
             except Exception as e:
                 logger.error(f"Failed to copy default {label}: {e}")
-        # skills: always copy-missing-only (user-generated data, never overwrite)
         try:
             self._copy_missing_templates(
-                self.system_templates_dir / "skills", self.settings.skills_dir, "skill(s)", overwrite=False
+                self.system_templates_dir / "skills", global_skills, "skill(s)", overwrite=False
             )
         except Exception as e:
             logger.error(f"Failed to copy default skill(s): {e}")
@@ -514,8 +522,9 @@ class TemplateManager:
                     return f"{kind}/{fallback_id}.md"
                 p = Path(source_path)
                 user_base = self.agents_dir if kind == "agents" else self.teams_dir
+                global_base = self.settings.global_agents_dir if kind == "agents" else self.settings.global_teams_dir
                 system_base = self.system_templates_dir / kind
-                for base in (user_base, system_base):
+                for base in (user_base, global_base, system_base):
                     try:
                         rel = p.relative_to(base)
                         return f"{kind}/{rel.as_posix()}"
@@ -530,6 +539,8 @@ class TemplateManager:
                         "id": tmpl.id,
                         "name": tmpl.name,
                         "path": _get_rel_path(tmpl.source_path, tmpl.id, "teams"),
+                        "source_path": tmpl.source_path,
+                        "scope": getattr(tmpl, 'scope', 'project'),
                     }
                     for tmpl in self.file_manager.list_teams(resolve_refs=False)
                 ]
@@ -543,6 +554,8 @@ class TemplateManager:
                         "id": agent.id,
                         "name": agent.name,
                         "path": _get_rel_path(agent.source_path, agent.id, "agents"),
+                        "source_path": agent.source_path,
+                        "scope": getattr(agent, 'scope', 'project'),
                     }
                     for agent in self.file_manager.list_agents()
                 ]

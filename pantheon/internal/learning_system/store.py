@@ -26,40 +26,60 @@ MAX_SKILLS = 200
 
 
 class SkillStore:
-    """Skill filesystem management with atomic writes and validation."""
+    """Skill filesystem management with atomic writes and validation.
 
-    def __init__(self, skills_dir: Path, runtime_dir: Path):
+    Supports layered scanning: project skills override global skills.
+    """
+
+    def __init__(self, skills_dir: Path, runtime_dir: Path, global_skills_dir: Path | None = None):
         self.skills_dir = skills_dir
         self.runtime_dir = runtime_dir
+        self.global_skills_dir = global_skills_dir
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Discovery ──
 
     def scan_headers(self) -> list[SkillHeader]:
-        """Scan all SKILL.md files, read only frontmatter, sort by mtime desc."""
+        """Scan all SKILL.md files from project + global, project overrides global."""
         headers: list[SkillHeader] = []
-        if not self.skills_dir.exists():
-            return headers
+        seen_paths: set[str] = set()
 
-        for skill_md in self._iter_skill_files():
+        # Project skills first (higher priority)
+        for skill_md in self._iter_skill_files(self.skills_dir):
             header = parse_frontmatter_only(skill_md, skills_dir=self.skills_dir)
             if header:
+                header.scope = "project"
                 headers.append(header)
+                seen_paths.add(header.path)
+
+        # Global skills (lower priority, skip duplicates)
+        if self.global_skills_dir and self.global_skills_dir.exists():
+            for skill_md in self._iter_skill_files(self.global_skills_dir):
+                header = parse_frontmatter_only(skill_md, skills_dir=self.global_skills_dir)
+                if header and header.path not in seen_paths:
+                    header.scope = "global"
+                    headers.append(header)
 
         headers.sort(key=lambda h: h.mtime, reverse=True)
         return headers[:MAX_SKILLS]
 
     def load_skill(self, name: str) -> SkillEntry | None:
-        """Load full skill content by name or path (e.g. 'scrna-qc' or 'bio/scrna-qc')."""
-        skill_dir = self._find_skill_dir(name)
+        """Load full skill content by name (project overrides global)."""
+        # Try project first
+        skill_dir = self._find_skill_dir_in(name, self.skills_dir)
+        base_dir = self.skills_dir
+        # Fallback to global
+        if not skill_dir and self.global_skills_dir:
+            skill_dir = self._find_skill_dir_in(name, self.global_skills_dir)
+            base_dir = self.global_skills_dir
         if not skill_dir:
             return None
         skill_md = skill_dir / "SKILL.md"
         if not skill_md.exists():
             return None
         try:
-            return parse_skill_file(skill_md, skills_dir=self.skills_dir)
+            return parse_skill_file(skill_md, skills_dir=base_dir)
         except Exception as e:
             logger.warning(f"Failed to parse skill '{name}': {e}")
             return None
@@ -289,36 +309,35 @@ class SkillStore:
     # ── Internal ──
 
     def _find_skill_dir(self, name: str) -> Path | None:
-        """Find a skill directory by name or relative path.
+        """Find a skill directory by name (project > global)."""
+        result = self._find_skill_dir_in(name, self.skills_dir)
+        if not result and self.global_skills_dir:
+            result = self._find_skill_dir_in(name, self.global_skills_dir)
+        return result
 
-        Supports both flat names ('scrna-qc') and path-style keys
-        ('bioinformatics/scrna-qc'). Path-style takes priority.
-        """
-        # Direct path match (handles both flat and hierarchical)
-        direct = self.skills_dir / name
+    @staticmethod
+    def _find_skill_dir_in(name: str, base_dir: Path) -> Path | None:
+        """Find a skill directory by name or relative path within a single base dir."""
+        if not base_dir or not base_dir.exists():
+            return None
+        direct = base_dir / name
         if (direct / "SKILL.md").exists():
             return direct
-
-        # Fallback: match by leaf directory name (backwards compat)
-        for skill_md in self._iter_skill_files():
+        for skill_md in SkillStore._iter_skill_files(base_dir):
             if skill_md.parent.name == name:
                 return skill_md.parent
-
         return None
 
-    def _iter_skill_files(self):
-        """Iterate all SKILL.md files in skills_dir."""
-        if not self.skills_dir.exists():
+    @staticmethod
+    def _iter_skill_files(base_dir: Path):
+        """Iterate all SKILL.md files in a directory."""
+        if not base_dir or not base_dir.exists():
             return
-        for root, dirs, files in os.walk(self.skills_dir):
+        for root, dirs, files in os.walk(base_dir):
             if "SKILL.md" in files:
                 yield Path(root) / "SKILL.md"
-                # A directory that already contains SKILL.md is a leaf skill;
-                # do not descend into its supporting files/subdirectories.
                 dirs[:] = []
                 continue
-
-            # Skip hidden directories while continuing to search category paths.
             dirs[:] = [d for d in dirs if not d.startswith(".")]
 
     @staticmethod
