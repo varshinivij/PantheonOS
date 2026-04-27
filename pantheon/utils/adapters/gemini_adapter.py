@@ -353,7 +353,19 @@ class GeminiAdapter(BaseAdapter):
         # Response modalities
         modalities = kwargs.pop("modalities", None)
         if modalities:
-            request_body.setdefault("generationConfig", {})["responseModalities"] = modalities
+            request_body.setdefault("generationConfig", {})["responseModalities"] = [
+                str(modality).upper() for modality in modalities
+            ]
+
+        image_config = kwargs.pop("image_config", None)
+        if image_config:
+            request_image_config = {}
+            if "aspect_ratio" in image_config:
+                request_image_config["aspectRatio"] = image_config["aspect_ratio"]
+            if "image_size" in image_config:
+                request_image_config["imageSize"] = image_config["image_size"]
+            if request_image_config:
+                request_body.setdefault("generationConfig", {})["imageConfig"] = request_image_config
 
         url = _build_url(model, key, stream=True, base_url=base_url)
 

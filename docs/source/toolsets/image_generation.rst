@@ -66,14 +66,16 @@ Generate an image from a text description.
    result = await image_tools.generate_image(
        prompt="A serene mountain lake at sunset with snow-capped peaks",
        reference_images=None,
-       model=None  # Uses default model
+       model=None,  # Uses default model
+       model_args=None
    )
 
 **Parameters:**
 
-- ``prompt``: Detailed description of the image to generate. Be specific about colors, composition, style, and subjects.
+- ``prompt``: Detailed image instruction. Include the subject, setting/context, composition/layout, visual style, colors/materials, lighting, camera/viewpoint, aspect-ratio intent, and any required or forbidden text. For diagrams or scientific figures, specify panels, labels, arrows, relative placement, and visual hierarchy. For edits or reference images, state what to preserve and what to change. Avoid vague prompts like "make it better"; describe the exact desired result.
 - ``reference_images``: Optional list of file paths to use as style reference
-- ``model``: Optional model override. Leave empty to use default.
+- ``model``: Optional model override. Leave empty to use default. This can be a concrete model name, a ``provider/model-name`` identifier, or one of the built-in shortcuts ``"gemini"`` and ``"openai"``.
+- ``model_args``: Optional provider-specific image generation arguments. Keep this simple: use only common controls unless the model requires otherwise. OpenAI-compatible image endpoints support ``size`` (default ``"1024x1024"`` in this tool), ``quality``, ``output_format``, and ``background``. Gemini supports ``aspect_ratio`` and ``image_size``; omitted Gemini values use the provider/model defaults.
 
 **Returns:**
 
@@ -126,7 +128,7 @@ The default model is determined by Pantheon's settings:
 
    # In settings.json
    {
-       "image_gen_model": "normal"  # or "high", "low", or specific model name
+       "image_gen_model": "gemini"  # or "openai", "high", "normal", "low", or a specific model name
    }
 
 Or override per-call:
@@ -136,6 +138,29 @@ Or override per-call:
    result = await image_tools.generate_image(
        prompt="A futuristic cityscape",
        model="dall-e-3"
+   )
+
+Use a provider shortcut when you want the tool to select that provider's
+default image model:
+
+.. code-block:: python
+
+   result = await image_tools.generate_image(
+       prompt="A publication-style cellular pathway diagram",
+       model="gemini",
+       model_args={"aspect_ratio": "16:9", "image_size": "2K"}
+   )
+
+For providers beyond the built-in shortcuts, pass a concrete model identifier.
+OpenAI-compatible image endpoints are attempted through their configured
+``base_url`` and API key:
+
+.. code-block:: python
+
+   result = await image_tools.generate_image(
+       prompt="A concise scientific icon set",
+       model="openrouter/provider-image-model",
+       model_args={"size": "1024x1024"}
    )
 
 Examples

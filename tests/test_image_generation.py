@@ -131,6 +131,141 @@ class TestToolSetBasics:
         assert calls["base_url"] == "https://openai-proxy.example/v1"
 
     @pytest.mark.asyncio
+    async def test_openai_model_shortcut_resolves_to_default_image_model(self, image_toolset, monkeypatch):
+        calls = {}
+
+        class FakeAdapter:
+            async def aimage_generation(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model=kwargs["model"],
+                    usage=None,
+                )
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="A precise vector-like icon of a microscope",
+            model="openai",
+        )
+
+        assert result["success"] is True
+        assert calls["model"] == "gpt-image-2"
+        assert result["model_used"] == "gpt-image-2"
+
+    @pytest.mark.asyncio
+    async def test_openai_model_args_are_forwarded_to_image_generation(self, image_toolset, monkeypatch):
+        calls = {}
+
+        class FakeAdapter:
+            async def aimage_generation(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model=kwargs["model"],
+                    usage=None,
+                )
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="A landscape scientific workflow diagram",
+            model="openai",
+            model_args={
+                "size": "1536x1024",
+                "quality": "high",
+                "output_format": "webp",
+            },
+        )
+
+        assert result["success"] is True
+        assert calls["size"] == "1536x1024"
+        assert calls["quality"] == "high"
+        assert calls["output_format"] == "webp"
+
+    @pytest.mark.asyncio
+    async def test_unsupported_image_provider_returns_available_options(self, image_toolset):
+        result = await image_toolset.generate_image(
+            prompt="A test image",
+            model="anthropic/claude-sonnet-4-6",
+        )
+
+        assert result["success"] is False
+        assert "Unsupported image generation provider" in result["error"]
+        assert result["available_model_shortcuts"] == ["openai", "gemini"]
+        assert "openai" in result["available_models"]
+        assert "gemini" in result["available_models"]
+
+    @pytest.mark.asyncio
+    async def test_provider_shortcut_without_builtin_image_default_returns_actionable_error(self, image_toolset):
+        result = await image_toolset.generate_image(
+            prompt="A test image",
+            model="openrouter",
+        )
+
+        assert result["success"] is False
+        assert "Provider shortcut 'openrouter' has no built-in image default" in result["error"]
+        assert "openrouter/<model-name>" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_compatible_provider_model_is_attempted(self, image_toolset, monkeypatch):
+        calls = {}
+
+        class FakeAdapter:
+            async def aimage_generation(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    data=[SimpleNamespace(b64_json="ZmFrZQ==", url=None)],
+                    model=kwargs["model"],
+                    usage=None,
+                )
+
+        monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="A test image",
+            model="openrouter/some-image-model",
+            model_args={"size": "1024x1024"},
+        )
+
+        assert result["success"] is True
+        assert calls["model"] == "some-image-model"
+        assert calls["api_key"] == "openrouter-key"
+        assert calls["base_url"] == "https://openrouter.ai/api/v1"
+
+    @pytest.mark.asyncio
+    async def test_missing_image_provider_key_returns_available_options(self, image_toolset, monkeypatch):
+        monkeypatch.setattr(
+            image_toolset,
+            "_resolve_model_connection",
+            lambda _model: (None, None),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="A test image",
+            model="openai",
+        )
+
+        assert result["success"] is False
+        assert result["error"] == "Missing API key for image generation provider 'openai'"
+        assert result["available_model_shortcuts"] == ["openai", "gemini"]
+        assert "gpt-image-2" in result["available_models"]["openai"]
+
+    @pytest.mark.asyncio
     async def test_gemini_multimodal_uses_gemini_provider_base_when_configured(self, image_toolset, monkeypatch):
         calls = {}
 
@@ -186,6 +321,55 @@ class TestToolSetBasics:
         assert calls["model"] == "gemini-2.5-flash-image"
         assert calls["api_key"] == "gemini-key"
         assert calls["base_url"] == "https://gemini-proxy.example"
+
+    @pytest.mark.asyncio
+    async def test_gemini_model_args_are_forwarded_as_image_config(self, image_toolset, monkeypatch):
+        calls = {}
+
+        class FakeAdapter:
+            async def acompletion(self, **kwargs):
+                calls.update(kwargs)
+                return [
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "ok",
+                                    "images": [
+                                        {
+                                            "image_url": {
+                                                "url": "data:image/png;base64,ZmFrZQ=="
+                                            }
+                                        }
+                                    ],
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "model": kwargs["model"],
+                    }
+                ]
+
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        monkeypatch.setattr(
+            "pantheon.utils.adapters.get_adapter",
+            lambda sdk: FakeAdapter(),
+        )
+
+        result = await image_toolset.generate_image(
+            prompt="A widescreen lab automation scene",
+            model="gemini",
+            model_args={"aspect_ratio": "16:9", "image_size": "2K"},
+        )
+
+        assert result["success"] is True
+        assert calls["image_config"] == {
+            "aspect_ratio": "16:9",
+            "image_size": "2K",
+        }
+
 
     @pytest.mark.asyncio
     async def test_gemini_multimodal_uses_global_llm_base_as_fallback(self, image_toolset, monkeypatch):

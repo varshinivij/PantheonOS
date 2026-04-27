@@ -159,8 +159,8 @@
     // ===== Image Generation Configuration =====
     // Model selection for generate_image tool
     // Options: "high", "normal", "low", or specific model name
-    // Factory default is explicit to keep the template aligned with current OpenAI image routing.
-    "image_gen_model": "gpt-image-2",
+    // Factory default uses Gemini image generation. Use "openai" or a concrete model to override.
+    "image_gen_model": "gemini",
     // Custom image generation models (optional - override code defaults)
     // "image_gen_models": {
     //     "gemini": {
