@@ -2843,11 +2843,46 @@ class ChatRoom(ToolSet):
     async def get_installed_store_packages(self) -> dict:
         """Get locally installed store packages with their versions.
 
+        Verifies files still exist — removes stale entries.
+
         Returns:
             dict with package_id -> {name, type, version, installed_at}
         """
         try:
             installs = self._load_store_installs()
+            settings = get_settings()
+            user_home = Path.home() / ".pantheon"
+            stale = []
+
+            for pkg_id, info in installs.items():
+                name = info.get("name", "")
+                pkg_type = info.get("type", "skill")
+                exists = False
+
+                if pkg_type == "skill":
+                    for base in [settings.skills_dir, user_home / "skills"]:
+                        if (base / name / "SKILL.md").exists() or (base / name).exists():
+                            exists = True
+                            break
+                elif pkg_type == "agent":
+                    for base in [settings.agents_dir, user_home / "agents"]:
+                        if (base / f"{name}.md").exists():
+                            exists = True
+                            break
+                elif pkg_type == "team":
+                    for base in [settings.teams_dir, user_home / "teams"]:
+                        if (base / f"{name}.md").exists():
+                            exists = True
+                            break
+
+                if not exists:
+                    stale.append(pkg_id)
+
+            if stale:
+                for pkg_id in stale:
+                    del installs[pkg_id]
+                self._save_store_installs(installs)
+
             return {"success": True, "installs": installs}
         except Exception as e:
             logger.error(f"Error reading store installs: {e}")
