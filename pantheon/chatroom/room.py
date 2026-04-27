@@ -2339,7 +2339,7 @@ class ChatRoom(ToolSet):
                     }
 
             # No template found, return default template info
-            template_manager = get_template_manager()
+            template_manager = self.template_manager
             default_template = template_manager.get_template("default")
             if default_template:
                 return {
@@ -2366,7 +2366,7 @@ class ChatRoom(ToolSet):
     async def validate_template(self, template: dict) -> dict:
         """Validate if a template is compatible with current endpoint."""
         try:
-            template_manager = get_template_manager()
+            template_manager = self.template_manager
             return template_manager.validate_template_dict(template)
         except Exception as e:
             logger.error(f"Error validating template compatibility: {e}")
@@ -2380,8 +2380,7 @@ class ChatRoom(ToolSet):
         List available template files.
         """
         logger.debug(f"Listing template files... {file_type}")
-        template_manager = get_template_manager()
-        return template_manager.list_template_files(file_type)
+        return self.template_manager.list_template_files(file_type)
 
     @tool
     async def read_template_file(
@@ -2395,7 +2394,7 @@ class ChatRoom(ToolSet):
             resolve_refs: If True, resolve agent references to full configs.
                          Use False for editing, True for applying template to chat.
         """
-        template_manager = get_template_manager()
+        template_manager = self.template_manager
         return template_manager.read_template_file(file_path, resolve_refs=resolve_refs)
 
     @tool
@@ -2403,7 +2402,7 @@ class ChatRoom(ToolSet):
         """
         Write/update a template markdown file.
         """
-        template_manager = get_template_manager()
+        template_manager = self.template_manager
         return template_manager.write_template_file(file_path, content)
 
     @tool
@@ -2411,7 +2410,7 @@ class ChatRoom(ToolSet):
         """
         Delete a template markdown file.
         """
-        template_manager = get_template_manager()
+        template_manager = self.template_manager
         return template_manager.delete_template_file(file_path)
 
     # Model Management Methods
