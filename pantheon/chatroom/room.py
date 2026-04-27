@@ -1607,14 +1607,19 @@ class ChatRoom(ToolSet):
         project_dir, global_dir = kind_dirs[kind]
         src = Path(source_path)
 
-        # If relative path (e.g. "teams/test.md"), resolve against project/global dirs
+        # If relative path, resolve against project/global dirs
         if not src.is_absolute():
-            # Strip kind prefix if present (e.g. "teams/test.md" → "test.md")
             rel_name = source_path
-            if '/' in source_path:
-                prefix = source_path.split('/')[0]
-                if prefix in ('agents', 'teams', 'skills'):
-                    rel_name = source_path.split('/', 1)[1]
+            # Strip .pantheon/<kind>/ prefix if present
+            for strip_prefix in [f'.pantheon/{kind}/', f'.pantheon/']:
+                if rel_name.startswith(strip_prefix):
+                    rel_name = rel_name[len(strip_prefix):]
+                    break
+            # Strip bare kind prefix (e.g. "teams/test.md" → "test.md")
+            if '/' in rel_name:
+                first = rel_name.split('/')[0]
+                if first in ('agents', 'teams', 'skills'):
+                    rel_name = rel_name.split('/', 1)[1]
 
             # Try project first, then global
             for base in [project_dir, global_dir]:
