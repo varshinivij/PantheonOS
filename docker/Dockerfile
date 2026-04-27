@@ -17,9 +17,8 @@ FROM python:3.12-slim-bookworm AS builder
 ARG VENV_PATH=/venv
 ARG CACHE_VERSION=default
 
-# Install system dependencies, uv, and Playwright browser dependencies (Use Aliyun mirror)
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies, uv, and Playwright browser dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     build-essential \
@@ -165,9 +164,8 @@ RUN ${VENV_PATH}/bin/python -m compileall -q /app/pantheon 2>/dev/null || true
 # ============================================
 FROM python:3.12-slim-bookworm
 
-# Install runtime dependencies and Playwright browser dependencies (Use Aliyun mirror for stability in CN)
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies and Playwright browser dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \
@@ -210,7 +208,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     r-base \
     r-base-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /var/cache/apt/archives/* \
-    # Install Node.js from NodeSource (using Aliyun mirror for faster download in CN)
+    # Install Node.js from NodeSource
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
@@ -268,19 +266,11 @@ ENV PATH="${VENV_PATH}/bin:$PATH" \
     UV_CACHE_DIR=/app/.uv-cache \
     # Install playwright browsers to an explicit path outside /root/.cache.
     # This prevents accidental deletion and makes the installation location unambiguous.
-    PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright \
-    # Use Playwright mirror for faster downloads in China
-    PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+    PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright
 
 # Layer C — Playwright browsers (~300-400MB, stable): only rebuilt when Playwright version changes.
 # Using chromium is sufficient for most web scraping/automation tasks.
-# PLAYWRIGHT_DOWNLOAD_HOST is already set in ENV above; the fallbacks override
-# it temporarily if the primary mirror is unreachable.
-RUN ${VENV_PATH}/bin/playwright install chromium --with-deps || \
-    (PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net \
-     ${VENV_PATH}/bin/playwright install chromium --with-deps) || \
-    (PLAYWRIGHT_DOWNLOAD_HOST= \
-     ${VENV_PATH}/bin/playwright install chromium --with-deps)
+RUN ${VENV_PATH}/bin/playwright install chromium --with-deps
 
 # ============================================
 # Layer D — MCP Server Caches (~150-300MB, stable)
