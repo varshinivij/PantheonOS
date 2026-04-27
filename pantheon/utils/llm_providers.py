@@ -61,6 +61,24 @@ PROVIDER_API_KEY_ENV_MAP: dict[str, str] = {
 }
 
 
+def get_provider_base_env(
+    provider_key: str,
+    provider_config: dict | None = None,
+) -> str:
+    """Return the Base URL env var name for a provider.
+
+    Providers can opt into a non-standard env var with ``api_base_env`` in the
+    catalog. Otherwise we derive ``<PROVIDER>_API_BASE`` so every catalog
+    provider can be pointed at an alternate OpenAI-compatible endpoint.
+    """
+    if provider_config and provider_config.get("api_base_env"):
+        return str(provider_config["api_base_env"])
+    mapped = PROVIDER_BASE_ENV_MAP.get(provider_key)
+    if mapped:
+        return mapped
+    return f"{provider_key.upper()}_API_BASE"
+
+
 # ============ Provider Detection ============
 
 
@@ -80,6 +98,7 @@ def detect_provider(model: str, relaxed_schema: bool) -> ProviderConfig:
     """
     base_url = None
     api_key = None
+    provider_type = None
 
     if "/" in model:
         provider_str, model_name = model.split("/", 1)
@@ -91,10 +110,24 @@ def detect_provider(model: str, relaxed_schema: bool) -> ProviderConfig:
             compat_base, compat_key_env = OPENAI_COMPATIBLE_PROVIDERS[provider_lower]
             base_url = os.environ.get(f"{provider_lower.upper()}_API_BASE", compat_base)
             api_key = os.environ.get(compat_key_env, "")
-        # Check if it's explicitly openai provider
-        elif provider_lower == "openai":
-            provider_type = ProviderType.OPENAI
         else:
+            from pantheon.utils.provider_registry import get_provider_config
+
+            catalog_config = get_provider_config(provider_lower)
+            if catalog_config.get("openai_compatible"):
+                provider_type = ProviderType.OPENAI
+                base_url = resolve_provider_base_url(
+                    provider_lower,
+                    catalog_config.get("base_url"),
+                )
+                api_key = get_provider_api_key(
+                    provider_lower,
+                    catalog_config.get("api_key_env"),
+                )
+        # Check if it's explicitly openai provider
+        if provider_lower == "openai":
+            provider_type = ProviderType.OPENAI
+        elif provider_type is None:
             # All other prefixed models use native SDK adapters (anthropic, gemini, etc.)
             provider_type = ProviderType.NATIVE
             model_name = model  # Keep full model string for native adapter
@@ -180,13 +213,16 @@ def reset_responses_api_cache() -> None:
     _RESPONSES_API_UNAVAILABLE.clear()
 
 
-def get_provider_base_url(provider_key: str) -> Optional[str]:
+def get_provider_base_url(
+    provider_key: str,
+    provider_config: dict | None = None,
+) -> Optional[str]:
     """Get a provider-specific Base URL override without applying global fallback."""
     from pantheon.settings import get_settings
+    from pantheon.utils.provider_registry import get_provider_config
 
-    env_key = PROVIDER_BASE_ENV_MAP.get(provider_key)
-    if not env_key:
-        return None
+    provider_config = provider_config or get_provider_config(provider_key)
+    env_key = get_provider_base_env(provider_key, provider_config)
     return get_settings().get_api_key(env_key)
 
 
@@ -208,7 +244,10 @@ def resolve_provider_base_url(
     2. Global ``LLM_API_BASE``
     3. Catalog/default base URL
     """
-    provider_base = get_provider_base_url(provider_key)
+    from pantheon.utils.provider_registry import get_provider_config
+
+    provider_config = get_provider_config(provider_key)
+    provider_base = get_provider_base_url(provider_key, provider_config)
     if provider_base:
         return provider_base
 

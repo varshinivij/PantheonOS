@@ -2686,17 +2686,18 @@ class ChatRoom(ToolSet):
         from pantheon.settings import LEGACY_API_KEY_ENV_MAP, get_settings
 
         settings = get_settings()
-        key_names = [
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GEMINI_API_KEY",
-            "DEEPSEEK_API_KEY",
-        ]
-        base_url_names = [
-            "OPENAI_API_BASE",
-            "ANTHROPIC_API_BASE",
-            "GEMINI_API_BASE",
-        ]
+        from pantheon.utils.llm_providers import get_provider_base_env
+        from pantheon.utils.provider_registry import load_catalog
+
+        key_names = []
+        base_url_names = []
+        for provider_key, provider_config in load_catalog().get("providers", {}).items():
+            key_env = provider_config.get("api_key_env")
+            if key_env and key_env not in key_names:
+                key_names.append(key_env)
+            base_env = get_provider_base_env(provider_key, provider_config)
+            if base_env and base_env not in base_url_names:
+                base_url_names.append(base_env)
         fallback_names = [
             "LLM_API_BASE",
             "LLM_API_KEY",

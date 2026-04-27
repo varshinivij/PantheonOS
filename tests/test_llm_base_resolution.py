@@ -115,3 +115,76 @@ async def test_acompletion_uses_global_llm_base_as_provider_base_fallback(
     assert resp.choices[0].message.content == "ok"
     assert captured["base_url"] == "https://fallback.example/v1"
     assert captured["api_key"] == "provider-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "api_key_env", "base_env", "expected_base"),
+    [
+        ("zai/glm-5", "ZAI_API_KEY", "ZAI_API_BASE", "https://zai-proxy.example/openai/v1"),
+        ("qwen/qwen-plus", "DASHSCOPE_API_KEY", "DASHSCOPE_API_BASE", "https://dashscope-proxy.example/v1"),
+    ],
+)
+async def test_acompletion_uses_catalog_provider_base_urls(
+    monkeypatch, model, api_key_env, base_env, expected_base
+):
+    from pantheon.utils import adapters as adapters_module
+    from pantheon.utils import llm as llm_module
+
+    captured: dict[str, str] = {}
+
+    class DummyAdapter:
+        async def acompletion(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "model": kwargs["model"],
+                },
+                {
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "choices": [],
+                },
+            ]
+
+    monkeypatch.setattr(adapters_module, "get_adapter", lambda _sdk: DummyAdapter())
+    monkeypatch.setenv(api_key_env, "provider-key")
+    monkeypatch.setenv(base_env, expected_base)
+    monkeypatch.delenv("LLM_API_BASE", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    resp = await llm_module.acompletion(
+        messages=[{"role": "user", "content": "hello"}],
+        model=model,
+        model_params={},
+    )
+
+    assert resp.choices[0].message.content == "ok"
+    assert captured["base_url"] == expected_base
+    assert captured["api_key"] == "provider-key"
+
+
+def test_detect_provider_uses_catalog_openai_compatible_base(monkeypatch):
+    from pantheon.utils.llm_providers import ProviderType, detect_provider
+
+    monkeypatch.setenv("ZAI_API_KEY", "zai-key")
+    monkeypatch.setenv("ZAI_API_BASE", "https://zai-proxy.example/openai/v1")
+    monkeypatch.delenv("LLM_API_BASE", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+    config = detect_provider("zai/glm-5.1", relaxed_schema=False)
+
+    assert config.provider_type == ProviderType.OPENAI
+    assert config.model_name == "glm-5.1"
+    assert config.base_url == "https://zai-proxy.example/openai/v1"
+    assert config.api_key == "zai-key"

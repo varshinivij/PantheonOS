@@ -651,6 +651,7 @@
       "sdk": "openai",
       "base_url": "https://open.bigmodel.cn/api/paas/v4",
       "api_key_env": "ZAI_API_KEY",
+      "api_base_env": "ZAI_API_BASE",
       "openai_compatible": true,
       "chat_output_token_param": "max_tokens",
       "models": {
@@ -889,6 +890,7 @@
       "sdk": "openai",
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "api_key_env": "DASHSCOPE_API_KEY",
+      "api_base_env": "DASHSCOPE_API_BASE",
       "openai_compatible": true,
       "chat_output_token_param": "max_tokens",
       "models": {
@@ -1329,6 +1331,7 @@
       "sdk": "openai",
       "base_url": "https://api.together.xyz/v1",
       "api_key_env": "TOGETHER_API_KEY",
+      "api_base_env": "TOGETHER_API_BASE",
       "openai_compatible": true,
       "chat_output_token_param": "max_tokens",
       "models": {

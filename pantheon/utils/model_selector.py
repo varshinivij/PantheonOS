@@ -33,6 +33,21 @@ CUSTOM_ENDPOINT_ENVS: dict[str, object] = {}
 
 SAVED_MODEL_PROVIDERS = ("openai", "anthropic", "gemini")
 
+
+def _saved_model_provider_order(raw: object = None) -> list[str]:
+    """Return providers to preserve in saved model settings.
+
+    Keep the historical core providers present even when empty, then include
+    any provider keys already present in user settings.
+    """
+    providers = list(SAVED_MODEL_PROVIDERS)
+    if isinstance(raw, dict):
+        for provider in raw:
+            if isinstance(provider, str) and provider not in providers:
+                providers.append(provider)
+
+    return providers
+
 # Sentinel object for negative cache (better than empty string)
 _NOT_FOUND = object()
 
@@ -94,11 +109,13 @@ def reset_ollama_cache() -> None:
 
 def normalize_saved_models(raw: object) -> dict[str, list[str]]:
     """Normalize ``models.saved_models`` into provider -> bare model names."""
-    normalized: dict[str, list[str]] = {provider: [] for provider in SAVED_MODEL_PROVIDERS}
+    normalized: dict[str, list[str]] = {
+        provider: [] for provider in _saved_model_provider_order(raw)
+    }
     if not isinstance(raw, dict):
         return normalized
 
-    for provider in SAVED_MODEL_PROVIDERS:
+    for provider in normalized:
         seen: set[str] = set()
         values = raw.get(provider, [])
         if not isinstance(values, list):

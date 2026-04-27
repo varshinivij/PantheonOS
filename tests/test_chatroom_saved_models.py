@@ -122,6 +122,7 @@ async def test_saved_models_round_trip():
                 "openai": ["openai/gpt-4.1", "gpt-4.1-mini"],
                 "anthropic": ["claude-sonnet-4-20250514"],
                 "gemini": [],
+                "zai": ["zai/glm-5.1", "glm-4.6"],
             },
         )
 
@@ -131,6 +132,7 @@ async def test_saved_models_round_trip():
             "openai": ["gpt-4.1", "gpt-4.1-mini"],
             "anthropic": ["claude-sonnet-4-20250514"],
             "gemini": [],
+            "zai": ["glm-5.1", "glm-4.6"],
         },
     )
     settings.reload.assert_called_once()
