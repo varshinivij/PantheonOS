@@ -137,34 +137,46 @@ class Endpoint(FileTransferToolSet):
 
         Unified startup sequence for MCP servers and builtin services.
         """
-        # ===== Phase 1: Load MCP Config and Start Gateway =====
+        # ===== Phase 1: Load MCP Config, pre-set URI, start gateway off critical path =====
         logger.info("Phase 1: Loading MCP config and starting gateway...")
         mcp_config = get_settings().get_mcp_config()
         result = await self.mcp_manager.load_config(mcp_config)
         if result.get("errors"):
             logger.warning(f"MCP configuration loading had errors: {result['errors']}")
 
-        # Always start gateway (for Package Runtime, dynamic server addition, etc.)
-        await self.mcp_manager._gateway.start_gateway()
+        # Pre-set ENDPOINT_MCP_URI immediately — get_unified_uri() is a pure string
+        # computation that does not require the gateway to be running.
         unified_uri = self.mcp_manager.get_unified_uri()
         os.environ["ENDPOINT_MCP_URI"] = unified_uri
-        logger.info(f"MCP Gateway started at {unified_uri}")
 
-        # Auto-start configured MCP servers
+        # Start gateway and mount endpoint tools as a background task so they don't
+        # block NATS subscription. Package Runtime only needs the gateway when a tool
+        # call is actually executed (seconds into the session, after the LLM responds),
+        # so there is no practical race condition.
         auto_start_mcp = mcp_config.get("auto_start", [])
-        if auto_start_mcp:
-            logger.info(f"Auto-starting MCP servers: {auto_start_mcp}")
-            result = await self.mcp_manager.start_services(auto_start_mcp)
-            if not result.get("success"):
-                logger.warning(
-                    f"Some MCP servers failed to start: {result.get('errors', [])}"
-                )
-            else:
-                logger.info(
-                    f"MCP servers started successfully: {result.get('started', [])}"
-                )
-        else:
-            logger.info("No MCP servers configured for auto-start")
+
+        async def _start_gateway_background():
+            try:
+                await self.mcp_manager._gateway.start_gateway()
+                logger.info(f"MCP Gateway started at {unified_uri}")
+                if auto_start_mcp:
+                    logger.info(f"Auto-starting MCP servers: {auto_start_mcp}")
+                    result = await self.mcp_manager.start_services(auto_start_mcp)
+                    if not result.get("success"):
+                        logger.warning(
+                            f"Some MCP servers failed to start: {result.get('errors', [])}"
+                        )
+                    else:
+                        logger.info(
+                            f"MCP servers started successfully: {result.get('started', [])}"
+                        )
+                else:
+                    logger.info("No MCP servers configured for auto-start")
+                await self._start_endpoint_mcp_server()
+            except Exception as e:
+                logger.error(f"MCP gateway background startup failed: {e}")
+
+        asyncio.create_task(_start_gateway_background())
 
         # ===== Phase 2: Start Builtin ToolSet Services =====
         logger.info("Phase 2: Starting builtin ToolSet services...")
@@ -184,9 +196,7 @@ class Endpoint(FileTransferToolSet):
         # ===== Phase 3: Health checks are now handled asynchronously =====
         logger.info("Phase 3: MCP servers initialized with async health monitoring")
 
-        # ===== Phase 4: Expose Endpoint as MCP Server =====
-        logger.info("Phase 4: Starting Endpoint MCP server for package API access...")
-        await self._start_endpoint_mcp_server()
+        # Phase 4 (mount endpoint tools) now runs in _start_gateway_background() above.
 
     async def _start_endpoint_mcp_server(self):
         """Mount Endpoint tools to the unified MCP gateway.

@@ -113,10 +113,9 @@ class UnifiedMCPGateway:
         await self._wait_until_ready()
 
     async def _wait_until_ready(
-        self, timeout: float = 30.0, interval: float = 0.1
+        self, timeout: float = 30.0, interval: float = 0.05
     ) -> None:
         """Wait until gateway HTTP server is ready to accept connections."""
-        import socket
         import time
 
         start_time = time.time()
@@ -129,14 +128,16 @@ class UnifiedMCPGateway:
                         f"Gateway server task failed: {exc}"
                     ) from exc
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.5)
-                    s.connect((self.host, self.port))
-                    logger.info(
-                        f"Unified MCP Gateway started at http://{self.host}:{self.port}/mcp"
-                    )
-                    return
-            except (ConnectionRefusedError, socket.timeout, OSError):
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.host, self.port), timeout=0.5
+                )
+                writer.close()
+                await writer.wait_closed()
+                logger.info(
+                    f"Unified MCP Gateway started at http://{self.host}:{self.port}/mcp"
+                )
+                return
+            except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
                 await asyncio.sleep(interval)
 
         raise RuntimeError(

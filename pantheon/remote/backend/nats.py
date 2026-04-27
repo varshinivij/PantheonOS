@@ -549,11 +549,11 @@ class NATSRemoteWorker(RemoteWorker):
             logger.info(f"[NATSWorker.run] NATS connected: {self.nc.connected_url}")
 
         self._running = True
-        await self._register_to_kv_store()
-        logger.info(f"[NATSWorker.run] KV store registered, subscribing to: {self.service_subject}")
 
-        self._subscription = await self.nc.subscribe(
-            self.service_subject, cb=self._handle_request
+        # KV registration and subject subscription are independent — run in parallel.
+        self._subscription, _ = await asyncio.gather(
+            self.nc.subscribe(self.service_subject, cb=self._handle_request),
+            self._register_to_kv_store(),
         )
         logger.info(f"NATS worker: {self.service_subject} registered.")
 
