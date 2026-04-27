@@ -20,9 +20,9 @@ def test_glm_5_1_model_specs():
     assert glm_5_1["max_input_tokens"] == 200000
     assert glm_5_1["max_output_tokens"] == 128000
 
-    # Check pricing
-    assert glm_5_1["input_cost_per_million"] == 1.0
-    assert glm_5_1["output_cost_per_million"] == 4.0
+    # Check pricing (updated 2026-04-27)
+    assert glm_5_1["input_cost_per_million"] == 1.4
+    assert glm_5_1["output_cost_per_million"] == 4.4
 
     # Check capabilities
     assert glm_5_1["supports_vision"] is True

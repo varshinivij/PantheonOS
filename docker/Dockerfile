@@ -200,7 +200,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     # Paper writing and graph maker dependencies
     pandoc \
-    pandoc-crossref \
     librsvg2-bin \
     libgdk-pixbuf-2.0-0 \
     shared-mime-info \
@@ -317,7 +316,7 @@ RUN echo "Pre-warming biomcp uv run cache into /app/.uv-cache..." \
 # ============================================
 # Layer E — CLI Tools for Report Generation (~50MB, stable)
 # ============================================
-# Install monolith (HTML bundler) and tectonic (LaTeX compiler)
+# Install monolith (HTML bundler), tectonic (LaTeX compiler), and pandoc-crossref
 # These are optional tools - if download fails, the build continues
 # They can be installed at runtime if needed
 RUN (curl -L --retry 3 --retry-delay 5 --max-time 60 \
@@ -329,7 +328,14 @@ RUN (curl -L --retry 3 --retry-delay 5 --max-time 60 \
     -o /tmp/tectonic.tar.gz && \
     tar -xzf /tmp/tectonic.tar.gz -C /usr/local/bin && \
     rm -f /tmp/tectonic.tar.gz) || \
-    echo "Warning: tectonic download failed, skipping (can be installed at runtime)"
+    echo "Warning: tectonic download failed, skipping (can be installed at runtime)" && \
+    (curl -L --retry 3 --retry-delay 5 --max-time 60 \
+    https://github.com/lierdakil/pandoc-crossref/releases/download/v0.3.18.0/pandoc-crossref-Linux.tar.xz \
+    -o /tmp/pandoc-crossref.tar.xz && \
+    tar -xJf /tmp/pandoc-crossref.tar.xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/pandoc-crossref && \
+    rm -f /tmp/pandoc-crossref.tar.xz) || \
+    echo "Warning: pandoc-crossref download failed, skipping (can be installed at runtime)"
 
 # Layer F — Workspace directory (stable)
 RUN mkdir -p /workspace
