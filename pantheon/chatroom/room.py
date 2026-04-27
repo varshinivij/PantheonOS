@@ -1565,7 +1565,7 @@ class ChatRoom(ToolSet):
     async def change_template_scope(
         self,
         kind: str,
-        name: str,
+        source_path: str,
         target_scope: str,
         overwrite: bool = False,
     ) -> dict:
@@ -1573,7 +1573,7 @@ class ChatRoom(ToolSet):
 
         Args:
             kind: "agents", "teams", or "skills"
-            name: Template ID, agent ID, or skill directory name
+            source_path: Absolute path to the source file or directory
             target_scope: "global" or "project"
             overwrite: If True, overwrite existing at target
         """
@@ -1591,47 +1591,50 @@ class ChatRoom(ToolSet):
             return {"success": False, "message": f"Unknown kind: {kind}. Use agents/teams/skills"}
 
         project_dir, global_dir = kind_dirs[kind]
+        src = Path(source_path)
+
+        if not src.exists():
+            return {"success": False, "message": f"Source not found: {source_path}"}
+
+        # Determine which base this source belongs to and compute relative path
+        if str(src).startswith(str(project_dir)):
+            src_base = project_dir
+        elif str(src).startswith(str(global_dir)):
+            src_base = global_dir
+        else:
+            return {"success": False, "message": f"Source path not in project or global dir"}
 
         if target_scope == "global":
-            src_base, dst_base = project_dir, global_dir
+            dst_base = global_dir
         elif target_scope == "project":
-            src_base, dst_base = global_dir, project_dir
+            dst_base = project_dir
         else:
             return {"success": False, "message": f"Unknown target_scope: {target_scope}"}
 
         try:
             if kind == "skills":
-                src = src_base / name
-                dst = dst_base / name
-                if not src.exists():
-                    return {"success": False, "message": f"Skill '{name}' not found at {src}"}
+                # For skills, move the directory containing SKILL.md
+                skill_dir = src if src.is_dir() else src.parent
+                rel = skill_dir.relative_to(src_base)
+                dst = dst_base / rel
                 if dst.exists() and not overwrite:
-                    return {"success": False, "message": f"Already exists at {dst}. Set overwrite=True to replace.", "conflict": True}
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
                 dst_base.mkdir(parents=True, exist_ok=True)
                 if dst.exists():
                     shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-                shutil.rmtree(src)
+                shutil.copytree(skill_dir, dst)
+                shutil.rmtree(skill_dir)
             else:
-                # agents and teams are .md files
-                src = src_base / f"{name}.md"
-                # Also check in subdirectories
-                if not src.exists():
-                    for p in src_base.rglob(f"{name}.md"):
-                        src = p
-                        break
-                if not src.exists():
-                    return {"success": False, "message": f"{kind[:-1].title()} '{name}' not found"}
                 rel = src.relative_to(src_base)
                 dst = dst_base / rel
                 if dst.exists() and not overwrite:
-                    return {"success": False, "message": f"Already exists at {dst}. Set overwrite=True to replace.", "conflict": True}
+                    return {"success": False, "message": f"Already exists at {dst}.", "conflict": True}
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
                 src.unlink()
 
-            logger.info(f"[change_scope] Moved {kind}/{name} → {target_scope}")
-            return {"success": True, "message": f"Moved to {target_scope}", "kind": kind, "name": name}
+            logger.info(f"[change_scope] Moved {kind}/{rel} → {target_scope}")
+            return {"success": True, "message": f"Moved to {target_scope}"}
         except Exception as e:
             logger.error(f"[change_scope] Failed: {e}")
             return {"success": False, "message": str(e)}
