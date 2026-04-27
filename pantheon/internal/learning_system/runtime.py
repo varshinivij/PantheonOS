@@ -27,12 +27,13 @@ class LearningRuntime:
         self.extractor: SkillExtractor | None = None
         self._initialized = False
 
-    def initialize(self, pantheon_dir: Path) -> None:
+    def initialize(self, pantheon_dir: Path, global_pantheon_dir: Path | None = None) -> None:
         """Initialize all components."""
         skills_dir = resolve_skills_dir(pantheon_dir)
         runtime_dir = resolve_skills_runtime_dir(pantheon_dir)
+        global_skills_dir = resolve_skills_dir(global_pantheon_dir) if global_pantheon_dir else None
 
-        self.store = SkillStore(skills_dir, runtime_dir)
+        self.store = SkillStore(skills_dir, runtime_dir, global_skills_dir=global_skills_dir)
         self.injector = SkillInjector(
             self.store,
             disabled_skills=self.config.get("disabled_skills"),

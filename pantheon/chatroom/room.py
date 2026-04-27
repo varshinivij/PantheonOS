@@ -1523,10 +1523,15 @@ class ChatRoom(ToolSet):
                     if hasattr(ts, 'path'):
                         ts.path = Path(resolved)
 
-            # 7. Reset memory system — singleton + cached plugins
+            # 7. Reset memory + learning system singletons
             try:
                 import pantheon.internal.memory_system.plugin as _mem_plugin
                 _mem_plugin._memory_runtime = None
+            except Exception:
+                pass
+            try:
+                import pantheon.internal.learning_system.plugin as _learn_plugin
+                _learn_plugin._learning_runtime = None
             except Exception:
                 pass
             # Recreate plugins with new settings so MemoryRuntime

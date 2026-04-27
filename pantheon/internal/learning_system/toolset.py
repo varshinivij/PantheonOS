@@ -65,12 +65,13 @@ class SkillToolSet(ToolSet):
         headers = store.scan_headers()
         skills = [
             {
-                "name": h.name,  # deprecated alias for display_name
+                "name": h.name,
                 "display_name": h.name,
-                "path": h.path,  # relative path key, e.g. "bioinformatics/scrna-qc"
+                "path": h.path,
                 "identifier": h.path,
                 "description": h.description,
                 "tags": h.tags,
+                "scope": getattr(h, 'scope', 'project'),
             }
             for h in headers
         ]

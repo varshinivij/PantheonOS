@@ -109,9 +109,16 @@ def _create_learning_plugin(config: dict, settings) -> LearningPlugin | None:
     if _learning_runtime is None:
         from pantheon.internal.memory_system.config import resolve_pantheon_dir
         from .config import get_learning_system_config
+        from pathlib import Path
+
+        pantheon_dir = resolve_pantheon_dir(settings)
+        global_pantheon_dir = Path.home() / ".pantheon"
+        # Don't use global as fallback if it's the same as project dir
+        if global_pantheon_dir.resolve() == pantheon_dir.resolve():
+            global_pantheon_dir = None
 
         _learning_runtime = LearningRuntime(get_learning_system_config(settings))
-        _learning_runtime.initialize(resolve_pantheon_dir(settings))
+        _learning_runtime.initialize(pantheon_dir, global_pantheon_dir=global_pantheon_dir)
     return LearningPlugin(_learning_runtime)
 
 
