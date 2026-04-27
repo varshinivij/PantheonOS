@@ -514,8 +514,9 @@ class TemplateManager:
                     return f"{kind}/{fallback_id}.md"
                 p = Path(source_path)
                 user_base = self.agents_dir if kind == "agents" else self.teams_dir
+                global_base = self.settings.global_agents_dir if kind == "agents" else self.settings.global_teams_dir
                 system_base = self.system_templates_dir / kind
-                for base in (user_base, system_base):
+                for base in (user_base, global_base, system_base):
                     try:
                         rel = p.relative_to(base)
                         return f"{kind}/{rel.as_posix()}"
@@ -530,6 +531,8 @@ class TemplateManager:
                         "id": tmpl.id,
                         "name": tmpl.name,
                         "path": _get_rel_path(tmpl.source_path, tmpl.id, "teams"),
+                        "source_path": tmpl.source_path,
+                        "scope": getattr(tmpl, 'scope', 'project'),
                     }
                     for tmpl in self.file_manager.list_teams(resolve_refs=False)
                 ]
@@ -543,6 +546,8 @@ class TemplateManager:
                         "id": agent.id,
                         "name": agent.name,
                         "path": _get_rel_path(agent.source_path, agent.id, "agents"),
+                        "source_path": agent.source_path,
+                        "scope": getattr(agent, 'scope', 'project'),
                     }
                     for agent in self.file_manager.list_agents()
                 ]
