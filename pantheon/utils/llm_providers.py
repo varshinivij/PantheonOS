@@ -585,9 +585,10 @@ async def call_llm_provider(
                 response_format=response_format,
                 process_chunk=process_chunk,
                 base_url=config.base_url,
+                api_key=config.api_key,
                 model_params=model_params,
             )
-        except _openai_mod.NotFoundError as e:
+        except (_openai_mod.NotFoundError, _openai_mod.OpenAIError) as e:
             # Endpoint has no /v1/responses (custom proxy, older gateway) or
             # the model isn't recognised on that endpoint. Mark unavailable
             # so we don't probe again, and fall through to Chat Completions

@@ -385,6 +385,7 @@ async def acompletion_responses(
     response_format: Any | None = None,
     process_chunk: Callable | None = None,
     base_url: str | None = None,
+    api_key: str | None = None,
     model_params: dict | None = None,
     num_retries: int = 3,
 ) -> dict:
@@ -398,10 +399,11 @@ async def acompletion_responses(
 
     # ========== Build client ==========
     effective_base, effective_key = get_openai_effective_config()
+    resolved_key = api_key or effective_key or None
     if base_url:
-        client = AsyncOpenAI(base_url=base_url, api_key=effective_key or None)
+        client = AsyncOpenAI(base_url=base_url, api_key=resolved_key)
     elif effective_base:
-        client = AsyncOpenAI(base_url=effective_base, api_key=effective_key or None)
+        client = AsyncOpenAI(base_url=effective_base, api_key=resolved_key)
     else:
         client = AsyncOpenAI()
 
