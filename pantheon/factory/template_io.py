@@ -936,9 +936,9 @@ class FileBasedTemplateManager:
             FileNotFoundError: If agent not found
             ValueError: If agent is referenced by teams
         """
-        path = self.agents_dir / f"{agent_id}.md"
+        path = self._resolve_template_path("agents", agent_id)
 
-        if not path.exists():
+        if not path or not path.exists():
             raise FileNotFoundError(f"Agent {agent_id} not found")
 
         # Check if referenced by any teams
@@ -1049,9 +1049,9 @@ class FileBasedTemplateManager:
         Raises:
             FileNotFoundError: If team not found
         """
-        path = self.teams_dir / f"{team_id}.md"
+        path = self._resolve_template_path("teams", team_id)
 
-        if not path.exists():
+        if not path or not path.exists():
             raise FileNotFoundError(f"Team {team_id} not found")
 
         path.unlink()
