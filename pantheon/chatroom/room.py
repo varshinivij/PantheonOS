@@ -359,6 +359,34 @@ class ChatRoom(ToolSet):
             "agent_count": agent_count,
         }
 
+    def _apply_model_to_template(
+        self,
+        template_obj: dict,
+        model: str | None,
+        *,
+        validate_model: bool = True,
+    ) -> dict:
+        """Return a normalized team template with every agent using model."""
+        if model is None:
+            return copy.deepcopy(template_obj)
+
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model must be a non-empty string when provided")
+
+        model = model.strip()
+        if validate_model:
+            from pantheon.agent import _parse_thinking_suffix
+
+            clean_model, _thinking = _parse_thinking_suffix(model)
+            is_valid, error_msg = self._validate_model_provider(clean_model)
+            if not is_valid:
+                raise ValueError(error_msg)
+
+        team_config = self.template_manager.dict_to_team_config(template_obj)
+        for agent_config in team_config.agents:
+            agent_config.model = model
+        return team_config.to_dict()
+
     async def get_team_for_chat(self, chat_id: str, save_to_memory: bool = True) -> PantheonTeam:
         """Get the team for a specific chat, creating from memory if needed."""
         # 0. If default_team is set, always use it (bypass template system)
@@ -521,17 +549,54 @@ class ChatRoom(ToolSet):
         return team
 
     @tool
-    async def setup_team_for_chat(self, chat_id: str, template_obj: dict, save_to_memory: bool = True):
-        """Setup/update team for a specific chat using full template object."""
+    async def setup_team_for_chat(
+        self,
+        chat_id: str,
+        template_obj: dict | None = None,
+        save_to_memory: bool = True,
+        model: str | None = None,
+        validate_model: bool = True,
+    ):
+        """Setup/update team for a chat using a template object and/or model override."""
         try:
+            # Read-only: storing template/model config, no need to fix
+            memory = await run_func(self.memory_manager.get_memory, chat_id)
+
+            if template_obj is None:
+                if model is None:
+                    return {
+                        "success": False,
+                        "message": "template_obj or model is required",
+                    }
+
+                extra_data = getattr(memory, "extra_data", None) or {}
+                template_obj = copy.deepcopy(extra_data.get("team_template"))
+                if not template_obj:
+                    default_template = self.template_manager.get_template("default")
+                    if not default_template:
+                        return {
+                            "success": False,
+                            "message": "No existing team template and default template not found",
+                        }
+                    template_obj = dataclasses.asdict(default_template)
+
+            if model is not None:
+                template_obj = self._apply_model_to_template(
+                    template_obj,
+                    model,
+                    validate_model=validate_model,
+                )
+
             logger.info(
                 f"Setting up team for chat {chat_id} with template: {template_obj.get('name', 'unknown')}"
             )
 
             # Store full template in memory using consolidated method
-            # Read-only: storing template, no need to fix
-            memory = await run_func(self.memory_manager.get_memory, chat_id)
-            self._save_team_template_to_memory(memory, template_obj, persist=save_to_memory)
+            template_dict = self._save_team_template_to_memory(
+                memory,
+                template_obj,
+                persist=save_to_memory,
+            )
 
             memory.delete_metadata("active_agent")
             
@@ -928,6 +993,8 @@ class ChatRoom(ToolSet):
         template_obj: dict | None = None,
         chat_config: dict | None = None,
         project_metadata: dict | None = None,
+        model: str | None = None,
+        validate_model: bool = True,
     ) -> dict:
         """Create a new chat.
 
@@ -940,6 +1007,8 @@ class ChatRoom(ToolSet):
             template_obj: Optional full team template object to bind at creation time.
             chat_config: Optional per-chat UI/runtime configuration blob.
             project_metadata: Optional extra project metadata to persist with the chat.
+            model: Optional model name or tag to apply to every agent in the selected template.
+            validate_model: If True, verify the model provider has valid credentials.
         """
         if template_id and template_obj:
             return {
@@ -979,6 +1048,24 @@ class ChatRoom(ToolSet):
             initial_template_dict = copy.deepcopy(
                 validation.get("template") or template_obj
             )
+
+        if model is not None:
+            if initial_template_dict is None:
+                default_template = self.template_manager.get_template("default")
+                if not default_template:
+                    return {
+                        "success": False,
+                        "message": "Default template not found in template manager",
+                    }
+                initial_template_dict = dataclasses.asdict(default_template)
+            try:
+                initial_template_dict = self._apply_model_to_template(
+                    initial_template_dict,
+                    model,
+                    validate_model=validate_model,
+                )
+            except ValueError as exc:
+                return {"success": False, "message": str(exc)}
 
         memory = await run_func(self.memory_manager.new_memory, chat_name)
         memory.set_metadata("last_activity_date", datetime.now().isoformat())

@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,32 @@ def _make_chatroom(tmp_path: Path) -> ChatRoom:
     chatroom.template_manager = get_template_manager(tmp_path)
     chatroom.chat_teams = {}
     return chatroom
+
+
+def test_model_parameters_are_appended_to_existing_tool_signatures():
+    create_params = list(inspect.signature(ChatRoom.create_chat).parameters)
+    setup_params = list(inspect.signature(ChatRoom.setup_team_for_chat).parameters)
+
+    assert create_params[:9] == [
+        "self",
+        "chat_name",
+        "project_name",
+        "workspace_path",
+        "workspace_mode",
+        "template_id",
+        "template_obj",
+        "chat_config",
+        "project_metadata",
+    ]
+    assert create_params[-2:] == ["model", "validate_model"]
+
+    assert setup_params[:4] == [
+        "self",
+        "chat_id",
+        "template_obj",
+        "save_to_memory",
+    ]
+    assert setup_params[-2:] == ["model", "validate_model"]
 
 
 @pytest.mark.asyncio
@@ -92,6 +119,147 @@ async def test_create_chat_can_initialize_template_workspace_and_chat_config(tmp
     assert chat_summary["chat_config"] == chat_config
     assert chat_summary["template"] == result["template"]
     assert chat_summary["project"]["color"] == "blue"
+
+
+@pytest.mark.asyncio
+async def test_create_chat_applies_model_after_template_id_resolution(tmp_path: Path):
+    chatroom = _make_chatroom(tmp_path)
+
+    result = await ChatRoom.create_chat(
+        chatroom,
+        chat_name="Model Override Chat",
+        template_id="default",
+        model="openai/gpt-5.4",
+        validate_model=False,
+    )
+
+    assert result["success"] is True
+    assert result["template"]["id"] == "default"
+    assert result["template"]["agent_count"] > 0
+
+    memory = chatroom.memory_manager.get_memory(result["chat_id"])
+    team_template = memory.extra_data["team_template"]
+    assert team_template["id"] == "default"
+    assert {agent["model"] for agent in team_template["agents"]} == {"openai/gpt-5.4"}
+
+
+@pytest.mark.asyncio
+async def test_setup_team_for_chat_can_update_only_saved_template_model(tmp_path: Path):
+    chatroom = _make_chatroom(tmp_path)
+    template_obj = {
+        "id": "scoped-team",
+        "name": "Scoped Team",
+        "description": "Team created together with the chat.",
+        "agents": [
+            {
+                "id": "analyst",
+                "name": "Analyst",
+                "model": "gpt-4.1",
+                "instructions": "Only work inside the assigned workspace.",
+            },
+            {
+                "id": "reviewer",
+                "name": "Reviewer",
+                "model": "gpt-4.1-mini",
+                "instructions": "Review the analyst's work.",
+            },
+        ],
+    }
+
+    created = await ChatRoom.create_chat(
+        chatroom,
+        chat_name="Model Update Chat",
+        template_obj=template_obj,
+    )
+    chat_id = created["chat_id"]
+    chatroom.chat_teams[chat_id] = object()
+
+    result = await ChatRoom.setup_team_for_chat(
+        chatroom,
+        chat_id=chat_id,
+        model="openai/gpt-5.4",
+        validate_model=False,
+    )
+
+    assert result["success"] is True
+    assert result["chat_id"] == chat_id
+    assert chat_id not in chatroom.chat_teams
+
+    memory = chatroom.memory_manager.get_memory(chat_id)
+    team_template = memory.extra_data["team_template"]
+    assert team_template["id"] == "scoped-team"
+    assert {agent["model"] for agent in team_template["agents"]} == {"openai/gpt-5.4"}
+
+
+@pytest.mark.asyncio
+async def test_create_chat_validates_model_by_default_before_creating_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    chatroom = _make_chatroom(tmp_path)
+
+    monkeypatch.setattr(
+        ChatRoom,
+        "_validate_model_provider",
+        lambda _self, _model: (False, "Provider unavailable"),
+    )
+
+    result = await ChatRoom.create_chat(
+        chatroom,
+        chat_name="Rejected Model Chat",
+        template_id="default",
+        model="missing-provider/model",
+    )
+
+    assert result["success"] is False
+    assert result["message"] == "Provider unavailable"
+    assert chatroom.memory_manager.list_memories() == []
+
+
+@pytest.mark.asyncio
+async def test_setup_team_for_chat_validates_model_by_default_without_mutating_saved_template(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    chatroom = _make_chatroom(tmp_path)
+    template_obj = {
+        "id": "scoped-team",
+        "name": "Scoped Team",
+        "description": "Team created together with the chat.",
+        "agents": [
+            {
+                "id": "analyst",
+                "name": "Analyst",
+                "model": "gpt-4.1",
+                "instructions": "Only work inside the assigned workspace.",
+            }
+        ],
+    }
+    created = await ChatRoom.create_chat(
+        chatroom,
+        chat_name="Rejected Setup Model Chat",
+        template_obj=template_obj,
+    )
+    chat_id = created["chat_id"]
+
+    monkeypatch.setattr(
+        ChatRoom,
+        "_validate_model_provider",
+        lambda _self, _model: (False, "Provider unavailable"),
+    )
+
+    result = await ChatRoom.setup_team_for_chat(
+        chatroom,
+        chat_id=chat_id,
+        model="missing-provider/model",
+    )
+
+    assert result["success"] is False
+    assert "Provider unavailable" in result["message"]
+
+    memory = chatroom.memory_manager.get_memory(chat_id)
+    team_template = memory.extra_data["team_template"]
+    assert team_template["agents"][0]["model"] == "gpt-4.1"
 
 
 @pytest.mark.asyncio
