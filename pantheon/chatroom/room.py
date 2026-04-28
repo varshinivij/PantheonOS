@@ -1603,12 +1603,14 @@ class ChatRoom(ToolSet):
             self.template_manager = get_template_manager(work_dir=Path(resolved))
             logger.info(f"[switch_project] templates reloaded")
 
-            # 6. Update FileManager root on Endpoint (if embedded)
+            # 6. Update all toolset workspace roots on Endpoint (if embedded)
             if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
                 tsm = self._endpoint.toolset_manager
                 for ts in tsm.local_toolsets.values():
                     if hasattr(ts, 'path'):
                         ts.path = Path(resolved)
+                    if hasattr(ts, 'workdir'):
+                        ts.workdir = Path(resolved) if isinstance(ts.workdir, Path) else resolved
 
             # 7. Reset memory + learning system singletons
             try:
