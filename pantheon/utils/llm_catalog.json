@@ -10,6 +10,22 @@
       "chat_output_token_param": "max_completion_tokens",
       "responses_output_token_param": "max_output_tokens",
       "models": {
+        "gpt-5.5": {
+          "max_input_tokens": 1000000,
+          "max_output_tokens": 64000,
+          "input_cost_per_million": 3.0,
+          "output_cost_per_million": 12.0,
+          "supports_vision": true,
+          "supports_function_calling": true,
+          "supports_response_schema": true,
+          "supports_reasoning": true,
+          "supports_audio_input": false,
+          "supports_audio_output": false,
+          "supports_web_search": false,
+          "supports_pdf_input": true,
+          "supports_computer_use": false,
+          "supports_assistant_prefill": false
+        },
         "gpt-5.4-pro": {
           "max_input_tokens": 1000000,
           "max_output_tokens": 64000,
@@ -1429,6 +1445,16 @@
       "auth_mode": "oauth",
       "responses_output_token_param": "max_output_tokens",
       "models": {
+        "gpt-5.5": {
+          "max_input_tokens": 1000000,
+          "max_output_tokens": 64000,
+          "input_cost_per_million": 3.0,
+          "output_cost_per_million": 12.0,
+          "supports_vision": true,
+          "supports_function_calling": true,
+          "supports_response_schema": true,
+          "supports_reasoning": true
+        },
         "gpt-5.4": {
           "max_input_tokens": 1000000,
           "max_output_tokens": 64000,

@@ -154,11 +154,11 @@ DEFAULT_PROVIDER_PRIORITY = ["openai", "anthropic", "gemini", "gemini-cli", "zai
 # Quality levels map to MODEL LISTS (not single models) for fallback chains
 # Models within each level are ordered by preference
 DEFAULT_PROVIDER_MODELS = {
-    # OpenAI: GPT-5.4 series
+    # OpenAI: GPT-5.5/5.4 series
     # https://platform.openai.com/docs/models
     "openai": {
-        "high": ["openai/gpt-5.4", "openai/gpt-5.2"],
-        "normal": ["openai/gpt-5.4", "openai/gpt-5.2-codex", "openai/gpt-5.2", "openai/gpt-5"],
+        "high": ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5.2"],
+        "normal": ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5.2-codex", "openai/gpt-5.2", "openai/gpt-5"],
         "low": ["openai/gpt-5.4-mini", "openai/gpt-5.4-nano", "openai/gpt-5-mini", "openai/gpt-4.1-mini"],
     },
     # Anthropic: Claude 4.6 series
@@ -261,7 +261,7 @@ DEFAULT_PROVIDER_MODELS = {
     },
     # Codex: OpenAI via ChatGPT OAuth (free with ChatGPT Plus)
     "codex": {
-        "high": ["codex/gpt-5.4", "codex/gpt-5.2-codex"],
+        "high": ["codex/gpt-5.5", "codex/gpt-5.4", "codex/gpt-5.2-codex"],
         "normal": ["codex/gpt-5.4-mini", "codex/gpt-5"],
         "low": ["codex/gpt-5.4-mini", "codex/o4-mini"],
     },
