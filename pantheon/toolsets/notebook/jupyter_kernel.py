@@ -18,6 +18,7 @@ import nbformat.v4
 from jupyter_client import AsyncKernelManager
 from jupyter_client.asynchronous import AsyncKernelClient
 
+from pantheon.internal.package_runtime.context import build_context_env
 from pantheon.remote.backend.base import RemoteBackend, StreamMessage, StreamType
 from pantheon.toolset import ToolSet, tool
 from pantheon.utils.log import logger
