@@ -1606,11 +1606,20 @@ class ChatRoom(ToolSet):
             # 6. Update all toolset workspace roots on Endpoint (if embedded)
             if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
                 tsm = self._endpoint.toolset_manager
+                def _update_workdir(obj):
+                    if hasattr(obj, 'path'):
+                        obj.path = Path(resolved)
+                    if hasattr(obj, 'workdir'):
+                        obj.workdir = Path(resolved) if isinstance(obj.workdir, Path) else resolved
                 for ts in tsm.local_toolsets.values():
-                    if hasattr(ts, 'path'):
-                        ts.path = Path(resolved)
-                    if hasattr(ts, 'workdir'):
-                        ts.workdir = Path(resolved) if isinstance(ts.workdir, Path) else resolved
+                    _update_workdir(ts)
+                    # Also update nested toolsets (e.g. IntegratedNotebook -> NotebookContents)
+                    for attr_name in dir(ts):
+                        if attr_name.startswith('_'):
+                            continue
+                        attr = getattr(ts, attr_name, None)
+                        if attr and hasattr(attr, 'workdir'):
+                            _update_workdir(attr)
 
             # 7. Reset memory + learning system singletons
             try:
