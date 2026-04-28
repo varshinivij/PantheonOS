@@ -165,9 +165,9 @@ DEFAULT_PROVIDER_MODELS = {
     # https://docs.anthropic.com/en/docs/about-claude/models/overview
     "anthropic": {
         "high": [
+            "anthropic/claude-opus-4-7",
             "anthropic/claude-opus-4-6",
             "anthropic/claude-opus-4-5-20251101",
-            "anthropic/claude-opus-4-20250514",
         ],
         "normal": [
             "anthropic/claude-sonnet-4-6",
