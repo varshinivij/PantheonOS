@@ -50,8 +50,15 @@ _GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 _V1ALPHA_PREFIXES = ("gemini-3", "gemini-4")
 
 
-def _api_version(model: str) -> str:
-    """Select API version based on model name."""
+def _api_version(model: str, base_url: str | None = None) -> str:
+    """Select API version based on model name.
+
+    v1alpha is only used for gemini-3+ on the official Google API.
+    Third-party proxies generally only support v1beta.
+    """
+    resolved_base = _get_gemini_api_base(base_url)
+    if resolved_base != _GEMINI_API_BASE:
+        return "v1beta"
     bare = model.split("/")[-1] if "/" in model else model
     for prefix in _V1ALPHA_PREFIXES:
         if bare.startswith(prefix):
@@ -81,7 +88,7 @@ def _build_url(
 ) -> str:
     """Build the Gemini REST API URL."""
     bare = model.split("/")[-1] if "/" in model else model
-    version = _api_version(model)
+    version = _api_version(model, base_url)
     endpoint = "streamGenerateContent" if stream else "generateContent"
     url = f"{_get_gemini_api_base(base_url)}/{version}/models/{bare}:{endpoint}?key={api_key}"
     if stream:
