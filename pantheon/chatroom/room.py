@@ -1604,6 +1604,9 @@ class ChatRoom(ToolSet):
             logger.info(f"[switch_project] templates reloaded")
 
             # 6. Update all toolset workspace roots on Endpoint (if embedded)
+            # Also update Endpoint itself (it extends FileTransferToolSet)
+            if self._endpoint and hasattr(self._endpoint, 'path'):
+                self._endpoint.path = Path(resolved)
             if self._endpoint and hasattr(self._endpoint, 'toolset_manager'):
                 tsm = self._endpoint.toolset_manager
                 def _update_workdir(obj):
