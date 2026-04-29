@@ -91,6 +91,10 @@ class ProjectManager:
     def active_project(self) -> Optional[ProjectInfo]:
         if self._active_path and self._active_path in self._projects:
             return self._projects[self._active_path]
+        # Fallback: if cwd is set but not registered, auto-register it
+        if self._active_path and Path(self._active_path).is_dir():
+            self.register(self._active_path)
+            return self._projects.get(self._active_path)
         return None
 
     def list_projects(self) -> list[dict]:
