@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 import tempfile
 import shutil
 import base64
@@ -1659,6 +1659,8 @@ class FileManagerToolSet(FileManagerToolSetBase):
         self,
         prompt: str,
         reference_images: list[str] | None = None,
+        model: str | None = None,
+        model_args: dict[str, Any] | None = None,
     ) -> dict:
         """Generate an image from a text description.
 
@@ -1666,14 +1668,47 @@ class FileManagerToolSet(FileManagerToolSetBase):
         provide reference images for style transfer or image editing.
 
         Args:
-            prompt: Detailed description of the image to generate.
-                Be specific about colors, composition, style, and subjects.
+            prompt: Detailed image instruction. Include the subject,
+                setting/context, composition/layout, visual style,
+                colors/materials, lighting, camera/viewpoint, aspect-ratio
+                intent, and any required or forbidden text. For diagrams or
+                scientific figures, specify panels, labels, arrows, relative
+                placement, and visual hierarchy. For edits or reference images,
+                state what to preserve and what to change. Avoid vague prompts
+                like "make it better"; describe the exact desired result.
                 When using reference_images, refer to them by order in prompt:
                 "first image", "second image", etc.
                 Example: "Combine the style of the first image with the subject of the second image"
             reference_images: File paths of existing images to use as reference.
                 Images are passed to the model in array order.
                 Example: ["style.png", "subject.png"]
+            model: Model selector for image generation.
+                Leave empty to use the configured default image model.
+                Use "gemini" to select the default Gemini image model.
+                Use "openai" to select the default OpenAI image model.
+                Use a concrete model name such as "gpt-image-2" or
+                "gemini/gemini-3.1-flash-image-preview" when you need a
+                specific model.
+                Use "provider/model-name" for other OpenAI-compatible image
+                endpoints; the tool will try that provider's configured
+                base_url and API key. Do not pass a provider name by itself
+                unless it is "gemini" or "openai".
+            model_args: Optional provider-specific image generation arguments.
+                For Gemini models, supported keys are:
+                - aspect_ratio: e.g. "1:1", "16:9", "9:16"
+                  Default: provider/model default, usually square.
+                - image_size: e.g. "1K", "2K", "4K" when supported by the model
+                  Default: provider/model default.
+                For OpenAI or OpenAI-compatible image endpoints, supported keys are:
+                - size: e.g. "1024x1024", "1536x1024", "1024x1536", "auto"
+                  Default: "1024x1024".
+                - quality: e.g. "low", "medium", "high", "auto"
+                  Default: provider/model default.
+                - output_format: e.g. "png", "jpeg", "webp"
+                  Default: provider/model default, usually PNG/base64.
+                - background: e.g. "auto", "transparent", "opaque"
+                  Default: provider/model default.
+                Unsupported keys return a structured error with available options.
 
         Returns:
             Dictionary with:
@@ -1697,7 +1732,7 @@ class FileManagerToolSet(FileManagerToolSetBase):
                 else:
                     abs_refs.append(ref)
 
-        return await self._image_gen.generate_image(prompt, abs_refs)
+        return await self._image_gen.generate_image(prompt, abs_refs, model, model_args)
 
     # =========================================================================
     # LaTeX Compilation
