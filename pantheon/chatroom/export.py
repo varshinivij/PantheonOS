@@ -44,6 +44,30 @@ _WORKDIR_RE = re.compile(
 )
 
 
+_SKIP_PREFIXES = (
+    "/usr/", "/bin/", "/sbin/", "/opt/homebrew/", "/opt/local/",
+    "/System/", "/Library/", "/Applications/",
+    "/nix/", "/snap/",
+)
+
+_SKIP_EXTENSIONS = {
+    "", ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe",
+    ".o", ".a", ".ko", ".class",
+}
+
+
+def _is_exportable(path: str) -> bool:
+    """Check whether a file should be included in the bundle."""
+    if any(path.startswith(p) for p in _SKIP_PREFIXES):
+        return False
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _SKIP_EXTENSIONS:
+        return False
+    if not os.access(path, os.R_OK):
+        return False
+    return True
+
+
 def _scan_file_paths(text: str, workspace_root: str = "") -> Set[str]:
     """Return the set of file paths referenced in *text* that
     actually exist on disk (files only, not dirs)."""
@@ -53,7 +77,7 @@ def _scan_file_paths(text: str, workspace_root: str = "") -> Set[str]:
     for m in _ABS_PATH_RE.finditer(text):
         raw = m.group(1)
         cleaned = raw.rstrip("'\"`,;:)]}*\\")
-        if os.path.isfile(cleaned):
+        if os.path.isfile(cleaned) and _is_exportable(cleaned):
             paths.add(cleaned)
 
     # Relative .pantheon/ paths
@@ -63,7 +87,7 @@ def _scan_file_paths(text: str, workspace_root: str = "") -> Set[str]:
             cleaned = raw.rstrip("'\"`,;:)]}*\\")
             if workspace_root:
                 full = os.path.join(workspace_root, cleaned)
-                if os.path.isfile(full):
+                if os.path.isfile(full) and _is_exportable(full):
                     paths.add(full)
 
     return paths
@@ -140,15 +164,24 @@ def export_chat_bundle(
     limit_bytes = int(size_limit_mb * 1024 * 1024)
 
     for abs_path in sorted(all_paths):
-        file_size = os.path.getsize(abs_path)
+        try:
+            file_size = os.path.getsize(abs_path)
+        except OSError:
+            skipped_files.append(abs_path)
+            continue
         rel = _relative_files_path(abs_path)
         if file_size > limit_bytes:
             skipped_files.append(abs_path)
             logger.info(f"[export] Skipping large file ({file_size/1e6:.1f}MB): {abs_path}")
             continue
         dest = output_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(abs_path, dest)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(abs_path, dest)
+        except (PermissionError, OSError) as e:
+            skipped_files.append(abs_path)
+            logger.warning(f"[export] Cannot copy {abs_path}: {e}")
+            continue
         copied_files.append({
             "original": abs_path,
             "local": rel,
