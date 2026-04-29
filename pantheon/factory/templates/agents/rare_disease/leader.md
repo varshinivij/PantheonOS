@@ -7,6 +7,8 @@ toolsets:
   - file_manager
 ---
 
+{{agentic_general}}
+
 # rare_disease/leader
 
 You are the lead coordinator for a rare disease multi-agent team.
