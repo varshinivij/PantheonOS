@@ -2,52 +2,140 @@
 id: hpc_data_transfer
 name: HPC Data Transfer via SSH
 description: |
-  Transfer data between local machine and HPC clusters (e.g. Stanford Sherlock)
-  that require interactive authentication (password + Duo/MFA). Uses pexpect
-  for automated login and SSH ControlMaster for persistent connection reuse.
-tags: [ssh, hpc, rsync, data-transfer, sherlock, duo]
+  Transfer data between local machine and HPC clusters via SSH.
+  Covers SSH ControlMaster for persistent connections, rsync for
+  efficient/resumable transfers, and pexpect for MFA authentication.
+tags: [ssh, hpc, rsync, data-transfer, scp]
 ---
 
 # HPC Data Transfer via SSH
 
-Transfer data to/from HPC clusters that require interactive authentication
-(password + Duo two-factor). This workflow establishes a single authenticated
-SSH connection, then reuses it for all subsequent transfers without re-authenticating.
-
-## Prerequisites
-
-```python
-# pexpect is required for interactive SSH authentication
-import pexpect  # usually pre-installed with Python
-```
-
-The user's `~/.ssh/config` should have the HPC host configured, e.g.:
-
-```
-Host sherlock
-  HostName login.sherlock.stanford.edu
-  User wzxu
-```
+Efficient, resumable data transfer to/from HPC clusters using SSH
+ControlMaster (single authentication, persistent connection) and rsync.
 
 ## Workflow
 
-### Step 1: Establish SSH ControlMaster Connection
+### 1. Establish a Persistent SSH Connection
 
-Use `pexpect` to handle the interactive password + Duo prompts, then keep the
-connection alive via SSH ControlMaster. All subsequent SSH/rsync/scp commands
-will reuse this connection without re-authenticating.
+SSH ControlMaster lets you authenticate once and reuse the connection for
+all subsequent SSH/rsync/scp commands — no repeated password prompts.
+
+```bash
+# Open a persistent connection (authenticates once)
+ssh -o ControlMaster=yes \
+    -o ControlPath=/tmp/hpc-ssh \
+    -o ControlPersist=3600 \
+    <host> "echo connected"
+
+# All subsequent commands reuse this connection automatically:
+ssh -o ControlPath=/tmp/hpc-ssh <host> "ls /data/"
+```
+
+| Parameter | Purpose |
+|---|---|
+| `ControlMaster=yes` | This connection becomes the shared master |
+| `ControlPath=/tmp/hpc-ssh` | Socket file for connection sharing |
+| `ControlPersist=3600` | Keep alive for 1 hour after last use |
+
+### 2. Transfer Data with rsync
+
+rsync is preferred over scp: it compresses, skips existing files, and
+resumes interrupted transfers.
+
+```bash
+# Download: remote → local
+rsync -avz --progress \
+  -e "ssh -o ControlPath=/tmp/hpc-ssh" \
+  <host>:/remote/path/ \
+  /local/path/
+
+# Upload: local → remote
+rsync -avz --progress \
+  -e "ssh -o ControlPath=/tmp/hpc-ssh" \
+  /local/path/ \
+  <host>:/remote/path/
+```
+
+For interrupted transfers, re-run the same command with `--partial` —
+rsync will skip completed files and resume partial ones.
+
+### 3. Parallel Downloads
+
+For multiple independent directories, run rsync processes in parallel:
+
+```python
+import subprocess
+
+CONTROL_PATH = "/tmp/hpc-ssh"
+HOST = "<host>"
+
+transfers = [
+    ("/remote/dir1/", "/local/dir1/"),
+    ("/remote/dir2/", "/local/dir2/"),
+    ("/remote/dir3/", "/local/dir3/"),
+]
+
+procs = []
+for remote, local in transfers:
+    p = subprocess.Popen([
+        "rsync", "-avz", "--progress",
+        "-e", f"ssh -o ControlPath={CONTROL_PATH}",
+        f"{HOST}:{remote}", local
+    ])
+    procs.append((remote, p))
+
+for remote, p in procs:
+    p.wait()
+    print(f"{'OK' if p.returncode == 0 else 'FAILED'}: {remote}")
+```
+
+### 4. Verify Transfer Completeness
+
+```python
+import subprocess
+from pathlib import Path
+
+def ssh_cmd(cmd, control_path=CONTROL_PATH, host=HOST):
+    result = subprocess.run(
+        ["ssh", "-o", f"ControlPath={control_path}", host, cmd],
+        capture_output=True, text=True, timeout=30
+    )
+    return result.stdout.strip()
+
+remote_count = int(ssh_cmd(f"find /remote/path/ -type f | wc -l"))
+local_count = sum(1 for _ in Path("/local/path/").rglob("*") if _.is_file())
+print(f"Remote: {remote_count}, Local: {local_count}")
+assert remote_count == local_count, "File count mismatch — re-run rsync"
+```
+
+### 5. Clean Up
+
+```bash
+# Close the persistent connection
+ssh -o ControlPath=/tmp/hpc-ssh -O exit <host>
+```
+
+The connection also closes automatically after `ControlPersist` seconds of
+inactivity.
+
+## Handling MFA / Interactive Authentication (e.g. Duo)
+
+Some HPC systems (e.g. Stanford Sherlock, SLAC) require interactive
+authentication (password + Duo push / TOTP). Since `BatchMode=yes` cannot
+handle this, use `pexpect` to automate the interactive prompts.
+
+> [!IMPORTANT]
+> Ask the user for their password before calling this function. Do not store
+> or log it. For Duo push, the user must approve on their phone.
 
 ```python
 import pexpect
 import sys
 
-CONTROL_PATH = "/tmp/sherlock-ssh"
-SSH_HOST = "sherlock"  # as configured in ~/.ssh/config
-
-def establish_ssh_connection(password: str, control_path: str = CONTROL_PATH, host: str = SSH_HOST):
+def establish_ssh_with_mfa(host, password, control_path="/tmp/hpc-ssh"):
     """
-    Establish a persistent SSH ControlMaster connection with Duo MFA.
-    The user must approve the Duo push on their phone.
+    Establish SSH ControlMaster through interactive MFA authentication.
+    Handles password prompt and Duo push (sends '1' to select push).
     """
     child = pexpect.spawn(
         f'ssh -o ControlMaster=yes -o ControlPath={control_path} '
@@ -56,136 +144,53 @@ def establish_ssh_connection(password: str, control_path: str = CONTROL_PATH, ho
     )
     child.logfile_sys = sys.stdout.buffer
 
-    idx = child.expect(['[Pp]assword:', 'CONNECTED_OK', pexpect.EOF, pexpect.TIMEOUT], timeout=30)
+    idx = child.expect(
+        ['[Pp]assword:', 'CONNECTED_OK', pexpect.EOF, pexpect.TIMEOUT],
+        timeout=30
+    )
     if idx == 0:
         child.sendline(password)
-
-        idx2 = child.expect(['Duo', 'CONNECTED_OK', '[Pp]assword:', pexpect.EOF, pexpect.TIMEOUT], timeout=30)
+        idx2 = child.expect(
+            ['Duo', 'CONNECTED_OK', '[Pp]assword:', pexpect.EOF, pexpect.TIMEOUT],
+            timeout=30
+        )
         if idx2 == 0:
-            # Send '1' to select Duo Push (option 1)
-            child.sendline('1')
-            # Wait for user to approve on phone
-            idx3 = child.expect(['CONNECTED_OK', 'Success', pexpect.EOF, pexpect.TIMEOUT], timeout=120)
+            child.sendline('1')  # select Duo Push
+            idx3 = child.expect(
+                ['CONNECTED_OK', 'Success', pexpect.EOF, pexpect.TIMEOUT],
+                timeout=120
+            )
             if idx3 not in [0, 1]:
-                raise RuntimeError(f"Duo approval failed or timed out: {child.before}")
+                raise RuntimeError(f"MFA approval failed or timed out")
         elif idx2 == 1:
-            pass  # Connected without Duo
+            pass  # connected without MFA
         elif idx2 == 2:
             raise RuntimeError("Password rejected")
-        else:
-            raise RuntimeError(f"Unexpected response: {child.before}")
     elif idx == 1:
-        pass  # Already connected
+        pass  # already connected
 
     child.expect(pexpect.EOF, timeout=30)
     child.close()
-
     if child.exitstatus != 0:
-        raise RuntimeError(f"SSH connection failed with exit status {child.exitstatus}")
-
+        raise RuntimeError(f"SSH failed with exit status {child.exitstatus}")
     return True
 ```
 
-> [!IMPORTANT]
-> The user MUST approve the Duo push on their phone within ~60 seconds.
-> Ask the user for their password before calling this function. Do not store it.
-
-### Step 2: Verify Connection
-
-```python
-import subprocess
-
-def ssh_cmd(cmd: str, control_path: str = CONTROL_PATH, host: str = SSH_HOST):
-    """Run a command on the remote host using the persistent connection."""
-    result = subprocess.run(
-        ["ssh", "-o", f"ControlPath={control_path}", host, cmd],
-        capture_output=True, text=True, timeout=30
-    )
-    return result.stdout.strip()
-
-# Verify
-print(ssh_cmd("echo connected"))  # Should print "connected"
-```
-
-### Step 3: Transfer Data
-
-Use `rsync` with the ControlMaster socket for efficient, resumable transfers.
-
-```bash
-# Download: remote → local
-rsync -avz --progress \
-  -e "ssh -o ControlPath=/tmp/sherlock-ssh" \
-  sherlock:/remote/path/ \
-  /local/path/
-
-# Upload: local → remote
-rsync -avz --progress \
-  -e "ssh -o ControlPath=/tmp/sherlock-ssh" \
-  /local/path/ \
-  sherlock:/remote/path/
-```
-
-#### Parallel Downloads
-
-For multiple independent directories, run rsync in parallel:
-
-```python
-import subprocess
-
-transfers = [
-    ("/oak/remote/dir1/", "/local/dir1/"),
-    ("/oak/remote/dir2/", "/local/dir2/"),
-    ("/oak/remote/dir3/", "/local/dir3/"),
-]
-
-procs = []
-for remote, local in transfers:
-    p = subprocess.Popen([
-        "rsync", "-avz", "--progress",
-        "-e", f"ssh -o ControlPath={CONTROL_PATH}",
-        f"{SSH_HOST}:{remote}", local
-    ])
-    procs.append((remote, p))
-
-# Wait for all to complete
-for remote, p in procs:
-    p.wait()
-    print(f"{'OK' if p.returncode == 0 else 'FAILED'}: {remote}")
-```
-
-#### Resume Interrupted Transfers
-
-rsync is resumable by default. If a transfer is interrupted, re-run the same
-command — it will skip already-transferred files and resume partial ones.
-
-After transfer, verify file counts match:
-
-```python
-remote_count = int(ssh_cmd(f"find {remote_path} -type f | wc -l"))
-local_count = len(list(Path(local_path).rglob("*")))
-assert remote_count == local_count, f"Mismatch: remote={remote_count}, local={local_count}"
-```
-
-### Step 4: Clean Up
-
-The ControlMaster connection persists for 1 hour (ControlPersist=3600).
-To close it manually:
-
-```bash
-ssh -o ControlPath=/tmp/sherlock-ssh -O exit sherlock
-```
-
-## Key Parameters
-
-| Parameter | Value | Purpose |
-|---|---|---|
-| `ControlMaster=yes` | Enable connection sharing | First connection becomes the master |
-| `ControlPath=/tmp/sherlock-ssh` | Socket file path | All subsequent connections use this socket |
-| `ControlPersist=3600` | Keep alive 1 hour | Connection stays open after initial session ends |
+**Adapting for other MFA methods:**
+- **TOTP (Google Authenticator, etc.)**: Replace `child.sendline('1')` with
+  `child.sendline('<totp_code>')` and adjust the expect pattern from `'Duo'`
+  to the prompt your system shows (e.g. `'Verification code:'`).
+- **No MFA**: If password-only, the `idx2 == 0` (Duo) branch is simply skipped.
+- **SSH key auth**: No pexpect needed — standard ControlMaster works directly.
 
 ## Troubleshooting
 
-- **"Permission denied"**: ControlMaster session expired. Re-run Step 1.
-- **rsync missing files**: Re-run the same rsync command — it will only transfer missing/changed files.
-- **Duo timeout**: Increase the pexpect timeout in the `expect` call (default 120s).
-- **Multiple HPC hosts**: Use different `ControlPath` values for each host.
+- **"Permission denied"**: ControlMaster session expired. Re-establish with Step 1.
+- **rsync missing files**: Re-run the same rsync command — it only transfers
+  missing or changed files.
+- **MFA timeout**: Increase pexpect timeout (default 120s). For Duo, user must
+  approve within this window.
+- **Multiple HPC hosts**: Use different `ControlPath` values per host
+  (e.g. `/tmp/sherlock-ssh`, `/tmp/slac-ssh`).
+- **Connection dropped mid-transfer**: Add `--partial` to rsync to keep
+  partially transferred files for resumption.
