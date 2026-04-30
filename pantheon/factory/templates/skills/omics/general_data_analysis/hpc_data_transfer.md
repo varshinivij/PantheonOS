@@ -120,7 +120,7 @@ inactivity.
 
 ## Handling MFA / Interactive Authentication (e.g. Duo)
 
-Some HPC systems (e.g. Stanford Sherlock, SLAC) require interactive
+Some HPC systems (e.g. Stanford Sherlock) require interactive
 authentication (password + Duo push / TOTP). Since `BatchMode=yes` cannot
 handle this, use `pexpect` to automate the interactive prompts.
 
