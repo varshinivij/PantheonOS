@@ -37,6 +37,18 @@ with PyVista.
 - You want to visualize gene expression or cell types in 3D
 - You want to create rotating GIF animations
 
+### Spatial 3D Slice Alignment (Spateo)
+
+Align serial spatial transcriptomics sections into a 3D volume using
+Spateo morpho_align with pairwise rigid registration.
+
+**Skill file**: [spatial_3d_alignment.md](./spatial_3d_alignment.md)
+
+**When to use**:
+- You have serial tissue sections that need 3D reconstruction
+- You want morphology + expression-based slice registration
+- You need rigid transformations between consecutive sections
+
 ### Spatial Cell-Cell Interaction (Spateo LR)
 
 Infer ligand-receptor interactions between spatially adjacent cell types
