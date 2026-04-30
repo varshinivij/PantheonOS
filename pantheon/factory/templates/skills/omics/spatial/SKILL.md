@@ -36,3 +36,15 @@ with PyVista.
 - Your spatial data has 3D coordinates
 - You want to visualize gene expression or cell types in 3D
 - You want to create rotating GIF animations
+
+### Spatial Cell-Cell Interaction (Spateo LR)
+
+Infer ligand-receptor interactions between spatially adjacent cell types
+using Spateo's two-group CCI analysis with permutation testing.
+
+**Skill file**: [spatial_cci.md](./spatial_cci.md)
+
+**When to use**:
+- You want to find LR interactions constrained by spatial proximity
+- You have imputed spatial data with mapped cell type labels
+- You want to compare spatial vs non-spatial CCI results
