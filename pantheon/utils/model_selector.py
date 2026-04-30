@@ -732,7 +732,7 @@ class ModelSelector:
         available = self._get_available_providers()
         
         # Priority order for image generation providers
-        priority = ["gemini", "openai"]
+        priority = ["openai", "gemini"]
         
         for provider in priority:
             if provider in available:
