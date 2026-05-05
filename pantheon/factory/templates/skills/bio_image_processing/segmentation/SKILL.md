@@ -3,8 +3,8 @@ id: cell_segmentation_index
 name: Cell Segmentation Skills Index
 description: |
   Cell and nucleus segmentation tools for microscopy images.
-  Covers Cellpose, SAM-based methods, and other SOTA approaches.
-tags: [segmentation, cellpose, sam, stardist, nucleus, cell]
+  Covers Cellpose, SAM-based methods, StarDist, InstanSeg, and Mesmer.
+tags: [segmentation, cellpose, sam, stardist, instanseg, mesmer, nucleus, cell]
 ---
 
 # Cell & Nucleus Segmentation Skills
@@ -15,52 +15,75 @@ the corresponding skill file for detailed usage.
 
 ## Tool Selection Guide
 
-Use this decision flowchart to pick the best tool for your task:
-
-| Goal | Recommended Tool |
-|------|-----------------|
-| Best overall accuracy | Cellpose-SAM (v4.x) |
-| Fastest inference | InstanSeg |
-| Low quality / noisy images | Cellpose 3 (image restoration) |
-| Interactive annotation / 3D / tracking | micro-sam |
-| Multiplexed (any number of channels) | InstanSeg (ChannelNet) |
-| Round nuclei only | StarDist |
-| Whole-cell (nucleus + membrane) | Mesmer / DeepCell |
-| Spatial transcriptomics (transcript-level) | Segger |
-| Fully automatic, no prompts needed | CellSAM |
-| Joint segmentation + classification | CelloType |
+| Goal | Recommended Tool | Speed | Tested |
+|------|-----------------|-------|--------|
+| Best overall accuracy | Cellpose-SAM (v4.x) | Moderate (~310s/1024px CPU) | ✅ 955 cells |
+| Fastest inference | InstanSeg | **Fast** (~7s/1024px CPU) | ✅ 586 cells |
+| Low quality / noisy images | Cellpose 3 (image restoration) | Moderate | ✅ |
+| Round nuclei only | StarDist | **Fastest** (~0.5s) | ✅ 150 cells |
+| Whole-cell (nucleus + membrane) | Mesmer / DeepCell | Moderate | ⚠️ install issues |
+| Interactive annotation / 3D / tracking | micro-sam | Slow | ⚠️ Python 3.10+ |
+| Fully automatic, no prompts | CellSAM | Moderate | ⚠️ Python 3.10+ |
 
 > [!TIP]
-> When in doubt, start with **Cellpose `cyto3`** for cells or **Cellpose `nuclei`**
-> for nuclei. These are the most robust general-purpose defaults. Switch to
-> Cellpose-SAM if you need the best possible accuracy and can tolerate slower
-> inference.
+> Start with **Cellpose** (default in v4.x) for most tasks. It has the best
+> generalization. Switch to **InstanSeg** if speed matters or you need
+> simultaneous nuclei + cell masks.
+
+> [!WARNING]
+> **Environment isolation is important.** These tools have conflicting
+> dependencies. Cellpose/InstanSeg use PyTorch; StarDist/Mesmer use TensorFlow;
+> SAM-based tools need Python 3.10+. Create **separate virtual environments**
+> for each tool family:
+> - `venv-cellpose`: Cellpose + InstanSeg (both PyTorch)
+> - `venv-stardist`: StarDist (TensorFlow, `numpy<2`)
+> - `venv-deepcell`: Mesmer/DeepCell (TensorFlow, strict numpy version)
+> - `venv-sam`: micro-sam / CellSAM (Python 3.10+)
 
 ## Available Skills
 
 ### Cellpose
 
-General-purpose cell and nucleus segmentation using Cellpose 3 and
-Cellpose-SAM. Covers model selection, GPU/CPU inference, image restoration,
+General-purpose cell and nucleus segmentation using Cellpose v4.x
+(includes Cellpose-SAM with ViT-L backbone). Image restoration,
 fine-tuning, and 3D segmentation.
 
 **Skill file**: [cellpose.md](./cellpose.md)
 
-**When to use**:
-- Default choice for most cell or nucleus segmentation tasks
-- Need image denoising/deblurring before segmentation
-- Fine-tuning on custom training data
-- 3D volumetric segmentation
+**When to use**: Default choice for most segmentation tasks.
+
+### InstanSeg
+
+Fast cell and nucleus segmentation with dual output (nuclei + cells
+simultaneously). Supports multiplexed images via ChannelNet.
+
+**Skill file**: [instanseg.md](./instanseg.md)
+
+**When to use**: Speed-critical workflows, multiplexed images, QuPath integration.
+
+### StarDist
+
+Nuclear segmentation using star-convex polygon prediction. Extremely fast
+but assumes round/convex nuclei.
+
+**Skill file**: [stardist.md](./stardist.md)
+
+**When to use**: Round nuclei in fluorescence images where speed matters.
+
+### Mesmer / DeepCell
+
+Whole-cell segmentation using both nuclear and membrane markers.
+TissueNet-trained PanopticNet architecture.
+
+**Skill file**: [mesmer.md](./mesmer.md)
+
+**When to use**: Tissue images with both nuclear and membrane/cytoplasm markers.
 
 ### SAM-Based Cell Segmentation
 
-Cell segmentation using Segment Anything Model adaptations: CellSAM,
-micro-sam, and SAMCell. Covers automatic and interactive segmentation modes.
+Cell segmentation using SAM adaptations: CellSAM (automatic), micro-sam
+(interactive + 3D), SAMCell (label-free).
 
 **Skill file**: [sam_based.md](./sam_based.md)
 
-**When to use**:
-- Need interactive point/box-prompt segmentation in napari
-- Fully automatic segmentation with no parameter tuning (CellSAM)
-- 3D segmentation or cell tracking (micro-sam)
-- Label-free brightfield/phase-contrast images (SAMCell)
+**When to use**: Interactive annotation, 3D/tracking, or label-free brightfield.

@@ -5,7 +5,7 @@ description: |
   Cell segmentation using Segment Anything Model (SAM) adaptations:
   CellSAM, micro-sam, and SAMCell. Covers automatic and interactive
   segmentation modes.
-tags: [segmentation, sam, cellsam, micro-sam, interactive, foundation-model]
+tags: [segmentation, sam, cellsam, micro-sam, foundation-model]
 ---
 
 # SAM-Based Cell Segmentation
@@ -14,13 +14,18 @@ This skill covers cell segmentation tools built on the Segment Anything
 Model (SAM), adapted for microscopy. These tools leverage SAM's powerful
 vision transformer backbone with microscopy-specific fine-tuning.
 
-## 1. Tool Selection
+> [!WARNING]
+> SAM-based tools require **Python 3.10+** and should be installed in a
+> **separate virtual environment** from Cellpose/InstanSeg (PyTorch version
+> conflicts) and StarDist/Mesmer (TensorFlow conflicts).
 
-| Tool | Mode | 3D | Interactive | Best for |
-|------|------|-----|-------------|----------|
-| CellSAM | Fully automatic | No | No | Diverse cell types, spatial tx |
-| micro-sam | Auto + interactive | Yes | Yes | Annotation, tracking, 3D |
-| SAMCell | Automatic | No | No | Label-free brightfield |
+## 1. Tool Overview
+
+| Tool | PyPI Package | Python | GPU | Mode |
+|---|---|---|---|---|
+| CellSAM | Not on PyPI — install from GitHub | 3.10+ | Recommended | Fully automatic |
+| micro-sam | `micro-sam` | 3.10+ | Recommended | Auto + interactive |
+| SAMCell | `samcell` | 3.9+ | Optional | Automatic (label-free) |
 
 ## 2. CellSAM
 
@@ -31,24 +36,21 @@ cell segmentation.
 ### Installation
 
 ```bash
-pip install cellsam
+# NOT on PyPI — install from source
+pip install git+https://github.com/vanvalenlab/cellSAM.git
 ```
 
 ### Basic Usage
 
 ```python
-from cellsam import segment_cellular_image
+from cellSAM import segment_cellular_image
 
-masks = segment_cellular_image(
-    img,
-    device='cuda',
-    # CellFinder auto-generates bounding box prompts
-)
+masks = segment_cellular_image(img, device='cuda')
 ```
 
 > [!TIP]
-> CellSAM is also available as a web app at cellsam.deepcell.org and as a
-> napari plugin, making it accessible without writing any code.
+> CellSAM is also available as a web app at https://cellsam.deepcell.org and
+> as a napari plugin, making it accessible without writing any code.
 
 ## 3. micro-sam
 
@@ -59,56 +61,31 @@ data with microscopy-specialized SAM models.
 ### Installation
 
 ```bash
-pip install micro_sam
+# Requires Python 3.10+
+pip install "micro-sam[all]"
 ```
 
-### Automatic Instance Segmentation (AIS)
+### Automatic Instance Segmentation
 
 ```python
 from micro_sam.automatic_segmentation import automatic_instance_segmentation
 
-masks = automatic_instance_segmentation(
-    img,
-    model_type="vit_b_lm",  # light microscopy generalist
-    # or "vit_b_em_organelles" for electron microscopy
-)
+labels = automatic_instance_segmentation(img, model_type='vit_b_lm')
 ```
 
-Available model types:
-- `vit_b_lm` -- light microscopy generalist (fluorescence, phase contrast)
-- `vit_b_em_organelles` -- electron microscopy organelle segmentation
-- `vit_l_lm` -- larger ViT-L model for light microscopy (more accurate, slower)
+### Interactive (napari plugin)
 
-### Interactive Segmentation (napari)
+Launch with `micro_sam.napari` — click points or draw boxes on cells for
+instant segmentation. Fine-tune on your data through the napari interface
+for domain-specific adaptation.
 
-```bash
-# Launch napari plugin
-micro_sam.napari
-```
+### Available Models
 
-Click points or draw boxes on cells for instant segmentation. Fine-tune
-on your data through the napari interface for domain-specific adaptation.
-
-### 3D Segmentation
-
-```python
-from micro_sam.automatic_segmentation import automatic_instance_segmentation
-
-masks_3d = automatic_instance_segmentation(
-    volume,
-    model_type="vit_b_lm",
-    ndim=3,
-)
-```
-
-micro-sam handles 3D segmentation by extending SAM's 2D predictions across
-slices with a specialized decoder, producing volumetric instance masks.
-
-### Cell Tracking (Time-Series)
-
-micro-sam also supports tracking cells across time points in timelapse
-data, linking segmented instances frame-to-frame through the interactive
-napari interface.
+| Model | Use case |
+|---|---|
+| `vit_b_lm` | Light microscopy (recommended) |
+| `vit_b_em_organelles` | Electron microscopy |
+| `vit_t_lm` | Light microscopy (faster, less accurate) |
 
 ## 4. SAMCell (Label-Free)
 
@@ -130,28 +107,25 @@ predictor = SAMCellPredictor()
 masks = predictor.predict(brightfield_img)
 ```
 
-SAMCell is optimized for transmitted-light microscopy where cell boundaries
-are low-contrast and traditional thresholding methods fail.
-
 ## Common Pitfalls
 
-1. **General SAM is not for cells**: Vanilla SAM/SAM2/SAM3 perform poorly
-   on microscopy data (AP ~0.27 vs specialized tools ~0.54). Always use
+1. **Python 3.10+ required**: Both CellSAM and micro-sam require Python 3.10
+   or newer. They will NOT install on Python 3.9 (no matching distribution
+   found on PyPI).
+
+2. **CellSAM not on PyPI**: Must install from GitHub source. The package name
+   `cellsam` does not exist on PyPI.
+
+3. **General SAM is not for cells**: Vanilla SAM/SAM2/SAM3 perform poorly on
+   microscopy data (AP ~0.27 vs specialized tools ~0.54). Always use
    microscopy-adapted versions (CellSAM, micro-sam, SAMCell).
 
-2. **micro-sam model choice**: Use `vit_b_lm` for light microscopy,
-   `vit_b_em_organelles` for EM. Using the wrong model type produces
-   significantly degraded results.
+4. **GPU strongly recommended**: SAM ViT models are large. CPU inference is
+   very slow. ViT-H needs 16GB+ VRAM.
 
-3. **CellSAM on unusual morphologies**: CellFinder may miss very small or
-   densely packed cells. Check detection quality before trusting the output
-   masks, especially on crowded fields of view.
+5. **micro-sam multi-channel**: Averages multi-channel inputs to a single
+   channel, losing information. For multiplexed data, use InstanSeg's
+   ChannelNet instead.
 
-4. **GPU memory**: SAM ViT models are large (~400MB+ weights). ViT-H
-   requires 16GB+ VRAM. Use ViT-B or ViT-T variants for smaller GPUs,
-   or run on CPU with slower inference.
-
-5. **Multi-channel images**: micro-sam averages multi-channel inputs to a
-   single channel, losing channel-specific information. For multiplexed or
-   highly multi-channel data, consider InstanSeg's ChannelNet instead,
-   which handles arbitrary channel counts natively.
+6. **micro-sam model download**: Models auto-download on first use (~400MB
+   for vit_b). Ensure internet access.

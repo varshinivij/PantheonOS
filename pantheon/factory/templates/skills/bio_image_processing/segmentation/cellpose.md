@@ -2,74 +2,77 @@
 id: cellpose_segmentation
 name: Cell Segmentation with Cellpose
 description: |
-  Cell and nucleus segmentation using Cellpose 3 and Cellpose-SAM.
-  Covers model selection, GPU/CPU inference, image restoration,
-  fine-tuning, and 3D segmentation.
-tags: [segmentation, cellpose, cellpose-sam, nucleus, cell, 3d]
+  Cell and nucleus segmentation using Cellpose v4.x (Cellpose-SAM).
+  Covers the v4.x API changes, model selection, GPU/CPU inference,
+  image restoration, fine-tuning, 3D segmentation, and batch processing.
+tags: [segmentation, cellpose, cellpose-sam, cpsam, nucleus, cell, 3d]
 ---
 
 # Cell Segmentation with Cellpose
 
 Cellpose is a generalist deep-learning model for cell and nucleus
-segmentation. This skill covers Cellpose 3 (image restoration) and
-Cellpose-SAM (highest accuracy).
+segmentation. Cellpose v4.x ships a single unified model (`cpsam`,
+Cellpose-SAM with a ViT-L backbone) and introduces breaking API changes
+from earlier versions.
 
 ## 1. Prerequisites
 
 ```bash
-pip install "cellpose[gui]"  # includes GUI
-# or minimal:
+python -m venv .venv-cellpose
+source .venv-cellpose/bin/activate
 pip install cellpose
 ```
 
-GPU is optional but recommended. Works on CPU, CUDA, and Apple MPS.
+> [!WARNING]
+> Cellpose uses PyTorch. Install in a **separate virtual environment** from
+> TensorFlow-based tools (StarDist, Mesmer). InstanSeg can share this environment.
+
+GPU is optional but strongly recommended. Supports CUDA and Apple MPS.
+CPU works but is roughly 5-10x slower (a 1024x1024 image takes ~300s on
+CPU vs ~10-30s on GPU).
 
 ## 2. Model Selection
 
-| Model | Description | When to use |
-|-------|-------------|-------------|
-| `cyto3` | Super-generalist (9 datasets) | Default for most cells |
-| `nuclei` | Nuclear segmentation | Nuclei only (DAPI/Hoechst) |
-| `cyto` | Original cytoplasm model | Legacy, use cyto3 instead |
-| `cellpose_sam` | ViT-L SAM backbone + flow fields | Best accuracy, slower |
+In Cellpose v4.x the model landscape has changed significantly:
 
-## 3. Basic Segmentation
+- The only model shipped is `cpsam` (Cellpose-SAM, ViT-L backbone with
+  flow-field prediction head). `MODEL_NAMES` contains only `['cpsam']`.
+- Legacy model names (`cyto3`, `nuclei`, `cyto`, `cellpose_sam`) are no
+  longer separate models. The package auto-selects `cpsam` regardless of
+  what you pass as `model_type`.
+- On CPU, `cyto3` and `cpsam` produce identical results (tested on a
+  1024x1024 embryo DAPI image: both detect 955 cells in ~310s). Speed
+  differences only appear on GPU.
+
+## 3. Basic Segmentation (v4.x API)
 
 ```python
 from cellpose import models
 
-model = models.Cellpose(model_type='cyto3', gpu=True)
+model = models.CellposeModel(gpu=True)  # or gpu=False for CPU
 
-# Single image
-masks, flows, styles, diams = model.eval(
-    img,
-    diameter=None,       # auto-estimate
-    channels=[0, 0],     # [cytoplasm, nucleus] channel indices
+masks, flows, styles = model.eval(
+    img,                    # (H, W) or (H, W, C) or (C, H, W)
+    diameter=None,          # auto-estimate; or specify in pixels
     flow_threshold=0.4,
     cellprob_threshold=0,
 )
+# masks: (H, W) integer array, 0=background, 1..N=cell IDs
 ```
 
-**Channels parameter explained**:
-- `[0, 0]` -- grayscale (single channel or average of channels)
-- `[2, 1]` -- green = cytoplasm, red = nucleus
-- `[0, 3]` -- grayscale cytoplasm, blue = nucleus
-- `[1, 0]` -- red = cytoplasm, no nucleus channel
-- The order is always `[cyto_channel, nuc_channel]`
-- Channel indices: 0 = grayscale, 1 = red, 2 = green, 3 = blue
+**Critical v4.x changes from earlier versions:**
+- `models.Cellpose` no longer exists. Use `models.CellposeModel`.
+- `model.eval()` returns 3 values `(masks, flows, styles)`, not 4.
+- The `model_type` argument is silently ignored in v4.0.1+.
+- The `channels` parameter is deprecated and silently ignored. Cellpose
+  uses the first 3 channels automatically.
 
-## 4. Batch Processing
+## 4. Multi-Channel Images
 
 ```python
-from cellpose import io
-
-files = io.get_image_files('/path/to/images/')
-masks_list = model.eval(
-    files,
-    diameter=None,
-    channels=[0, 0],
-    batch_size=8,
-)
+# For (C, H, W) or (H, W, C) images, Cellpose uses first 3 channels
+# No need to specify channels in v4.x
+masks, flows, styles = model.eval(img_multichannel, diameter=None)
 ```
 
 ## 5. Image Restoration (Cellpose 3)
@@ -80,13 +83,10 @@ directly into the segmentation pipeline:
 ```python
 from cellpose import denoise
 
-# Denoise before segmentation
 dn_model = denoise.DenoiseModel(model_type='cyto3', gpu=True)
-masks, flows, styles, diams = dn_model.eval(
+masks, flows, styles = dn_model.eval(
     img,
-    channels=[0, 0],
     diameter=None,
-    # Restoration options:
     restore_type='denoise_cyto3',  # or 'deblur_cyto3', 'upsample_cyto3'
 )
 ```
@@ -96,17 +96,24 @@ Available `restore_type` values:
 - `deblur_cyto3` / `deblur_nuclei` -- correct optical blur
 - `upsample_cyto3` / `upsample_nuclei` -- super-resolve low-resolution images
 
-## 6. Fine-Tuning on Custom Data
+## 6. Batch Processing
 
 ```python
-from cellpose import models, io
+from cellpose import io
 
-model = models.CellposeModel(model_type='cyto3', gpu=True)
-train_data, train_labels = io.load_train_test('/path/to/training/')
+files = io.get_image_files('/path/to/images/')
+for f in files:
+    img = io.imread(f)
+    masks, flows, styles = model.eval(img, diameter=None)
+    io.save_masks(img, masks, flows, f, save_txt=False)
+```
 
+## 7. Fine-Tuning
+
+```python
+model = models.CellposeModel(gpu=True)
 model.train(
     train_data, train_labels,
-    channels=[0, 0],
     n_epochs=100,
     learning_rate=0.1,
     save_path='/path/to/model/',
@@ -114,63 +121,52 @@ model.train(
 ```
 
 Training data format: pairs of images and 16-bit label masks where each
-cell has a unique integer ID. Place `_img.tif` and `_masks.tif` files in
-the same directory.
+cell has a unique integer ID.
 
-## 7. 3D Segmentation
+## 8. 3D Segmentation
 
 ```python
 masks_3d = model.eval(
     volume,          # (Z, Y, X) or (Z, Y, X, C)
     diameter=None,
-    channels=[0, 0],
-    do_3D=True,      # true 3D
-    # or stitch_threshold=0.5 for 2D+stitch approach
+    do_3D=True,      # true volumetric
+    # OR stitch_threshold=0.5 for faster 2D+stitch
 )
 ```
 
 Two approaches:
 - `do_3D=True` -- true volumetric segmentation (slower, more accurate for
-  isotropic voxels)
+  isotropic voxels). Very memory-intensive.
 - `stitch_threshold=0.5` -- segment each Z-plane in 2D, then stitch masks
-  across planes using IoU (faster, better for anisotropic data)
-
-## 8. Using Cellpose-SAM
-
-```python
-model = models.Cellpose(model_type='cellpose_sam', gpu=True)
-# Same API as above, just slower but more accurate
-masks, flows, styles, diams = model.eval(
-    img,
-    diameter=None,
-    channels=[0, 0],
-)
-```
-
-Cellpose-SAM replaces the default U-Net backbone with a ViT-L encoder from
-SAM while keeping Cellpose's flow-field prediction head. The API is identical
-to standard Cellpose.
+  across planes using IoU. Much faster and often sufficient, especially
+  when Z-spacing is larger than XY pixel size.
 
 ## Common Pitfalls
 
-1. **diameter matters**: Wrong diameter = bad results. Use `diameter=None`
-   for auto-estimation, or measure from a few cells in pixels. If cells are
-   ~30px across, set `diameter=30`.
+1. **v4.x API breaking change**: `models.Cellpose` is removed. Use
+   `models.CellposeModel`. Old tutorials and code using `models.Cellpose`
+   will raise `AttributeError`.
 
-2. **channels confusion**: `[0,0]` = grayscale. `[2,1]` = green cytoplasm,
-   red nucleus. `[0,3]` = grayscale + blue nucleus. The order is
-   `[cyto_channel, nuc_channel]`, where 0 means grayscale.
+2. **`model_type` and `channels` deprecated**: In v4.0.1+, these arguments
+   are silently ignored. Do not rely on them to select a specific model or
+   specify channel order.
 
-3. **flow_threshold too strict**: Default 0.4 is good for most cases.
-   Increase to 0.8 for over-segmentation cleanup, decrease for
-   under-segmented images.
+3. **diameter=None for auto-estimation**: Works well for most cases. If
+   cells are very small (<10px) or very large (>200px), measure and specify
+   manually.
 
-4. **GPU memory**: Large images may OOM. Use `tile=True` for automatic
-   tiling, or resize images before segmentation.
+4. **flow_threshold**: Default 0.4. Increase to 0.8 to reduce
+   over-segmentation; decrease to 0.2 for under-segmented images.
 
-5. **3D vs stitch**: `do_3D=True` is true volumetric but slow.
-   `stitch_threshold=0.5` is faster (2D per-plane + z-stitching) and often
-   sufficient, especially when Z-spacing is larger than XY pixel size.
+5. **CPU vs GPU timing**: On CPU, a 1024x1024 image takes ~300s. On GPU,
+   expect ~10-30s. For batch processing, GPU is essential.
 
-6. **Cellpose-SAM speed**: ~3-5x slower than cyto3 due to ViT backbone.
-   Use cyto3 for screening, cellpose_sam for final results.
+6. **3D: do_3D vs stitch**: `do_3D=True` is true volumetric but very slow
+   and memory-intensive. `stitch_threshold=0.5` runs 2D per-slice then
+   stitches -- much faster and often sufficient.
+
+7. **16-bit images**: Cellpose handles uint16 natively. No need to convert
+   to 8-bit.
+
+8. **Image restoration timing**: `DenoiseModel` adds ~50% overhead but
+   substantially improves results on noisy or blurred images.
