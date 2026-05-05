@@ -213,8 +213,11 @@ class FileManagerToolSetBase(ToolSet):
         return Path(workdir) if workdir else self.path
 
     def _resolve_path(self, file_path: str) -> Path:
-        """Resolve a file path: absolute paths pass through, relative paths
-        resolve against the effective workspace root (workdir or self.path)."""
+        """Resolve a file path: absolute paths pass through, paths starting
+        with ~ expand to the user's home, relative paths resolve against the
+        effective workspace root (workdir or self.path)."""
+        if file_path.startswith("~"):
+            return Path(file_path).expanduser()
         if os.path.isabs(file_path):
             return Path(file_path)
         return self._get_root() / file_path
